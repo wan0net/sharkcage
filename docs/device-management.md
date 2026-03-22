@@ -1,21 +1,23 @@
 # Device Management
 
-How physical USB devices (security keys, dev boards, HSMs) are managed across a fleet of Dell 5070 thin clients running code-orchestration.
+How physical USB devices (security keys, dev boards, HSMs) are managed across a fleet of Dell 5070 thin clients running code-orchestration on Nomad.
 
 ---
 
 ## Overview
 
-The system manages physical devices attached to runner machines. Tasks can require specific devices, and the orchestrator routes tasks to runners that have those devices connected and available. Devices are never accessed directly by the coding agent -- they go through wrapper scripts that handle locking, timeouts, and logging.
+The system manages physical devices attached to runner machines. Tasks can require specific devices, and Nomad routes tasks to nodes that have those devices by matching job constraints against node metadata. Devices are never accessed directly by the coding agent -- they go through wrapper scripts that handle locking, timeouts, and logging.
 
 The flow is:
 
 1. Devices are plugged into Dell 5070 runners and given stable names via udev rules.
-2. The runner daemon discovers devices and reports inventory to the API.
-3. When a task requires a device, the orchestrator routes it to a runner that has it available.
-4. The runner acquires an exclusive lock on the device before starting the task.
+2. The Nomad client on each runner advertises attached devices via its `meta` block (e.g., `device_yubikey = true`).
+3. When a task requires a device, the `co` CLI adds a Nomad constraint targeting that device's metadata key, and Nomad schedules the job on a node that satisfies the constraint.
+4. The `run-agent.sh` entrypoint acquires an exclusive flock on the device before starting the task.
 5. The coding agent (Crush/Claude/Aider) accesses the device only through wrapper scripts.
 6. After the task completes, the lock is released and the device becomes available again.
+
+There is no custom device registry API. Nomad IS the device registry. Device presence is encoded in node metadata, and the standard Nomad API (`GET /v1/nodes`) is the query interface.
 
 ---
 
@@ -137,73 +139,192 @@ ls -la /dev/yubikey-1
 
 ---
 
-## Device Inventory
+## Device Inventory via Nomad Node Metadata
 
-The runner daemon discovers and tracks devices, reporting their state to the orchestrator API.
+There is no custom device registry or inventory API. Nomad node metadata is the single source of truth for which devices exist on which nodes.
 
-### Discovery Process
+### How It Works
 
-On startup and periodically (every 60 seconds):
+Each Nomad client advertises its attached devices in the `meta` block of its client configuration (`/etc/nomad.d/client.hcl` or equivalent):
 
-1. Scan `/dev/` for known symlinks (defined by udev rules).
-2. Cross-reference with expected devices in the runner config file.
-3. Report inventory to the API.
+```hcl
+client {
+  enabled = true
 
-### Inventory Payload
+  meta {
+    # Device presence flags
+    device_yubikey     = "true"
+    device_yubikey_path = "/dev/yubikey-1"
 
-The runner sends a device inventory report to `POST /api/runners/{runner_id}/devices`:
+    device_yubihsm     = "true"
+    device_yubihsm_path = "/dev/yubihsm-1"
 
-```json
-{
-  "runner_id": "dell-02",
-  "devices": [
-    {
-      "name": "yubikey-1",
-      "type": "usb-security-key",
-      "vendor": "1050",
-      "product": "0407",
-      "serial": "12345678",
-      "path": "/dev/yubikey-1",
-      "status": "connected",
-      "locked_by": null
-    },
-    {
-      "name": "esp32-main",
-      "type": "usb-serial",
-      "vendor": "10c4",
-      "product": "ea60",
-      "path": "/dev/esp32-main",
-      "baud": 115200,
-      "status": "connected",
-      "locked_by": "task-abc123"
-    }
-  ]
+    device_esp32       = "true"
+    device_esp32_path  = "/dev/esp32-main"
+  }
 }
 ```
 
-### Hotplug Detection
+The naming convention is:
 
-Rather than relying solely on the 60-second polling interval, the runner daemon can detect hotplug events in real-time using two methods:
+- **`device_{name}`** -- presence flag, set to `"true"` when the device is connected.
+- **`device_{name}_path`** -- the `/dev/` path to the device (the udev symlink).
 
-**udevadm monitor** -- subscribes to the kernel's uevent stream:
+A node with multiple devices of the same type uses suffixed names:
 
-```bash
-udevadm monitor --subsystem-match=usb --subsystem-match=tty
+```hcl
+meta {
+  device_esp32_front      = "true"
+  device_esp32_front_path = "/dev/esp32-front"
+
+  device_esp32_rear       = "true"
+  device_esp32_rear_path  = "/dev/esp32-rear"
+}
 ```
 
-The runner daemon spawns this as a child process and parses its stdout for `add` and `remove` events, triggering an immediate inventory update when a known device is plugged or unplugged.
+### Querying the Device Inventory
 
-**inotify on /dev/** -- watches for symlink creation and removal:
+The `co devices` command queries all Nomad nodes and extracts device metadata:
 
-The runner daemon sets up inotify watches on `/dev/` for the specific symlink names it expects (e.g., `yubikey-1`, `esp32-main`). This catches changes faster than polling and with less overhead than parsing udevadm monitor output.
+```bash
+co devices
+```
 
-In practice, both methods are used: inotify for speed, polling as a fallback to catch anything inotify missed.
+Output:
+
+```
+NODE        DEVICE           PATH               STATUS
+dell-01     yubikey          /dev/yubikey-1      available
+dell-01     yubihsm          /dev/yubihsm-1      available
+dell-02     esp32            /dev/esp32-main     available
+dell-03     esp32_front      /dev/esp32-front    available
+dell-03     esp32_rear       /dev/esp32-rear     available
+```
+
+Under the hood, `co devices` calls the Nomad API:
+
+```bash
+# List all nodes
+curl -s http://localhost:4646/v1/nodes | jq '.[] | .ID'
+
+# Get metadata for a specific node
+curl -s http://localhost:4646/v1/node/<node-id> | jq '.Meta'
+```
+
+Then it filters for keys starting with `device_` that do not end in `_path`, pairs each with its corresponding `_path` key, and displays the result.
+
+To get the raw metadata for all nodes in a scriptable format:
+
+```bash
+# All device metadata across the fleet
+for node_id in $(curl -s http://localhost:4646/v1/nodes | jq -r '.[].ID'); do
+  echo "=== $(curl -s http://localhost:4646/v1/node/$node_id | jq -r '.Name') ==="
+  curl -s http://localhost:4646/v1/node/$node_id | jq '.Meta | to_entries[] | select(.key | startswith("device_"))'
+done
+```
+
+---
+
+## Device Routing via Nomad Constraints
+
+Device routing is handled entirely by Nomad's constraint system. When a task requires a device, the job specification includes a constraint that targets the device's metadata key. Nomad's scheduler evaluates the constraint against all nodes and places the job on a node that satisfies it.
+
+### How Constraints Work
+
+A job that needs a YubiKey includes:
+
+```hcl
+job "sign-release" {
+  # ...
+
+  constraint {
+    attribute = "${meta.device_yubikey}"
+    value     = "true"
+  }
+
+  group "default" {
+    task "sign" {
+      driver = "exec"
+      config {
+        command = "/opt/code-orchestration/run-agent.sh"
+        args    = ["--needs", "yubikey", "--", "sign the release artifacts"]
+      }
+    }
+  }
+}
+```
+
+Nomad will only schedule this job on nodes where `device_yubikey = "true"` in the node metadata. If no node satisfies the constraint, the job remains in a `pending` state until a suitable node becomes available.
+
+### The `--needs` Flag
+
+The `co` CLI's `--needs` flag translates device requirements into Nomad constraints automatically:
+
+```bash
+# Single device requirement
+co run --needs yubikey -- "sign the release artifacts with the YubiKey"
+
+# Multiple device requirements (all must be on the same node)
+co run --needs yubikey --needs yubihsm -- "generate a key on the HSM and enroll it on the YubiKey"
+
+# Specific device variant
+co run --needs esp32_front -- "flash firmware to the front ESP32"
+```
+
+Each `--needs <device>` flag adds a constraint block to the dispatched Nomad job:
+
+```hcl
+constraint {
+  attribute = "${meta.device_<device>}"
+  value     = "true"
+}
+```
+
+The device path is made available to the task via the Nomad meta interpolation. The `run-agent.sh` entrypoint reads `${meta.device_<device>_path}` to know which `/dev/` path to lock and pass to wrapper scripts.
+
+### Multiple Devices on the Same Node
+
+If a task needs two devices (e.g., both a YubiKey and an HSM), both constraints must be satisfied by the same node. Nomad handles this naturally -- all constraints on a job must be satisfied by the placed node:
+
+```bash
+co run --needs yubikey --needs yubihsm -- "enroll the HSM key onto the YubiKey"
+```
+
+This produces:
+
+```hcl
+constraint {
+  attribute = "${meta.device_yubikey}"
+  value     = "true"
+}
+
+constraint {
+  attribute = "${meta.device_yubihsm}"
+  value     = "true"
+}
+```
+
+Only nodes with both devices will be eligible.
+
+### What Happens When No Node Matches
+
+If no node currently has the required device, the Nomad job enters `pending` status. The allocation will show a "constraint filtering" message in `nomad alloc status`:
+
+```
+Constraint "${meta.device_yubikey}" = "true" filtered 4 nodes
+All nodes were filtered
+```
+
+The job remains pending until either:
+
+- A node with the device comes online (or has its metadata updated to advertise the device).
+- The job is manually stopped.
 
 ---
 
 ## Device Locking
 
-Exclusive access to devices is enforced using `flock(1)` advisory locks. This prevents two tasks from accessing the same device simultaneously.
+Exclusive access to devices is enforced using `flock(1)` advisory locks. This prevents two tasks from accessing the same device simultaneously. Even though Nomad handles routing, locking is still necessary because multiple jobs could be scheduled on the same node if it has enough resources, and two jobs could both target the same device.
 
 ### Lock File Convention
 
@@ -244,32 +365,31 @@ flock -n /var/lock/code-orchestration/device-yubikey-1.lock -c "echo free" || ec
 
 ### Full Lifecycle
 
-1. **Task arrives** requiring `yubikey-1`.
-2. **Orchestrator routes** the task to a runner that reports `yubikey-1` as `connected` and `locked_by: null`.
-3. **Runner checks** the device symlink exists in `/dev/`.
-4. **Runner acquires flock** on `/var/lock/code-orchestration/device-yubikey-1.lock`.
-5. **Runner updates** device status to `locked_by: "task-abc123"` and reports to API.
+1. **Nomad schedules** a job with `constraint { attribute = "${meta.device_yubikey}" value = "true" }` onto a node that has the device.
+2. **`run-agent.sh` starts** on the target node.
+3. **`run-agent.sh` checks** the device symlink exists in `/dev/`.
+4. **`run-agent.sh` acquires flock** on `/var/lock/code-orchestration/device-yubikey-1.lock`.
+5. **If the lock is already held** (another task on the same node is using the device), `run-agent.sh` can either wait with a timeout or fail immediately. Default: fail immediately, Nomad reschedules.
 6. **Runtime spawns** (Crush/Claude/Aider). The coding agent accesses the device through the wrapper script. The wrapper verifies the lock is held before proceeding.
 7. **Task completes** (success or failure).
-8. **Runner process exits**, which **releases the flock** automatically.
-9. **Runner updates** device status to `locked_by: null` and reports to API.
+8. **`run-agent.sh` exits**, which **releases the flock** automatically.
 
 ### Error Cases
 
 **Device locked by another task:**
 
-The orchestrator will not route a task to a runner where the required device is already locked. If a task is submitted and the only runner with the required device is busy, the task enters the queue. It will be picked up when the device becomes free (the runner reports `locked_by: null` on its next heartbeat or status change event).
+If flock acquisition fails (another allocation on the same node holds the lock), `run-agent.sh` exits with a non-zero status. Nomad will reschedule the allocation according to the job's `reschedule` stanza. If the job uses `type = "batch"`, Nomad retries up to the configured `attempts` count. This is a transient condition -- the device will free up when the other task finishes.
+
+To minimize lock contention, consider setting `count = 1` on the task group and using Nomad's `resources` block to limit concurrency on device-bearing nodes.
 
 **Device disconnected while locked:**
 
 If a device disappears (symlink vanishes from `/dev/`) while a task holds its lock:
 
-1. The runner detects the disconnection (via inotify or health check).
-2. The runner pauses the task's execution.
-3. The runner sends a notification to the orchestrator with the event details.
-4. The runner waits for the device to reappear (reconnection) or for a configurable timeout (default: 5 minutes).
-5. If the device reappears, execution resumes.
-6. If the timeout expires, the task is marked as failed with error `device_disconnected`.
+1. The wrapper script detects the device is gone on the next operation and returns an error.
+2. The task fails.
+3. Nomad's `restart` policy determines what happens next (retry on the same node, or reschedule to another node).
+4. If the device is permanently gone, update the node's Nomad metadata to remove the device (see "Device Health Monitoring" below) so that future jobs are not scheduled there.
 
 ---
 
@@ -469,39 +589,125 @@ esac
 
 ## Device Health Monitoring
 
-The runner daemon continuously monitors device health to detect problems early.
+Device health monitoring ensures that Nomad node metadata stays in sync with the actual devices present on each node. Unlike a custom daemon that reports to a central API, the approach here is to keep the Nomad client metadata accurate so that Nomad's scheduler makes correct placement decisions.
 
-### Health Check Loop
+### Option 1: Periodic Device Check Script (Recommended)
 
-Every 60 seconds, on each runner, for each expected device:
+A systemd timer or cron job runs every 60 seconds on each node, checks which devices are actually present, and updates the Nomad client metadata if anything has changed.
 
-1. **Check symlink exists** in `/dev/` -- if the symlink is gone, the device has been unplugged.
-2. **For serial devices** -- try opening the port non-blocking (`stty -F /dev/esp32-main`). If this fails, the device may be in a bad state.
-3. **For USB devices** -- check presence in `lsusb` output by vendor:product ID.
-4. **For PKCS#11 devices** -- run `pkcs11-tool --module <module> --list-slots` and verify the expected slot appears.
+```bash
+#!/bin/bash
+# /opt/code-orchestration/device-health.sh
+# Runs periodically to sync device presence with Nomad node metadata.
 
-Status changes are reported to the API immediately via `POST /api/runners/{runner_id}/devices/status` -- the runner does not wait for the next 60-second heartbeat.
+set -euo pipefail
 
-If a device disappears while a task is using it, the runner pauses the task and sends a notification to the user.
+NOMAD_ADDR="${NOMAD_ADDR:-http://localhost:4646}"
+NODE_ID=$(nomad node status -self -json | jq -r '.ID')
 
-### Device Status States
+# Define expected devices and their symlinks
+declare -A DEVICES=(
+  ["yubikey"]="/dev/yubikey-1"
+  ["yubihsm"]="/dev/yubihsm-1"
+  ["esp32"]="/dev/esp32-main"
+)
 
+CHANGED=false
+META_ARGS=()
+
+for device in "${!DEVICES[@]}"; do
+  path="${DEVICES[$device]}"
+  meta_key="device_${device}"
+
+  if [ -e "$path" ]; then
+    META_ARGS+=("${meta_key}=true" "${meta_key}_path=${path}")
+  else
+    META_ARGS+=("${meta_key}=false" "${meta_key}_path=")
+  fi
+done
+
+# Update node metadata via Nomad API
+# This requires the node to have the meta block mutable (Nomad 1.7+)
+# or we update the client config file and reload.
+
+# Approach A: Use nomad node meta apply (Nomad 1.7+)
+nomad node meta apply "${META_ARGS[@]}"
+
+# Approach B: For older Nomad, update the config file and reload
+# This is more disruptive but works on all versions:
+#   1. Generate new meta block
+#   2. Write to /etc/nomad.d/devices.hcl
+#   3. systemctl reload nomad
 ```
-connected  -->  locked        (task acquires device)
-locked     -->  connected     (task completes, lock released)
-connected  -->  disconnected  (device unplugged)
-disconnected -> connected     (device plugged back in)
-connected  -->  error         (device present but not responding)
-error      -->  connected     (device recovers, e.g., after reset)
+
+The `nomad node meta apply` command (Nomad 1.7+) allows updating node metadata at runtime without restarting the Nomad client. For older versions, the script must rewrite the config file and reload the Nomad service.
+
+**systemd timer setup:**
+
+```ini
+# /etc/systemd/system/device-health.timer
+[Unit]
+Description=Check device health and update Nomad metadata
+
+[Timer]
+OnBootSec=10s
+OnUnitActiveSec=60s
+
+[Install]
+WantedBy=timers.target
 ```
 
-State transitions are logged and reported. The orchestrator uses these states to make routing decisions -- it will never route a task to a device in `disconnected` or `error` state.
+```ini
+# /etc/systemd/system/device-health.service
+[Unit]
+Description=Device health check for code-orchestration
+
+[Service]
+Type=oneshot
+ExecStart=/opt/code-orchestration/device-health.sh
+User=root
+```
+
+### Option 2: Let It Fail and Retry
+
+The simpler alternative is to not actively monitor devices at all. If a device is disconnected:
+
+1. The Nomad node metadata still says `device_yubikey = "true"`.
+2. Nomad schedules a job requiring a YubiKey onto that node.
+3. `run-agent.sh` tries to access `/dev/yubikey-1`, finds it missing, and exits with an error.
+4. Nomad's `reschedule` stanza kicks in and tries again (possibly on the same node, possibly on another).
+5. Eventually an operator notices the failures, fixes the device, or updates the metadata manually.
+
+This approach is acceptable for small fleets where device disconnection is rare. It trades monitoring complexity for occasional wasted allocation attempts.
+
+### Option 3: udev-triggered Metadata Update
+
+Use a udev rule to trigger a metadata update immediately when a device is plugged or unplugged:
+
+```udev
+# /etc/udev/rules.d/91-nomad-device-meta.rules
+# Trigger metadata update on YubiKey plug/unplug
+SUBSYSTEM=="usb", ATTRS{idVendor}=="1050", ATTRS{idProduct}=="0407", \
+  RUN+="/opt/code-orchestration/device-health.sh"
+```
+
+This gives near-instant metadata updates but requires careful scripting to avoid race conditions (the device symlink may not exist yet when the udev rule fires on plug-in). Best combined with Option 1 as a fallback.
+
+### Health Check Summary
+
+| Approach | Latency | Complexity | Best For |
+|----------|---------|------------|----------|
+| Periodic script (Option 1) | Up to 60s | Medium | Production fleets |
+| Let it fail (Option 2) | Until job fails | Low | Small/dev setups |
+| udev-triggered (Option 3) | Near-instant | High | Latency-sensitive setups |
+
+For most deployments, Option 1 is the right balance. Option 2 is fine when you are getting started. Option 3 is worth adding later if stale metadata causes frequent failed allocations.
 
 ---
 
 ## Remote Device Access
 
-For when a device is physically attached to one Dell but needed from another. This is a future capability, not in v1. In v1, tasks are always routed to the runner that has the required device.
+For when a device is physically attached to one Dell but needed from another. In most cases, the simpler and more reliable approach is to route the task to the node that has the device via Nomad constraints. Remote device access is a fallback for edge cases.
 
 ### USB/IP
 
@@ -598,14 +804,16 @@ pkcs11-tool --module /usr/lib/p11-kit-client.so --list-slots
 - Bad for: nothing, really -- if you need remote HSM access, this is the correct approach.
 - Secured by SSH authentication and tunnel encryption.
 
-### When to Use Remote Access vs. Task Routing
+### When to Use Remote Access vs. Nomad Constraints
 
-In most cases, it is simpler and more reliable to route the task to the runner that has the device. Remote device access adds latency, failure modes, and configuration complexity.
+In most cases, Nomad constraints are simpler and more reliable. The task is routed to the node with the device, and there is no network hop or remote device protocol to worry about.
 
 Use remote access only when:
-- A task needs devices that are on different runners (e.g., sign with HSM on dell-01, then flash firmware on dell-03).
-- A device is expensive/rare and you cannot duplicate it across runners.
+- A task needs devices that are on different nodes (e.g., sign with HSM on dell-01, then flash firmware on dell-03). In this case, consider splitting into two jobs instead.
+- A device is expensive/rare and you cannot duplicate it across nodes.
 - You need to consolidate devices on fewer machines for physical security reasons.
+
+If you find yourself reaching for USB/IP or ser2net frequently, consider whether the task should be split into multiple Nomad jobs, each with its own device constraint, chained via job dependencies.
 
 ---
 
@@ -700,7 +908,42 @@ ls -la /dev/your-device-name
 # Should show a symlink pointing to the actual device node
 ```
 
-### 6. Write Wrapper Script
+### 6. Update Nomad Client Metadata
+
+Add the device to the Nomad client's `meta` block. There are two ways:
+
+**Option A: Runtime metadata update (Nomad 1.7+):**
+
+```bash
+nomad node meta apply \
+  device_yourdevice=true \
+  device_yourdevice_path=/dev/your-device-name
+```
+
+This takes effect immediately with no restart required.
+
+**Option B: Config file update (any Nomad version):**
+
+Edit the Nomad client configuration (e.g., `/etc/nomad.d/devices.hcl`):
+
+```hcl
+client {
+  meta {
+    device_yourdevice      = "true"
+    device_yourdevice_path = "/dev/your-device-name"
+  }
+}
+```
+
+Then reload or restart Nomad:
+
+```bash
+systemctl reload nomad
+# or if reload is not sufficient:
+systemctl restart nomad
+```
+
+### 7. Write Wrapper Script
 
 Create `/opt/code-orchestration/devices/your-device.sh`:
 
@@ -709,40 +952,48 @@ Create `/opt/code-orchestration/devices/your-device.sh`:
 - Define the allowed subcommands.
 - Make it executable: `chmod 755 /opt/code-orchestration/devices/your-device.sh`.
 
-### 7. Add to Runner Config
+### 8. Update the Device Health Script
 
-Add the device to the runner's configuration file so the daemon knows to look for it:
-
-```yaml
-devices:
-  - name: your-device-name
-    type: usb-serial          # or usb-security-key, hsm, smart-card, usb-storage
-    vendor: "XXXX"
-    product: "YYYY"
-    path: /dev/your-device-name
-    capabilities:
-      - firmware-flash
-      - serial-monitor
-```
-
-### 8. Restart Runner Daemon
+If you are using the periodic device health script (Option 1 from "Device Health Monitoring"), add the new device to its `DEVICES` map:
 
 ```bash
-systemctl restart code-orchestration-runner
+declare -A DEVICES=(
+  # ... existing devices ...
+  ["yourdevice"]="/dev/your-device-name"
+)
 ```
 
-Alternatively, the runner daemon will auto-detect the new device on its next health check cycle (within 60 seconds), but the config file must be updated first so the daemon knows to expect it.
+### 9. Add USBGuard Rule
 
-### 9. Verify
+If USBGuard is enabled, whitelist the new device's vendor:product ID in `/etc/usbguard/rules.conf`:
+
+```
+allow id XXXX:YYYY  # Description of your device
+```
+
+Then reload USBGuard:
+
+```bash
+usbguard allow-device XXXX:YYYY
+# or edit rules.conf and restart:
+systemctl restart usbguard
+```
+
+### 10. Verify
 
 ```bash
 co devices
 ```
 
-This should show the new device as `connected` on the runner. You can also check the API directly:
+This should show the new device as available on the node. You can also verify directly via the Nomad API:
 
 ```bash
-curl -s http://localhost:8080/api/runners/dell-02/devices | jq .
+curl -s http://localhost:4646/v1/node/$(nomad node status -self -json | jq -r '.ID') \
+  | jq '.Meta | to_entries[] | select(.key | startswith("device_"))'
 ```
 
-The device is now available for task routing. Any task that declares a requirement for this device (by name or by capability) will be routed to this runner.
+The device is now available for task routing. Any task dispatched with `--needs yourdevice` will be routed to this node:
+
+```bash
+co run --needs yourdevice -- "test the new device"
+```

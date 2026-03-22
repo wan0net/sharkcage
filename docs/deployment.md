@@ -1,6 +1,6 @@
 # Deployment Guide: Dell 5070 Runner Fleet
 
-This document covers end-to-end setup of Dell OptiPlex 5070 Micro thin clients as autonomous coding agent runners for code-orchestration. Follow it top to bottom to go from bare hardware to a working fleet.
+This document covers end-to-end setup of Dell OptiPlex 5070 Micro thin clients as autonomous coding agent runners for code-orchestration. The architecture uses HashiCorp Nomad for job scheduling -- a single Go binary replaces Redis, BullMQ, and the custom worker daemon. Follow it top to bottom to go from bare hardware to a working fleet.
 
 ---
 
@@ -20,6 +20,8 @@ The Dell OptiPlex 5070 Micro is a small-form-factor desktop that makes an excell
 **Why these boxes work:**
 
 Claude Code, Crush, and Aider are API-call-heavy, not compute-heavy. The LLM inference runs in the cloud. These boxes just run the CLI process, manage local files, and shuttle JSON over HTTPS. A Celeron with 4 GB RAM is more than enough. Three of them running 24/7 cost roughly $15-20 AUD per year in electricity.
+
+Nomad server + client is a single ~100MB Go binary with minimal resource requirements. It runs comfortably alongside the coding agents on these low-power boxes. No JVM, no database server, no container runtime needed.
 
 The multiple USB 3.0 ports matter for device-attached tasks (YubiKeys, ESP32 boards, serial consoles).
 
@@ -134,12 +136,9 @@ Create `ansible/inventory.ini`:
 
 ```ini
 [runners]
-co-dell-01 ansible_host=192.168.1.101
-co-dell-02 ansible_host=192.168.1.102
-co-dell-03 ansible_host=192.168.1.103
-
-[redis]
-co-dell-01 ansible_host=192.168.1.101
+co-dell-01 ansible_host=192.168.1.101 nomad_role=server
+co-dell-02 ansible_host=192.168.1.102 nomad_role=client
+co-dell-03 ansible_host=192.168.1.103 nomad_role=client
 
 [runners:vars]
 ansible_user=runner
@@ -160,7 +159,6 @@ Create `ansible/playbook.yml`:
 
   vars:
     tailscale_authkey: "{{ lookup('env', 'TAILSCALE_AUTHKEY') }}"
-    redis_password: "{{ lookup('env', 'CO_REDIS_PASSWORD') }}"
     anthropic_api_key: "{{ lookup('env', 'ANTHROPIC_API_KEY') }}"
     openai_api_key: "{{ lookup('env', 'OPENAI_API_KEY') | default('', true) }}"
     google_api_key: "{{ lookup('env', 'GOOGLE_API_KEY') | default('', true) }}"
@@ -173,11 +171,11 @@ Create `ansible/playbook.yml`:
     - base
     - tailscale
     - node
-    - redis
+    - nomad
     - runtimes
     - git
     - devices
-    - runner
+    - jobs
 ```
 
 ### Role: base
@@ -263,13 +261,29 @@ Create `ansible/playbook.yml`:
     from_ip: 100.64.0.0/10
     comment: "SSH via Tailscale only"
 
-- name: Configure UFW - allow runner health endpoint from Tailscale
+- name: Configure UFW - allow Nomad HTTP API from Tailscale
   ufw:
     rule: allow
-    port: "9090"
+    port: "4646"
     proto: tcp
     from_ip: 100.64.0.0/10
-    comment: "Health endpoint via Tailscale"
+    comment: "Nomad HTTP API via Tailscale"
+
+- name: Configure UFW - allow Nomad RPC from Tailscale
+  ufw:
+    rule: allow
+    port: "4647"
+    proto: tcp
+    from_ip: 100.64.0.0/10
+    comment: "Nomad RPC via Tailscale"
+
+- name: Configure UFW - allow Nomad Serf from Tailscale
+  ufw:
+    rule: allow
+    port: "4648"
+    proto: tcp
+    from_ip: 100.64.0.0/10
+    comment: "Nomad Serf via Tailscale"
 
 - name: Enable UFW
   ufw:
@@ -387,83 +401,175 @@ Create `ansible/playbook.yml`:
     msg: "Node.js {{ node_ver.stdout }}, pnpm {{ pnpm_ver.stdout }}"
 ```
 
-### Role: redis
+### Role: nomad
 
-`ansible/roles/redis/tasks/main.yml`:
+`ansible/roles/nomad/tasks/main.yml`:
 
 ```yaml
 ---
-- name: Install Redis
+- name: Download Nomad binary
+  get_url:
+    url: "https://releases.hashicorp.com/nomad/{{ nomad_version }}/nomad_{{ nomad_version }}_linux_amd64.zip"
+    dest: /tmp/nomad.zip
+    checksum: "sha256:{{ nomad_sha256 }}"
+  vars:
+    nomad_version: "1.9.7"
+    nomad_sha256: "check-releases.hashicorp.com-for-current-hash"
+
+- name: Install unzip
   apt:
-    name: redis-server
+    name: unzip
     state: present
-  when: inventory_hostname in groups['redis']
 
-- name: Configure Redis
+- name: Extract Nomad binary
+  unarchive:
+    src: /tmp/nomad.zip
+    dest: /usr/local/bin/
+    remote_src: true
+    mode: "0755"
+
+- name: Verify Nomad installation
+  command: nomad version
+  register: nomad_ver
+  changed_when: false
+
+- name: Print Nomad version
+  debug:
+    msg: "{{ nomad_ver.stdout }}"
+
+- name: Create Nomad data directory
+  file:
+    path: /opt/nomad/data
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Create Nomad config directory
+  file:
+    path: /etc/nomad.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Deploy Nomad server+client config
   copy:
-    dest: /etc/redis/redis.conf
+    dest: /etc/nomad.d/nomad.hcl
     content: |
-      # code-orchestration Redis configuration
-      # Bind to Tailscale IP and localhost only
-      bind {{ ts_ip }} 127.0.0.1
+      data_dir = "/opt/nomad/data"
+      bind_addr = "0.0.0.0"
 
-      # Require authentication
-      requirepass {{ redis_password }}
+      advertise {
+        http = "{{ ts_ip }}:4646"
+        rpc  = "{{ ts_ip }}:4647"
+        serf = "{{ ts_ip }}:4648"
+      }
 
-      # Persistence - AOF for durability
-      appendonly yes
-      appendfilename "appendonly.aof"
-      appendfsync everysec
+      server {
+        enabled          = true
+        bootstrap_expect = 1
+      }
 
-      # Memory limits
-      maxmemory 256mb
-      maxmemory-policy noeviction
+      client {
+        enabled = true
+        meta {
+          "project_peer6" = "true"
+          "project_rule1" = "true"
+        }
+      }
 
-      # Standard settings
-      port 6379
-      daemonize no
-      supervised systemd
-      loglevel notice
-      logfile /var/log/redis/redis-server.log
+      plugin "raw_exec" {
+        config {
+          enabled = true
+        }
+      }
 
-      # Security
-      protected-mode yes
-      rename-command FLUSHALL ""
-      rename-command FLUSHDB ""
-      rename-command DEBUG ""
-
-      # Performance
-      tcp-backlog 511
-      timeout 0
-      tcp-keepalive 300
-      databases 4
-    owner: redis
-    group: redis
+      acl {
+        enabled = true
+      }
+    owner: root
+    group: root
     mode: "0640"
-  when: inventory_hostname in groups['redis']
-  notify: restart redis
+  when: nomad_role == "server"
+  notify: restart nomad
 
-- name: Enable and start Redis
+- name: Deploy Nomad client-only config
+  copy:
+    dest: /etc/nomad.d/nomad.hcl
+    content: |
+      data_dir = "/opt/nomad/data"
+
+      server {
+        enabled = false
+      }
+
+      client {
+        enabled = true
+        servers = ["co-dell-01.tailnet:4646"]
+        meta {
+          "project_login2"      = "true"
+          "device_yubikey"      = "true"
+          "device_yubikey_path" = "/dev/yubikey-1"
+        }
+      }
+
+      plugin "raw_exec" {
+        config {
+          enabled = true
+        }
+      }
+    owner: root
+    group: root
+    mode: "0640"
+  when: nomad_role == "client"
+  notify: restart nomad
+
+- name: Deploy Nomad systemd service
+  copy:
+    dest: /etc/systemd/system/nomad.service
+    content: |
+      [Unit]
+      Description=HashiCorp Nomad
+      Documentation=https://nomadproject.io/docs/
+      Wants=network-online.target
+      After=network-online.target
+
+      [Service]
+      ExecStart=/usr/local/bin/nomad agent -config=/etc/nomad.d/
+      ExecReload=/bin/kill -HUP $MAINPID
+      KillMode=process
+      KillSignal=SIGINT
+      LimitNOFILE=65536
+      LimitNPROC=infinity
+      Restart=on-failure
+      RestartSec=2
+      TasksMax=infinity
+
+      [Install]
+      WantedBy=multi-user.target
+    mode: "0644"
+  notify: reload systemd
+
+- name: Enable and start Nomad
   systemd:
-    name: redis-server
+    name: nomad
     enabled: true
     state: started
-  when: inventory_hostname in groups['redis']
-
-handlers:
-  - name: restart redis
-    systemd:
-      name: redis-server
-      state: restarted
+    daemon_reload: true
 ```
 
-Note: Place the handler in `ansible/roles/redis/handlers/main.yml`:
+Place handlers in `ansible/roles/nomad/handlers/main.yml`:
 
 ```yaml
 ---
-- name: restart redis
+- name: reload systemd
   systemd:
-    name: redis-server
+    daemon_reload: true
+
+- name: restart nomad
+  systemd:
+    name: nomad
     state: restarted
 ```
 
@@ -522,7 +628,6 @@ Note: Place the handler in `ansible/roles/redis/handlers/main.yml`:
       ANTHROPIC_API_KEY={{ anthropic_api_key }}
       OPENAI_API_KEY={{ openai_api_key }}
       GOOGLE_API_KEY={{ google_api_key }}
-      REDIS_URL=redis://:{{ redis_password }}@{{ hostvars[groups['redis'][0]]['ts_ip'] }}:6379
     owner: runner
     group: runner
     mode: "0600"
@@ -719,18 +824,9 @@ Note: Place the handler in `ansible/roles/redis/handlers/main.yml`:
       reject
     mode: "0600"
   notify: restart usbguard
-
-handlers:
-  - name: reload udev
-    shell: udevadm control --reload-rules && udevadm trigger
-
-  - name: restart usbguard
-    systemd:
-      name: usbguard
-      state: restarted
 ```
 
-Note: Place handlers in `ansible/roles/devices/handlers/main.yml`:
+Place handlers in `ansible/roles/devices/handlers/main.yml`:
 
 ```yaml
 ---
@@ -743,19 +839,23 @@ Note: Place handlers in `ansible/roles/devices/handlers/main.yml`:
     state: restarted
 ```
 
-### Role: runner
+### Role: jobs
 
-`ansible/roles/runner/tasks/main.yml`:
+`ansible/roles/jobs/tasks/main.yml`:
 
 ```yaml
 ---
-- name: Create code-orchestration base directory
+- name: Create code-orchestration directories
   file:
-    path: "{{ co_base_dir }}"
+    path: "{{ item }}"
     state: directory
     owner: runner
     group: runner
     mode: "0755"
+  loop:
+    - "{{ co_base_dir }}"
+    - "{{ co_base_dir }}/jobs"
+    - "{{ co_base_dir }}/scripts"
 
 - name: Clone code-orchestration repository
   become: true
@@ -767,68 +867,30 @@ Note: Place handlers in `ansible/roles/devices/handlers/main.yml`:
     update: true
     force: false
 
-- name: Install code-orchestration dependencies
-  become: true
-  become_user: runner
-  command: pnpm install --frozen-lockfile
-  args:
-    chdir: "{{ co_base_dir }}"
-
-- name: Build code-orchestration
-  become: true
-  become_user: runner
-  command: pnpm build
-  args:
-    chdir: "{{ co_base_dir }}"
-
-- name: Deploy runner config
-  template:
-    src: config.yaml.j2
-    dest: "{{ co_base_dir }}/config.yaml"
+- name: Deploy run-agent.sh script
+  copy:
+    src: scripts/run-agent.sh
+    dest: "{{ co_base_dir }}/scripts/run-agent.sh"
     owner: runner
     group: runner
-    mode: "0640"
+    mode: "0755"
 
-- name: Deploy systemd service file
+- name: Deploy job templates
   copy:
-    dest: /etc/systemd/system/code-orchestration-runner.service
-    content: |
-      [Unit]
-      Description=code-orchestration runner daemon
-      After=network-online.target redis.service
-      Wants=network-online.target
-
-      [Service]
-      Type=simple
-      User=runner
-      Group=runner
-      WorkingDirectory={{ co_base_dir }}
-      ExecStart=/usr/bin/node dist/runner/index.js
-      Restart=always
-      RestartSec=10
-      Environment=NODE_ENV=production
-      EnvironmentFile={{ co_base_dir }}/.env
-
-      # Security hardening
-      NoNewPrivileges=true
-      ProtectSystem=strict
-      ReadWritePaths={{ co_base_dir }} /var/lock/code-orchestration /var/log/code-orchestration /tmp
-      PrivateTmp=true
-
-      # Resource limits
-      LimitNOFILE=65536
-
-      [Install]
-      WantedBy=multi-user.target
+    src: "jobs/"
+    dest: "{{ co_base_dir }}/jobs/"
+    owner: runner
+    group: runner
     mode: "0644"
-  notify: reload systemd
 
-- name: Enable and start code-orchestration runner
-  systemd:
-    name: code-orchestration-runner
-    enabled: true
-    state: started
-    daemon_reload: true
+- name: Register parameterized job with Nomad
+  become: true
+  become_user: runner
+  shell: |
+    nomad job run {{ co_base_dir }}/jobs/run-coding-agent.nomad.hcl
+  environment:
+    NOMAD_ADDR: "http://{{ ts_ip }}:4646"
+  changed_when: true
 
 - name: Deploy worktree cleanup cron
   cron:
@@ -840,184 +902,140 @@ Note: Place handlers in `ansible/roles/devices/handlers/main.yml`:
     job: >-
       find {{ co_base_dir }}/workspaces -maxdepth 3 -name '.git' -type f
       -mtime +7 -execdir git worktree remove --force . \; 2>/dev/null || true
-
-handlers:
-  - name: reload systemd
-    systemd:
-      daemon_reload: true
-```
-
-Note: Place the handler in `ansible/roles/runner/handlers/main.yml`:
-
-```yaml
----
-- name: reload systemd
-  systemd:
-    daemon_reload: true
-```
-
-### Runner Config Template
-
-`ansible/roles/runner/templates/config.yaml.j2`:
-
-```yaml
-runner_id: {{ inventory_hostname }}
-api_url: https://co-api.link42.app
-redis_url: redis://:{{ redis_password }}@{{ hostvars[groups['redis'][0]]['ts_ip'] }}:6379
-
-runtimes:
-  crush:
-    binary: /usr/local/bin/crush
-    default_model: anthropic/claude-sonnet-4
-  claude:
-    binary: /usr/local/bin/claude
-    default_model: sonnet
-
-projects:
-  login2:
-    repo: git@github.com:wan0net/auth.git
-    path: {{ co_base_dir }}/workspaces/login2
-    preferred_runtime: claude
-  peer6:
-    repo: git@github.com:wan0net/mentor.git
-    path: {{ co_base_dir }}/workspaces/peer6
-    preferred_runtime: crush
-
-devices: []
-
-queues:
-  - tasks:general
 ```
 
 ---
 
-## 4. Runner Configuration Reference
+## 4. Nomad ACL Setup
 
-Each runner gets a `config.yaml` deployed by Ansible. Here is a fully populated example for a runner with USB devices attached:
+After the Nomad server is running on co-dell-01, bootstrap ACLs. This is a one-time manual step.
 
-```yaml
-runner_id: co-dell-02
-api_url: https://co-api.link42.app
-redis_url: redis://:password@100.x.y.z:6379
-
-runtimes:
-  crush:
-    binary: /usr/local/bin/crush
-    default_model: anthropic/claude-sonnet-4
-  claude:
-    binary: /usr/local/bin/claude
-    default_model: sonnet
-
-projects:
-  login2:
-    repo: git@github.com:wan0net/auth.git
-    path: /opt/code-orchestration/workspaces/login2
-    preferred_runtime: claude
-  peer6:
-    repo: git@github.com:wan0net/mentor.git
-    path: /opt/code-orchestration/workspaces/peer6
-    preferred_runtime: crush
-
-devices:
-  - name: yubikey-1
-    type: usb-security-key
-    symlink: /dev/yubikey-1
-  - name: esp32-main
-    type: usb-serial
-    symlink: /dev/esp32-main
-    baud: 115200
-
-queues:
-  - tasks:login2
-  - tasks:peer6
-  - tasks:needs-usb-security-key
-  - tasks:general
-```
-
-Fields:
-
-- **runner_id**: Matches the hostname. Used to identify this runner in the API and logs.
-- **api_url**: The code-orchestration API endpoint. Either a Cloudflare Worker URL or a Tailscale IP if self-hosted.
-- **redis_url**: Connection string for the BullMQ Redis instance. Use the Tailscale IP of whichever Dell runs Redis.
-- **runtimes**: Available coding agent CLIs on this box. Each entry specifies the binary path and default model.
-- **projects**: Git repos this runner can work on. Cloned to the specified path. `preferred_runtime` is a hint for task routing.
-- **devices**: USB devices attached to this specific runner. The `symlink` is created by udev rules.
-- **queues**: BullMQ queues this runner subscribes to. A runner with a YubiKey subscribes to `tasks:needs-usb-security-key` in addition to general queues.
-
----
-
-## 5. Systemd Service
-
-The complete unit file is deployed by Ansible (see Role: runner above). For reference:
-
-```ini
-[Unit]
-Description=code-orchestration runner daemon
-After=network-online.target redis.service
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=runner
-Group=runner
-WorkingDirectory=/opt/code-orchestration
-ExecStart=/usr/bin/node dist/runner/index.js
-Restart=always
-RestartSec=10
-Environment=NODE_ENV=production
-EnvironmentFile=/opt/code-orchestration/.env
-
-# Security hardening
-NoNewPrivileges=true
-ProtectSystem=strict
-ReadWritePaths=/opt/code-orchestration /var/lock/code-orchestration /var/log/code-orchestration /tmp
-PrivateTmp=true
-
-# Resource limits
-LimitNOFILE=65536
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Managing the service:
+### Step 1: Bootstrap ACL
 
 ```bash
-# Start/stop/restart
-sudo systemctl start code-orchestration-runner
-sudo systemctl stop code-orchestration-runner
-sudo systemctl restart code-orchestration-runner
+ssh runner@co-dell-01
 
-# Check status
-sudo systemctl status code-orchestration-runner
+export NOMAD_ADDR=http://127.0.0.1:4646
+nomad acl bootstrap
+```
 
-# View logs (live follow)
-journalctl -u code-orchestration-runner -f
+This prints a management token. Save it securely (password manager). This token has full access and should only be used for administration.
 
-# View logs (last 100 lines)
-journalctl -u code-orchestration-runner -n 100
+### Step 2: Create policy for `co` CLI
 
-# Enable on boot
-sudo systemctl enable code-orchestration-runner
+Write the policy file:
+
+```bash
+cat > /tmp/co-cli-policy.hcl << 'EOF'
+namespace "default" {
+  policy = "write"
+  capabilities = ["submit-job", "dispatch-job", "read-job", "read-logs", "alloc-exec", "alloc-lifecycle"]
+}
+
+node {
+  policy = "read"
+}
+
+variable {
+  path "cost/*"
+  capabilities = ["read", "write"]
+}
+
+variable {
+  path "sessions/*"
+  capabilities = ["read", "write"]
+}
+EOF
+```
+
+Apply it:
+
+```bash
+export NOMAD_TOKEN=<management-token>
+nomad acl policy apply co-cli-policy /tmp/co-cli-policy.hcl
+```
+
+### Step 3: Create client token
+
+```bash
+nomad acl token create -name="co-cli" -policy="co-cli-policy"
+```
+
+This prints the client token. Save it -- this is what your laptop uses to talk to Nomad.
+
+### Step 4: Configure token on laptop
+
+```bash
+export NOMAD_TOKEN=<co-cli-token>
+```
+
+Or set it in the `co` config file (see section 5).
+
+---
+
+## 5. `co` CLI Installation on Laptop
+
+### Install
+
+```bash
+npm install -g @wan0net/code-orchestration
+```
+
+Or clone the repo and link it:
+
+```bash
+git clone git@github.com:wan0net/code-orchestration.git
+cd code-orchestration
+pnpm install && pnpm build
+npm link
+```
+
+### Configure
+
+Create `~/.config/co/config.yaml`:
+
+```yaml
+# ~/.config/co/config.yaml
+nomad_addr: http://co-dell-01.tailnet:4646
+nomad_token: <acl-token>
+
+defaults:
+  runtime: crush
+  model: anthropic/claude-sonnet-4
+
+projects:
+  peer6:
+    runtime: crush
+    model: anthropic/claude-sonnet-4
+  login2:
+    runtime: claude
+    model: opus
+
+notifications:
+  ntfy_topic: co-notifications
+```
+
+Verify connectivity:
+
+```bash
+co runners        # Should list all Nomad client nodes
+co status         # Should show registered jobs
 ```
 
 ---
 
 ## 6. Networking
 
-### Internal LAN
-
-All Dells sit on the same LAN segment for low-latency Redis access. If they are on different networks, Tailscale handles routing transparently -- just use Tailscale IPs for Redis connections.
-
 ### Tailscale Mesh
 
 Every Dell and your laptop join the same Tailnet. This provides:
 
 - **SSH from anywhere**: `ssh runner@co-dell-01` via MagicDNS (e.g., `co-dell-01.tail-net.ts.net`)
-- **Cross-network routing**: If a Dell is on a different subnet or even a different physical location, Tailscale routes traffic
+- **Nomad API access**: `co` CLI on your laptop talks to Nomad server over Tailscale
+- **Cross-network routing**: If a Dell is on a different subnet or physical location, Tailscale routes traffic
 - **ACLs**: Configure Tailscale ACLs to restrict which devices can reach the runners
 
-Install Tailscale on your laptop too:
+Install Tailscale on your laptop:
 
 ```bash
 # macOS
@@ -1026,6 +1044,18 @@ brew install tailscale
 # Then from any network:
 ssh runner@co-dell-01    # MagicDNS resolves via Tailscale
 ```
+
+### Nomad Ports
+
+The Nomad server listens on the Tailscale IP, not a public address.
+
+| Port | Protocol | Purpose |
+|------|----------|---------|
+| 4646 | TCP | HTTP API (job submission, UI, status queries) |
+| 4647 | TCP | RPC (internal server-client communication) |
+| 4648 | TCP/UDP | Serf (cluster membership gossip) |
+
+All three ports are firewalled to accept connections only from the Tailscale subnet (100.64.0.0/10).
 
 ### Outbound Connectivity
 
@@ -1037,141 +1067,94 @@ Runners need outbound HTTPS access to:
 | Anthropic API | `api.anthropic.com` |
 | OpenAI API | `api.openai.com` |
 | Google API | `generativelanguage.googleapis.com` |
-| Cloudflare | Various, for Workers deployment |
 | npm registry | `registry.npmjs.org` |
+| HashiCorp (updates) | `releases.hashicorp.com` |
 
 No inbound ports are required from the public internet. All inbound access is via Tailscale.
 
-### DNS
-
-If the code-orchestration API is a Cloudflare Worker, point `co-api.link42.app` to the Worker route in Cloudflare DNS. If you self-host the API on a Dell, use:
-
-- Tailscale IP directly (e.g., `http://100.x.y.z:3000`), or
-- MagicDNS hostname (e.g., `http://co-dell-01:3000`)
-
 ---
 
-## 7. Redis Configuration
+## 7. Nomad UI
 
-Redis runs on one Dell (designated in the `[redis]` group in Ansible inventory). It holds the BullMQ task queues.
+Nomad ships with a built-in web UI. No additional software to install.
 
-### Full Configuration
+### Access
 
-Deployed by the `redis` Ansible role. The key settings:
+Open in your browser (from any machine on the Tailnet):
 
 ```
-# Bind to Tailscale IP and localhost only -- never 0.0.0.0
-bind 100.x.y.z 127.0.0.1
-
-# Require authentication
-requirepass <strong-password-here>
-
-# AOF persistence -- survives restarts without losing queued tasks
-appendonly yes
-appendfilename "appendonly.aof"
-appendfsync everysec
-
-# Memory limits -- 256MB is more than enough for task queues
-maxmemory 256mb
-maxmemory-policy noeviction
-
-# Security
-protected-mode yes
-
-# Disable dangerous commands
-rename-command FLUSHALL ""
-rename-command FLUSHDB ""
-rename-command DEBUG ""
+http://co-dell-01.tailnet:4646/ui
 ```
 
-### Verifying Redis
+### Authentication
 
-```bash
-# From the Redis host
-redis-cli -a '<password>' ping
-# Should return: PONG
+Click the ACL token icon in the top-right corner and paste your management token or `co-cli` token. The UI respects ACL policies -- you see only what your token permits.
 
-# From another Dell (via Tailscale)
-redis-cli -h 100.x.y.z -a '<password>' ping
+### What You Get
 
-# Check memory usage
-redis-cli -a '<password>' info memory | grep used_memory_human
+- **Jobs**: List of registered jobs, their status, deployment history
+- **Allocations**: Running, completed, and failed task instances with logs
+- **Nodes**: All client nodes in the cluster, their status, resource usage, metadata
+- **Topology**: Visual map of which allocations run on which nodes
+- **Logs**: Live-streaming stdout/stderr from any allocation
 
-# Check AOF status
-redis-cli -a '<password>' info persistence | grep aof
-```
-
-### Backup
-
-The AOF file is at `/var/lib/redis/appendonly.aof`. To back up:
-
-```bash
-# Copy AOF file (safe to copy while Redis is running with appendfsync everysec)
-cp /var/lib/redis/appendonly.aof /backup/redis-aof-$(date +%Y%m%d).aof
-```
-
-To restore, stop Redis, replace the AOF file, and start Redis.
+The UI replaces the need for Bull Board or any custom monitoring dashboard. Everything about job scheduling, execution, and history is visible here.
 
 ---
 
 ## 8. Monitoring and Maintenance
 
-### Logs
+### Fleet Health
 
 ```bash
-# Live runner logs
-journalctl -u code-orchestration-runner -f
+# List all nodes and their status
+nomad node status
 
-# Last hour of logs
-journalctl -u code-orchestration-runner --since "1 hour ago"
+# Detailed info on a specific node
+nomad node status -verbose <node-id>
 
-# Redis logs
-journalctl -u redis-server -f
-
-# Application logs (if writing to file)
-tail -f /var/log/code-orchestration/runner.log
+# From your laptop via co CLI
+co runners
 ```
 
-### Queue Monitoring
-
-Bull Board provides a web dashboard for inspecting queues (waiting, active, completed, failed jobs). It runs alongside the API service. Access it via Tailscale:
-
-```
-http://co-dell-01:3000/admin/queues
-```
-
-### Tailscale Admin Console
-
-View which Dells are online, their Tailscale IPs, and last-seen timestamps at:
-
-```
-https://login.tailscale.com/admin/machines
-```
-
-### Disk Space
-
-Git worktrees accumulate over time. A weekly cron job (deployed by the runner role) cleans worktrees older than 7 days:
+### Live Logs
 
 ```bash
-# Manual cleanup
+# Stream logs from a running allocation
+nomad alloc logs -f <alloc-id> execute
+
+# Stream stderr
+nomad alloc logs -f -stderr <alloc-id> execute
+
+# Via co CLI
+co logs <task-id>
+```
+
+### Nomad Service Logs
+
+```bash
+# Live follow of Nomad daemon itself
+journalctl -u nomad -f
+
+# Last hour
+journalctl -u nomad --since "1 hour ago"
+```
+
+### Disk Cleanup
+
+Git worktrees accumulate over time. A weekly cron job (deployed by the jobs role) cleans worktrees older than 7 days.
+
+```bash
+# Manual worktree cleanup
 find /opt/code-orchestration/workspaces -maxdepth 3 -name '.git' -type f \
   -mtime +7 -execdir git worktree remove --force . \; 2>/dev/null
 
 # Check disk usage
 du -sh /opt/code-orchestration/workspaces/*
 df -h /
-```
 
-### Health Endpoint
-
-Each runner exposes a local HTTP health endpoint on port 9090:
-
-```bash
-curl http://localhost:9090/health
-# Returns: {"status":"ok","runner_id":"co-dell-02","uptime":123456,"active_tasks":1}
-
-# From your laptop (via Tailscale)
-curl http://co-dell-02:9090/health
+# Nomad garbage collection (clean old allocations)
+nomad system gc
 ```
 
 ### System Health
@@ -1180,8 +1163,8 @@ curl http://co-dell-02:9090/health
 # CPU and memory
 htop
 
-# Systemd service status
-systemctl status code-orchestration-runner redis-server tailscaled
+# Nomad and Tailscale status
+systemctl status nomad tailscaled
 
 # Network connectivity
 tailscale status
@@ -1196,27 +1179,34 @@ udevadm info /dev/yubikey-1
 
 ## 9. Backup and Recovery
 
-### What is Ephemeral
-
-Runner state is intentionally ephemeral. Everything can be rebuilt from:
-
-- **Configuration**: Stored in the code-orchestration repo, managed by Ansible
-- **Task data**: Stored in Redis (AOF-backed)
-- **Code**: Stored in GitHub repos (just re-clone)
-
 ### What to Back Up
+
+Nomad state can be snapshotted, but in practice the system is designed to be ephemeral and re-provisionable.
 
 | Data | Location | Backup Method |
 |------|----------|---------------|
-| Redis AOF | `/var/lib/redis/appendonly.aof` | Copy file (cron or manual) |
+| Nomad Raft state | `/opt/nomad/data` | `nomad operator snapshot save backup.snap` |
 | API keys | `/opt/code-orchestration/.env` | Stored in your password manager, deployed by Ansible |
 | SSH keys | `~/.ssh/co-fleet`, `~/.ssh/co-github-deploy` | Stored in your password manager |
 | Ansible inventory | `ansible/inventory.ini` | In the code-orchestration repo |
+| Nomad ACL tokens | Generated at bootstrap | Stored in your password manager |
 | Tailscale auth | Tailscale admin console | Re-generate auth key if needed |
+
+### Nomad State Snapshot
+
+```bash
+# Save a snapshot of Nomad's Raft state
+export NOMAD_ADDR=http://co-dell-01.tailnet:4646
+export NOMAD_TOKEN=<management-token>
+nomad operator snapshot save backup-$(date +%Y%m%d).snap
+
+# Restore from snapshot (if needed)
+nomad operator snapshot restore backup-20260322.snap
+```
 
 ### Recovery Procedure
 
-If a Dell dies or you need to add a replacement:
+If a Dell dies or you need to rebuild from scratch:
 
 1. Install Ubuntu Server 24.04 on the new hardware (use autoinstall USB, ~10 minutes)
 2. Update Ansible inventory with the new hostname and IP
@@ -1225,33 +1215,59 @@ If a Dell dies or you need to add a replacement:
 
 ```bash
 export TAILSCALE_AUTHKEY="tskey-auth-..."
-export CO_REDIS_PASSWORD="your-redis-password"
 export ANTHROPIC_API_KEY="sk-ant-..."
 
 ansible-playbook -i ansible/inventory.ini ansible/playbook.yml --limit co-dell-04
 ```
 
-5. Attach USB devices and verify udev rules:
+5. If replacing the server node (co-dell-01), restore the Raft snapshot or re-bootstrap ACLs and re-register jobs
+6. If replacing a client node, it auto-joins the cluster via Tailscale -- no extra steps
+7. Verify:
 
 ```bash
-ssh runner@co-dell-04 "lsusb && ls -la /dev/yubikey* /dev/esp32* 2>/dev/null"
+nomad node status    # New node appears
+co runners           # Shows in fleet
 ```
 
-6. Verify the runner is online:
+Total recovery time: approximately 15 minutes from bare metal to accepting jobs.
 
-```bash
-co runners
-```
-
-Total recovery time: approximately 15 minutes from bare metal to running tasks.
+Git repos are re-cloned from GitHub on first job dispatch. The job template is re-registered by the `jobs` Ansible role.
 
 ---
 
 ## 10. Security Hardening
 
+### Nomad API Access
+
+The Nomad HTTP API binds to the Tailscale IP, not a public address. UFW rules restrict ports 4646-4648 to the Tailscale subnet (100.64.0.0/10). The API is not reachable from the public internet.
+
+### ACL Tokens
+
+All API access requires a valid ACL token. The management token is used only for administration. The `co-cli` token has scoped permissions (submit jobs, read logs, manage variables). No anonymous access is permitted.
+
+### raw_exec as Unprivileged User
+
+The `raw_exec` driver runs tasks as the `runner` user, not root. Configure this in the Nomad client config if needed:
+
+```hcl
+plugin "raw_exec" {
+  config {
+    enabled = true
+  }
+}
+
+client {
+  options {
+    "driver.raw_exec.enable" = "1"
+  }
+}
+```
+
+Jobs specify `user = "runner"` in the task block to enforce this.
+
 ### Firewall
 
-UFW is configured to deny all inbound traffic except from the Tailscale subnet (100.64.0.0/10):
+UFW is configured to deny all inbound traffic except from the Tailscale subnet:
 
 ```bash
 # Verify firewall rules
@@ -1261,14 +1277,16 @@ sudo ufw status verbose
 # Status: active
 # Default: deny (incoming), allow (outgoing), deny (routed)
 # 22/tcp    ALLOW IN    100.64.0.0/10    # SSH via Tailscale only
-# 9090/tcp  ALLOW IN    100.64.0.0/10    # Health endpoint via Tailscale
+# 4646/tcp  ALLOW IN    100.64.0.0/10    # Nomad HTTP API via Tailscale
+# 4647/tcp  ALLOW IN    100.64.0.0/10    # Nomad RPC via Tailscale
+# 4648/tcp  ALLOW IN    100.64.0.0/10    # Nomad Serf via Tailscale
 ```
 
 ### SSH
 
 - Key-only authentication (password auth disabled after initial setup)
 - No root login
-- Tailscale SSH as fallback (configured in the tailscale role)
+- Tailscale SSH as fallback
 
 Harden `/etc/ssh/sshd_config`:
 
@@ -1299,24 +1317,13 @@ sudo usbguard list-devices
 - Deployed by Ansible from environment variables on your control machine
 - Rotate keys by updating the env vars and re-running Ansible
 
-### Systemd Security
+### Unattended Security Upgrades
 
-The service unit applies:
-
-- `NoNewPrivileges=true`: Prevents privilege escalation
-- `ProtectSystem=strict`: Mounts the filesystem read-only except for explicit `ReadWritePaths`
-- `PrivateTmp=true`: Isolates /tmp for the service
-- `ReadWritePaths`: Only the directories the runner actually needs
-
-### Audit Trail
-
-All tool calls and device interactions are logged to `/var/log/code-orchestration/`. Combined with systemd journal, this provides a complete audit trail of what each runner executed.
+Configured by the `base` Ansible role. Security patches from Ubuntu are applied automatically. Automatic reboots are disabled -- schedule reboots during maintenance windows if kernel updates require them.
 
 ---
 
 ## 11. Adding a New Runner
-
-Step-by-step procedure:
 
 **1. Install the OS.**
 
@@ -1328,60 +1335,53 @@ Edit `ansible/inventory.ini`:
 
 ```ini
 [runners]
-co-dell-01 ansible_host=192.168.1.101
-co-dell-02 ansible_host=192.168.1.102
-co-dell-03 ansible_host=192.168.1.103
-co-dell-04 ansible_host=192.168.1.104
+co-dell-01 ansible_host=192.168.1.101 nomad_role=server
+co-dell-02 ansible_host=192.168.1.102 nomad_role=client
+co-dell-03 ansible_host=192.168.1.103 nomad_role=client
+co-dell-04 ansible_host=192.168.1.104 nomad_role=client
 ```
 
-**3. Copy SSH key.**
-
-```bash
-ssh-copy-id -i ~/.ssh/co-fleet runner@192.168.1.104
-```
-
-**4. Run the playbook (targeted).**
+**3. Run the playbook (targeted).**
 
 ```bash
 ansible-playbook -i ansible/inventory.ini ansible/playbook.yml --limit co-dell-04
 ```
 
-This installs everything: Tailscale, Node.js, runtimes, git config, device tools, and the runner service.
+This installs everything: Tailscale, Node.js, Nomad (client mode), runtimes, git config, device tools, and job templates.
 
-**5. Attach USB devices.**
+**4. Dell auto-joins the Nomad cluster.**
 
-Plug in any YubiKeys, ESP32 boards, or serial adapters. Verify they are detected and udev rules created the expected symlinks:
+The client-mode Nomad config points at `co-dell-01.tailnet:4646`. Once Tailscale is up and Nomad starts, the new node registers with the server automatically. No manual cluster join step.
 
-```bash
-ssh runner@co-dell-04 "lsusb"
-ssh runner@co-dell-04 "ls -la /dev/yubikey* /dev/esp32* 2>/dev/null"
+**5. Set node metadata for projects and devices.**
+
+Edit the Nomad client config (via Ansible host vars or the config template) to declare what this node can do:
+
+```hcl
+client {
+  meta {
+    "project_peer6"  = "true"
+    "project_login2" = "true"
+    "device_yubikey" = "true"
+  }
+}
 ```
 
-If you have new device types, add udev rules to the `devices` Ansible role and re-run:
+Re-run the playbook or restart Nomad for metadata changes to take effect.
+
+**6. Verify.**
 
 ```bash
-ansible-playbook -i ansible/inventory.ini ansible/playbook.yml --limit co-dell-04 --tags devices
+# From your laptop
+nomad node status          # New node appears with "ready" status
+co runners                 # Shows the new runner in the fleet
+
+# From the new Dell
+nomad node status -self     # Confirms client is connected to server
+systemctl status nomad      # Service is active
 ```
 
-**6. Update runner config.**
-
-Edit `ansible/roles/runner/templates/config.yaml.j2` or use host-specific variables to set the projects, devices, and queues for the new runner. Re-run:
-
-```bash
-ansible-playbook -i ansible/inventory.ini ansible/playbook.yml --limit co-dell-04 --tags runner
-```
-
-**7. Start and verify.**
-
-```bash
-# Check the service is running
-ssh runner@co-dell-04 "sudo systemctl status code-orchestration-runner"
-
-# Check it registered with the API
-co runners
-
-# The new runner should appear in the list with status "idle"
-```
+The new node immediately starts accepting job dispatches that match its metadata constraints.
 
 ---
 
@@ -1405,33 +1405,41 @@ ssh runner@co-dell-01
 # Check all runners
 co runners
 
-# Check queue status
+# Check job status
 co status
+
+# Nomad cluster overview
+nomad node status
+nomad job status
 ```
 
 ### Troubleshooting
 
 | Problem | Check |
 |---------|-------|
-| Runner not picking up tasks | `journalctl -u code-orchestration-runner -n 50` |
-| Redis connection refused | `redis-cli -h <ts-ip> -a <password> ping` |
+| Runner not picking up tasks | `journalctl -u nomad -n 50` on the node |
+| Node not joining cluster | `nomad agent-info` and check server address, Tailscale connectivity |
+| Nomad API unreachable | `curl http://co-dell-01.tailnet:4646/v1/status/leader` |
+| ACL token rejected | Verify token with `nomad acl token self` |
 | Tailscale offline | `tailscale status` on the box |
 | USB device not found | `lsusb` and `ls /dev/yubikey*` |
-| Disk full | `df -h /` and clean worktrees |
+| Disk full | `df -h /`, clean worktrees, `nomad system gc` |
 | API key expired | Update env var, re-run Ansible runtimes role |
-| Service won't start | `systemctl status code-orchestration-runner` and check ExecStart path |
 
 ### File Locations
 
 | Path | Purpose |
 |------|---------|
 | `/opt/code-orchestration/` | Application root |
-| `/opt/code-orchestration/config.yaml` | Runner configuration |
+| `/opt/code-orchestration/jobs/` | Nomad job templates |
+| `/opt/code-orchestration/scripts/` | Agent runner scripts |
 | `/opt/code-orchestration/.env` | API keys and secrets |
 | `/opt/code-orchestration/workspaces/` | Cloned project repos and worktrees |
 | `/opt/code-orchestration/devices/` | Device wrapper scripts |
+| `/opt/nomad/data/` | Nomad state data |
+| `/etc/nomad.d/nomad.hcl` | Nomad configuration |
+| `/etc/systemd/system/nomad.service` | Nomad systemd unit |
 | `/var/lock/code-orchestration/` | Device lock files |
 | `/var/log/code-orchestration/` | Application logs |
-| `/var/lib/redis/appendonly.aof` | Redis persistence |
 | `/etc/udev/rules.d/90-code-orchestration.rules` | USB device rules |
 | `/etc/usbguard/rules.conf` | USB device whitelist |

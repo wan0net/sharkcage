@@ -4,7 +4,7 @@ An agent-agnostic autonomous coding orchestrator for physical runner fleets.
 
 ## What This Is
 
-A system for running AI coding agents (Claude Code, Crush/OpenCode, Aider, etc.) autonomously on a fleet of physical machines, with centralized task routing, device-aware scheduling, and remote control. Tasks are submitted via CLI or API, routed to available runners based on device requirements and capacity, and executed without human presence.
+A system for running AI coding agents (Claude Code, Crush/OpenCode, Aider) autonomously on a fleet of physical Dell 5070 thin clients. Uses HashiCorp Nomad for orchestration -- no custom servers, databases, or message queues. The entire custom surface is a thin CLI and a set of job templates.
 
 ## The Problem
 
@@ -15,77 +15,117 @@ A system for running AI coding agents (Claude Code, Crush/OpenCode, Aider, etc.)
 
 ## Architecture
 
-```
-                          +---------------------+
-                          |        API          |
-                          |  Hono / CF Workers  |
-                          |  BullMQ + Redis     |
-                          |  Device Registry    |
-                          |  CF Access (auth)   |
-                          +--------+------------+
-                                   |
-                            Tailscale mesh
-                   +---------------+---------------+
-                   |               |               |
-           +-------+---+   +------+----+   +------+----+
-           | Runner 01 |   | Runner 02 |   | Runner 03 |
-           | Dell 5070 |   | Dell 5070 |   | Dell 5070 |
-           |           |   |           |   |           |
-           | worker    |   | worker    |   | worker    |
-           | daemon    |   | daemon    |   | daemon    |
-           |           |   |           |   |           |
-           | USB: YK5  |   | USB: HSM  |   | (none)   |
-           +-----------+   +-----------+   +-----------+
+Nomad is the core orchestrator. It handles job scheduling, fleet management, log streaming, health checks, retries, and metadata storage natively. There are only two custom components: the `co` CLI and a set of parameterized HCL job templates.
 
-    +-------+
-    |  CLI  |  <-- submit tasks, monitor, approve, manage fleet
-    +-------+
+```
+┌──────────┐                ┌──────────────────────────────────┐
+│  co CLI  │─── Nomad API ─▶│  Nomad Server  (co-dell-01)      │
+│  (laptop)│    :4646/v1    │                                  │
+│          │◀── HTTP ───────│  Schedules onto:                 │
+└──────────┘                │  ┌─────────┬─────────┬─────────┐ │
+     │                      │  │dell-01  │dell-02  │dell-03  │ │
+     │ Tailscale mesh       │  │client   │client   │client   │ │
+     │                      │  │peer6    │login2   │patch8   │ │
+     │                      │  │rule1    │         │threat10 │ │
+     │                      │  │         │USB: YK  │USB: HSM │ │
+     │                      │  └─────────┴─────────┴─────────┘ │
+     │                      │                                  │
+     │                      │  Built-in: scheduling, logs,     │
+     │                      │  health, drain, retry, UI, ACLs  │
+     └──────────────────────┴──────────────────────────────────┘
 ```
 
-Three components:
+- The `co` CLI runs on your laptop and talks to the Nomad HTTP API (port 4646) over Tailscale.
+- One Dell runs the Nomad server in single-server mode (`bootstrap_expect = 1`).
+- All Dells (including the server) run Nomad clients.
+- Each Dell has projects cloned locally and optionally has USB devices attached.
+- No custom API, no Redis, no message queue -- just Nomad.
 
-1. **API** -- Hono on Cloudflare Workers (or self-hosted). Task queue backed by BullMQ/Redis. Device registry tracks which runners have which hardware attached. Cloudflare Access handles authentication.
+## How It Works
 
-2. **Runner fleet** -- Dell 5070 thin clients running Linux. Each runs a worker daemon that polls for tasks, spawns coding agent CLIs (Claude Code, Crush, etc.), and manages USB devices. Connected via Tailscale mesh VPN.
+1. You run `co run peer6 "implement feature X"` from your laptop.
+2. The `co` CLI templates a Nomad parameterized job dispatch with your parameters.
+3. Nomad schedules it onto an available Dell that has `peer6` cloned (via node metadata constraints).
+4. Nomad's `raw_exec` driver runs the coding agent CLI (Crush, Claude Code, etc.) directly on the host.
+5. You stream logs with `co logs <job-id>` (wraps `nomad alloc logs -f`).
+6. On completion, results are committed to a branch and optionally a draft PR is created.
 
-3. **CLI** -- Local tool for submitting tasks, monitoring progress, approving actions, and managing the fleet.
+## What Nomad Gives Us For Free
 
-## Key Design Principles
+| Need | Before (Custom) | Now (Nomad) |
+|------|-----------------|-------------|
+| Task queue | BullMQ + Redis | Nomad job dispatch |
+| Worker daemon | Custom TypeScript daemon | Nomad client (raw_exec) |
+| Fleet health | Custom heartbeat | Nomad node health |
+| Log streaming | Custom Redis pub/sub | `GET /v1/client/fs/logs?follow=true` |
+| Job cancellation | Custom signal handling | `DELETE /v1/job/:id` |
+| Retry/restart | Custom logic | Nomad restart policies |
+| Fleet drain | Custom drain logic | `POST /v1/node/:id/drain` |
+| Metadata storage | D1/SQLite | Nomad Variables (encrypted) |
+| Monitoring UI | Bull Board | Nomad UI (:4646/ui) |
+| Auth | CF Access / API keys | Nomad ACL tokens |
+| Device routing | Custom queue-per-device | Node metadata + constraints |
 
-- **Agent-agnostic.** Runtime adapters normalize the interface across Claude Code, Crush, Aider, and others. Adding a new agent means writing one adapter, not changing the orchestrator.
-- **Device-aware.** Tasks can declare required USB devices (e.g., a YubiKey for signing, an HSM for key operations). The scheduler routes tasks to runners that have the hardware attached.
-- **Off-the-shelf where possible.** BullMQ for queuing, Tailscale for networking, Ansible for provisioning, udev for device detection, flock for locking. Custom code is roughly 500 lines of glue.
-- **Fail-closed.** Runners pause execution if they lose contact with the API. No autonomous work without a functioning control plane.
-- **Audit everything.** Every tool call, file write, and shell command executed by an agent is logged and attributable to a task.
+## CLI Commands
+
+```
+co run <project> "<prompt>"     Submit a task
+  --runtime crush|claude|aider  Runtime (default: crush)
+  --model <provider/model>      Model (default: per-project config)
+  --mode implement|test|review  Task mode
+  --needs <device-type>         Require a USB device
+  --budget <usd>                Cost cap
+  --priority low|normal|high    Priority
+
+co status                       List all active tasks
+co logs <job-id>                Stream task output
+co stop <job-id>                Cancel a running task
+co continue <job-id> "<prompt>" Resume with new instructions
+co runners                      Fleet overview
+co drain <node>                 Drain a runner
+co activate <node>              Reactivate a runner
+co devices                      Device inventory
+co cost [--period day|week|month] Cost report
+```
+
+The `co` CLI is roughly 200 lines of TypeScript -- a thin wrapper around Nomad's HTTP API with opinionated defaults.
 
 ## Supported Runtimes
 
-| Runtime            | Headless CLI           | Structured Output              | Session Resume       | Multi-provider |
-|--------------------|------------------------|--------------------------------|----------------------|----------------|
-| Crush (OpenCode)   | `crush run "..."`      | JSON                           | `--session {id}`     | 15+ providers  |
-| Claude Code        | `claude -p "..."`      | `--output-format stream-json`  | `--resume {id}`      | Anthropic only |
-| Aider              | `aider --message "..."` | Limited                       | Limited              | Multi-provider |
+| Runtime | Headless CLI | Structured Output | Session Resume | Multi-provider |
+|---|---|---|---|---|
+| Crush (OpenCode) | `crush run "..."` | JSON | `--session {id}` | 15+ providers |
+| Claude Code | `claude -p "..."` | `--output-format stream-json` | `--resume {id}` | Anthropic only |
+| Aider | `aider --message "..."` | Limited | Limited | Multi-provider |
+
+## Key Design Principles
+
+- **Agent-agnostic.** Runtime adapters normalize the interface across coding agents. Adding a new agent means writing one adapter script, not changing the orchestrator.
+- **Device-aware.** Tasks can declare required USB devices (e.g., a YubiKey for signing, an HSM for key operations). Nomad routes tasks to nodes with matching metadata.
+- **Off-the-shelf where possible.** Nomad for orchestration, Tailscale for networking, Ansible for provisioning, udev for device detection. Custom code is roughly 200 lines of CLI glue.
+- **Fail-closed.** Runners stop accepting work if Nomad marks them unhealthy. No autonomous work without a functioning control plane.
+- **Audit everything.** Every tool call, file write, and shell command executed by an agent is logged and attributable to a task via Nomad's allocation logs.
 
 ## Project Structure
 
 ```
 code-orchestration/
   docs/
-    architecture.md        # Component deep-dive, technology choices
-    use-cases.md           # Concrete scenarios and workflows
-    data-flows.md          # Sequence diagrams for every operation
-    runtime-adapters.md    # How coding agents are integrated
-    device-management.md   # USB devices, udev, locking, health checks
-    deployment.md          # Dell 5070 setup, Ansible, networking
-  src/
-    runner/                # Worker daemon
-    api/                   # Hono API
-    cli/                   # CLI tool
-    adapters/              # Runtime adapters
-  ansible/                 # Fleet provisioning playbooks
+    architecture.md              # Component deep-dive, Nomad configuration
+    use-cases.md                 # Concrete scenarios and workflows
+    data-flows.md                # Sequence diagrams for every operation
+    runtime-adapters.md          # How coding agents are integrated
+    device-management.md         # USB devices, udev, locking, health checks
+    deployment.md                # Dell 5070 setup, Ansible, networking
+  jobs/
+    run-coding-agent.nomad.hcl   # Parameterized job template
+    scripts/
+      run-agent.sh               # Runtime adapter entry point
+  cli/                           # co CLI source
+  ansible/                       # Fleet provisioning playbooks
   README.md
 ```
 
 ## Status
 
-Design phase. The architecture is documented and the component boundaries are defined. See `docs/` for detailed architecture, data flows, and deployment plans. No implementation code yet.
+Design phase. See `docs/` for detailed architecture and data flows.

@@ -1,8 +1,8 @@
 # code-orchestration Architecture
 
-Agent-agnostic autonomous coding orchestrator for physical runner fleets.
+Nomad-based autonomous coding orchestrator for physical runner fleets.
 
-Version: 0.1.0 (draft)
+Version: 0.2.0
 Last updated: 2026-03-22
 
 ---
@@ -10,1540 +10,484 @@ Last updated: 2026-03-22
 ## Table of Contents
 
 1. [System Overview](#1-system-overview)
-2. [API / Control Plane](#2-api--control-plane)
-3. [Runner / Worker Daemon](#3-runner--worker-daemon)
-4. [CLI](#4-cli)
-5. [Technology Choices](#5-technology-choices)
-6. [Security Model](#6-security-model)
-7. [Cost Control](#7-cost-control)
-8. [Scaling Path](#8-scaling-path)
+2. [Nomad Configuration](#2-nomad-configuration)
+3. [Parameterized Job Template](#3-parameterized-job-template)
+4. [Runtime Adapter Script](#4-runtime-adapter-script)
+5. [`co` CLI Design](#5-co-cli-design)
+6. [Nomad Variables for State](#6-nomad-variables-for-state)
+7. [Technology Choices](#7-technology-choices)
+8. [Security Model](#8-security-model)
+9. [Scaling Path](#9-scaling-path)
+10. [What We Don't Build](#10-what-we-dont-build)
 
 ---
 
 ## 1. System Overview
 
-The system consists of three components:
+The system has two custom components and several off-the-shelf tools. Nomad does the heavy lifting -- scheduling, fleet management, log streaming, health checks, restart policies, drain logic, a built-in web UI, and encrypted key-value storage. We add a thin CLI for ergonomics and a shell script adapter for runtime execution.
 
-- **API (Control Plane)** -- accepts work, manages state, routes tasks to runners.
-- **Runner Fleet (Execution)** -- Dell 5070 thin clients that pull tasks, execute coding agents, and report results.
-- **CLI (Human Interface)** -- command-line tool for submitting tasks, monitoring progress, and managing the fleet.
+### Custom Components
+
+- **`co` CLI** -- a thin TypeScript wrapper around Nomad's HTTP API. Roughly 200 lines. It provides ergonomic defaults, prompt templating, and cost aggregation. It does not contain business logic that Nomad already handles.
+- **Job templates** -- parameterized HCL job specs and a runtime adapter shell script (`run-agent.sh`) that wires up git worktrees, coding agent binaries, and post-run cleanup.
+
+### Off-the-Shelf
+
+- **Nomad** -- orchestration, scheduling, fleet management, log streaming, metadata, web UI, ACLs, encrypted variables, restart policies, node drain. Single Go binary. This replaces the custom API, BullMQ, Redis, the worker daemon, Bull Board, and the cost database.
+- **Tailscale** -- encrypted WireGuard mesh networking between all nodes and the operator's laptop. Zero config, no port forwarding.
+- **Ansible** -- fleet provisioning. Installs Nomad, coding agent runtimes, udev rules, clones project repos. Agentless, runs over SSH.
+- **udev + flock** -- Linux-native device naming (stable `/dev/yubikey-1` symlinks) and POSIX file locking for exclusive device access.
 
 ### Architecture Diagram
 
 ```
-                          +---------------------------+
-                          |       Human Operator      |
-                          +---------------------------+
-                                      |
-                                      | co run / co status / co logs
-                                      v
+                        +---------------------------+
+                        |       Human Operator      |
+                        |       (laptop)            |
+                        +---------------------------+
+                                    |
+                                    | co run / co status / co logs
+                                    | (HTTP to Nomad API via Tailscale)
+                                    v
 +-----------------------------------------------------------------------+
-|                          CLI  (co)                                     |
-|  TypeScript, npx code-orchestration or global install                 |
-|  Talks to API over HTTPS. Streams logs via WebSocket.                 |
+|                         co CLI (~200 lines TS)                        |
+|  Thin wrapper: translates commands to Nomad HTTP API calls.           |
+|  No server process. No database. Just a script.                       |
 +-----------------------------------------------------------------------+
-            |                    |                    |
-            | POST /tasks       | GET /tasks/:id     | WS /tasks/:id/stream
-            | POST /approve     | GET /runners       |
-            v                    v                    v
+                                    |
+                                    | Nomad HTTP API (:4646)
+                                    | via Tailscale mesh
+                                    v
 +-----------------------------------------------------------------------+
-|                     API / Control Plane                                |
 |                                                                       |
-|  Hono (Cloudflare Workers or self-hosted Node on Dell)                |
+|                    Nomad Server + Client                              |
+|                    (co-dell-01.tailnet)                                |
 |                                                                       |
-|  +-------------------+  +------------------+  +-------------------+   |
-|  |   REST Endpoints  |  |   Bull Board UI  |  |  Audit / Cost DB  |   |
-|  |   (task, runner,  |  |   :3001/queues   |  |  (D1 or SQLite)   |   |
-|  |    device mgmt)   |  |                  |  |                   |   |
-|  +-------------------+  +------------------+  +-------------------+   |
-|           |                      |                      |             |
-|           +----------+-----------+----------------------+             |
-|                      |                                                |
-|              +-------v--------+                                       |
-|              |  BullMQ + Redis |                                      |
-|              |  Task Queues   |                                       |
-|              |  Pub/Sub       |                                       |
-|              +-------+--------+                                       |
+|  +------------------+  +------------------+  +-------------------+    |
+|  |  Job Scheduler   |  |   Nomad Web UI   |  | Nomad Variables   |    |
+|  |  Parameterized   |  |   :4646/ui       |  | (encrypted KV)    |    |
+|  |  batch dispatch  |  |                  |  | cost, sessions    |    |
+|  +------------------+  +------------------+  +-------------------+    |
+|                                                                       |
+|  Also runs as client: executes jobs locally via raw_exec              |
+|  meta: project_peer6=true, project_rule1=true                         |
 +-----------------------------------------------------------------------+
-                       |
-                       | Queue consumption (outbound poll)
-                       | Heartbeat POST every 30s
-                       | Result POST on completion
-                       | Redis pub/sub for live streaming
-                       |
-         +-------------+-------------+
-         |             |             |
-         v             v             v
-+----------------+ +----------------+ +----------------+
-|   Runner 01    | |   Runner 02    | |   Runner 03    |
-|   Dell 5070    | |   Dell 5070    | |   Dell 5070    |
-|                | |                | |                |
-| systemd daemon | | systemd daemon | | systemd daemon |
-| BullMQ worker  | | BullMQ worker  | | BullMQ worker  |
-|                | |                | |                |
-| Projects:      | | Projects:      | | Projects:      |
-|  - peer6       | |  - rule1       | |  - peer6       |
-|  - login2      | |  - threat10    | |  - login2      |
-|                | |                | |                |
-| Devices:       | | Devices:       | | Devices:       |
-|  - YubiKey 5   | |  - (none)      | |  - Arduino Uno |
-|  - Flipper Zero| |                | |  - Bus Pirate  |
-+----------------+ +----------------+ +----------------+
-        |                                     |
-        | /dev/ttyUSB0 (udev named)           | /dev/ttyUSB0
-        v                                     v
-  +-----------+                         +-----------+
-  | YubiKey 5 |                         |Arduino Uno|
-  | Flipper   |                         |Bus Pirate |
-  +-----------+                         +-----------+
+         |                                           |
+         | Nomad client protocol                     | Nomad client protocol
+         | (via Tailscale)                           | (via Tailscale)
+         v                                           v
++------------------------+                +------------------------+
+|   co-dell-02           |                |   co-dell-03           |
+|   Nomad Client         |                |   Nomad Client         |
+|                        |                |                        |
+|   raw_exec driver      |                |   raw_exec driver      |
+|   run-agent.sh         |                |   run-agent.sh         |
+|                        |                |                        |
+|   meta:                |                |   meta:                |
+|     project_login2     |                |     project_peer6      |
+|     device_yubikey     |                |     project_login2     |
+|     device_yubikey_    |                |                        |
+|       path=/dev/       |                |                        |
+|       yubikey-1        |                |                        |
++------------------------+                +------------------------+
+         |
+         v
+   +-----------+
+   | YubiKey 5 |
+   | /dev/     |
+   | yubikey-1 |
+   +-----------+
 ```
 
-### Data Flow
-
-```
-1. Human runs:       co run peer6 "add rate limiting to API" --budget 2.00
-
-2. CLI sends:        POST /tasks
-                     {project: "peer6", prompt: "...", budget: 2.00, runtime: "crush"}
-
-3. API:              Validates budget against caps
-                     Enqueues to BullMQ queue "tasks:peer6"
-                     Returns task ID to CLI
-
-4. Runner 01:        Consuming queue "tasks:peer6"
-                     Picks up task
-                     git pull peer6 repo
-                     git worktree add .worktrees/task-abc123
-                     Spawns: crush --prompt "..." --max-budget-usd 2.00
-                     Streams stdout -> Redis pub/sub channel "task:abc123:output"
-
-5. CLI (streaming):  WS /tasks/abc123/stream
-                     API subscribes to Redis pub/sub "task:abc123:output"
-                     Forwards frames to CLI over WebSocket
-
-6. Runner 01:        Agent completes
-                     git add -A && git commit
-                     git push origin task/abc123
-                     POST /tasks/abc123/result {status: "complete", cost: 1.47, branch: "task/abc123"}
-
-7. API:              Updates task record
-                     Sends notification via ntfy.sh
-                     CLI shows: "Task abc123 complete. Cost: $1.47. Branch: task/abc123"
-```
-
-### Network Topology
-
-```
-+------------------------------------------------------------------+
-|                        Tailscale Mesh                            |
-|                                                                  |
-|  dell-01.ts.net  <------>  dell-02.ts.net  <------>  dell-03.ts.net  |
-|       |                        |                        |        |
-|       +------------------------+------------------------+        |
-|                                |                                 |
-|                        redis.ts.net:6379                         |
-|                        (runs on dell-01)                         |
-|                                                                  |
-|  Operator laptop:  operator.ts.net                               |
-|       SSH to any runner, CLI to API                              |
-+------------------------------------------------------------------+
-                                |
-                                | HTTPS (outbound only)
-                                v
-                   +------------------------+
-                   |   API on Cloudflare    |
-                   |   Workers (or on a     |
-                   |   Dell via Tailscale)  |
-                   +------------------------+
-```
+The entire backend is Nomad. There is no custom API server, no message queue, no database server. The CLI talks directly to the Nomad HTTP API. Nomad schedules work onto the Dell fleet based on node metadata constraints, streams logs, manages retries, and provides a web UI for visibility.
 
 ---
 
-## 2. API / Control Plane
+## 2. Nomad Configuration
 
-### Runtime
+Each Dell runs a single Nomad agent. One node (co-dell-01) acts as both server and client. The others are client-only, joining the server over the Tailscale mesh.
 
-Two deployment options (choose one):
+### Server (co-dell-01)
 
-1. **Cloudflare Workers** -- zero ops, global edge, free tier covers low volume. D1 for storage.
-2. **Self-hosted on Dell** -- Node.js 22 LTS, runs on one of the fleet Dells. SQLite for storage. Lower latency to Redis (same machine or same Tailscale mesh).
+```hcl
+data_dir = "/opt/nomad/data"
 
-For v1, self-hosted on Dell is simpler: everything on the same Tailscale network, no CORS issues, Redis is local.
+server {
+  enabled          = true
+  bootstrap_expect = 1  # single server, fine for this scale
+}
 
-### Framework
+client {
+  enabled = true
+  meta {
+    "project_peer6" = "true"
+    "project_rule1" = "true"
+  }
+}
 
-Hono 4.x. Already in use across peer6 (apps/api) and login2. Runs identically on Workers and Node.
-
-```typescript
-// src/api.ts
-import { Hono } from "hono";
-import { bearerAuth } from "hono/bearer-auth";
-
-const app = new Hono();
-
-app.use("/api/*", bearerAuth({ token: process.env.API_KEY }));
-
-// Mount route groups
-app.route("/api/tasks", taskRoutes);
-app.route("/api/runners", runnerRoutes);
-app.route("/api/devices", deviceRoutes);
-app.route("/api/audit", auditRoutes);
-```
-
-### Task Queue
-
-BullMQ 5.x with Redis 7.x (or Valkey). Named queues per project and per capability:
-
-```
-tasks:peer6          -- tasks targeting the peer6 project
-tasks:login2         -- tasks targeting login2
-tasks:rule1          -- tasks targeting rule1
-tasks:needs-yubikey  -- tasks requiring a YubiKey
-tasks:needs-serial   -- tasks requiring any serial device
-tasks:general        -- catch-all
-```
-
-Queue configuration:
-
-```typescript
-import { Queue } from "bullmq";
-
-const taskQueue = new Queue("tasks:peer6", {
-  connection: { host: "redis.ts.net", port: 6379 },
-  defaultJobOptions: {
-    attempts: 1,           // coding tasks are not idempotent -- no auto-retry
-    backoff: undefined,
-    removeOnComplete: 100, // keep last 100 completed for inspection
-    removeOnFail: 200,     // keep last 200 failed for debugging
-  },
-});
-```
-
-Priority levels map to BullMQ's numeric priorities (lower number = higher priority):
-
-```typescript
-const PRIORITY_MAP = {
-  critical: 1,
-  high: 2,
-  normal: 3,
-  low: 4,
-} as const;
-```
-
-### Queue Monitoring
-
-Bull Board 6.x mounted on the API:
-
-```typescript
-import { createBullBoard } from "@bull-board/api";
-import { BullMQAdapter } from "@bull-board/api/bullMQAdapter";
-import { HonoAdapter } from "@bull-board/hono";
-
-const serverAdapter = new HonoAdapter("/ui/queues");
-
-createBullBoard({
-  queues: [
-    new BullMQAdapter(peer6Queue),
-    new BullMQAdapter(login2Queue),
-    new BullMQAdapter(generalQueue),
-  ],
-  serverAdapter,
-});
-
-app.route("/ui", serverAdapter.registerPlugin());
-```
-
-Accessible at `https://api.ts.net:3000/ui/queues`. Protected by the same auth layer as the API.
-
-### Persistent Storage
-
-D1 (if on Workers) or SQLite via better-sqlite3 (if self-hosted). Schema:
-
-```sql
--- Runner registry
-CREATE TABLE runners (
-  id            TEXT PRIMARY KEY,         -- hostname, e.g. "dell-01"
-  tailscale_ip  TEXT NOT NULL,
-  projects      TEXT NOT NULL,            -- JSON array: ["peer6", "login2"]
-  devices       TEXT NOT NULL DEFAULT '[]', -- JSON array of attached devices
-  tags          TEXT NOT NULL DEFAULT '[]', -- JSON array of capability tags
-  status        TEXT NOT NULL DEFAULT 'active', -- active | draining | maintenance
-  last_heartbeat INTEGER NOT NULL,        -- unix timestamp
-  current_task  TEXT,                     -- task ID or null
-  created_at    INTEGER NOT NULL DEFAULT (unixepoch()),
-  updated_at    INTEGER NOT NULL DEFAULT (unixepoch())
-);
-
--- Task log
-CREATE TABLE tasks (
-  id            TEXT PRIMARY KEY,         -- ulid
-  project       TEXT NOT NULL,
-  prompt        TEXT NOT NULL,
-  runtime       TEXT NOT NULL DEFAULT 'crush',
-  model         TEXT,
-  mode          TEXT NOT NULL DEFAULT 'implement',
-  runner_id     TEXT,
-  queue         TEXT NOT NULL,
-  priority      INTEGER NOT NULL DEFAULT 3,
-  status        TEXT NOT NULL DEFAULT 'queued',
-    -- queued | running | paused | complete | failed | cancelled
-  budget_usd    REAL,
-  cost_usd      REAL,
-  branch        TEXT,
-  pr_url        TEXT,
-  error         TEXT,
-  output        TEXT,                     -- final output (truncated if large)
-  started_at    INTEGER,
-  completed_at  INTEGER,
-  created_at    INTEGER NOT NULL DEFAULT (unixepoch()),
-  updated_at    INTEGER NOT NULL DEFAULT (unixepoch())
-);
-
--- Audit log (append-only)
-CREATE TABLE audit_log (
-  id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  timestamp     INTEGER NOT NULL DEFAULT (unixepoch()),
-  runner_id     TEXT NOT NULL,
-  task_id       TEXT NOT NULL,
-  event_type    TEXT NOT NULL,            -- tool_call | approval_request | completion | error
-  tool_name     TEXT,
-  input         TEXT,                     -- JSON, truncated at 4KB
-  output        TEXT,                     -- JSON, truncated at 4KB
-  cost_usd      REAL
-);
-
--- Cost tracking (materialized from tasks, updated on completion)
-CREATE TABLE cost_daily (
-  date          TEXT NOT NULL,            -- YYYY-MM-DD
-  project       TEXT NOT NULL,
-  runner_id     TEXT NOT NULL,
-  total_usd     REAL NOT NULL DEFAULT 0,
-  task_count    INTEGER NOT NULL DEFAULT 0,
-  PRIMARY KEY (date, project, runner_id)
-);
-
--- Device inventory
-CREATE TABLE devices (
-  id            TEXT PRIMARY KEY,         -- "dell-01:yubikey-5"
-  runner_id     TEXT NOT NULL,
-  device_type   TEXT NOT NULL,            -- yubikey | flipper | arduino | bus-pirate | serial
-  dev_path      TEXT NOT NULL,            -- /dev/yubikey0, /dev/flipper0
-  udev_serial   TEXT,                     -- USB serial for stable identification
-  status        TEXT NOT NULL DEFAULT 'available', -- available | in-use | disconnected
-  last_seen     INTEGER NOT NULL,
-  FOREIGN KEY (runner_id) REFERENCES runners(id)
-);
-
-CREATE INDEX idx_tasks_project ON tasks(project);
-CREATE INDEX idx_tasks_status ON tasks(status);
-CREATE INDEX idx_tasks_runner ON tasks(runner_id);
-CREATE INDEX idx_audit_task ON audit_log(task_id);
-CREATE INDEX idx_audit_runner ON audit_log(runner_id);
-CREATE INDEX idx_cost_date ON cost_daily(date);
-```
-
-### API Endpoints
-
-#### Tasks
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/api/tasks` | Submit a new task |
-| `GET` | `/api/tasks` | List tasks (query: `?project=peer6&status=running&runner=dell-01&limit=50&offset=0`) |
-| `GET` | `/api/tasks/:id` | Task detail including output |
-| `GET` | `/api/tasks/:id/stream` | WebSocket: live output stream |
-| `POST` | `/api/tasks/:id/approve` | Approve a paused agent action |
-| `POST` | `/api/tasks/:id/deny` | Deny a paused agent action |
-| `POST` | `/api/tasks/:id/cancel` | Cancel a running task (sends SIGTERM to agent process) |
-| `POST` | `/api/tasks/:id/continue` | Resume a completed session with a new prompt (body: `{prompt}`) |
-
-**POST /tasks request body:**
-
-```json
-{
-  "project": "peer6",
-  "prompt": "Add rate limiting middleware to the Hono API using sliding window algorithm",
-  "runtime": "crush",
-  "model": "anthropic/claude-sonnet-4-20250514",
-  "mode": "implement",
-  "runner": null,
-  "needs": null,
-  "budget": 2.00,
-  "priority": "normal"
+plugin "raw_exec" {
+  config {
+    enabled = true
+  }
 }
 ```
 
-**POST /tasks response:**
+This node bootstraps a single-node Raft cluster and also participates as a client, running jobs alongside the other Dells. The `bootstrap_expect = 1` configuration is appropriate for this scale; upgrading to a 3-node Raft cluster is straightforward if HA becomes necessary (see [Scaling Path](#9-scaling-path)).
 
-```json
-{
-  "id": "01J5K9XYZABC123",
-  "status": "queued",
-  "queue": "tasks:peer6",
-  "position": 3,
-  "estimatedStart": null
+### Client-only (co-dell-02, co-dell-03)
+
+```hcl
+data_dir = "/opt/nomad/data"
+
+server {
+  enabled = false
+}
+
+client {
+  enabled = true
+  servers = ["co-dell-01.tailnet:4646"]
+  meta {
+    "project_login2"       = "true"
+    "device_yubikey"       = "true"
+    "device_yubikey_path"  = "/dev/yubikey-1"
+  }
+}
+
+plugin "raw_exec" {
+  config {
+    enabled = true
+  }
 }
 ```
 
-#### Runners
+### Node Metadata
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/runners` | List all runners with status, current task, devices |
-| `GET` | `/api/runners/:id` | Runner detail: projects, devices, load, recent tasks |
-| `POST` | `/api/runners/:id/drain` | Stop accepting new tasks (finish current) |
-| `POST` | `/api/runners/:id/maintenance` | Mark offline for maintenance |
-| `POST` | `/api/runners/:id/activate` | Return to active status |
+Node metadata is the routing mechanism. Each Dell advertises two categories of information:
 
-#### Devices
+- **Project availability** (`project_<name> = "true"`) -- which project repositories are cloned and ready on this node. When a job is dispatched for `peer6`, Nomad's constraint system ensures it lands on a node where `project_peer6 = "true"`.
+- **Device availability** (`device_<type> = "true"`, `device_<type>_path = "/dev/..."`) -- which USB/serial devices are attached. Jobs that require a specific device (e.g., YubiKey for FIDO2 testing) are routed to nodes that have one.
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/devices` | All devices across fleet (query: `?type=yubikey&status=available`) |
-| `GET` | `/api/devices/:id` | Device detail |
-
-#### Operational
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/audit` | Audit log (query: `?task=X&runner=Y&from=ts&to=ts&limit=100`) |
-| `GET` | `/api/cost` | Cost summary (query: `?period=day&project=peer6&from=2026-03-01`) |
-| `GET` | `/api/health` | API health check |
-
-#### Internal (Runner-to-API)
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/internal/runners/register` | Runner self-registration on boot |
-| `POST` | `/internal/runners/:id/heartbeat` | Heartbeat with status update |
-| `POST` | `/internal/tasks/:id/started` | Runner reports task pickup |
-| `POST` | `/internal/tasks/:id/result` | Runner reports task completion |
-| `POST` | `/internal/tasks/:id/audit` | Runner pushes audit events |
-
-Internal endpoints use a separate runner API key, distinct from the operator API key.
-
-### Live Output Streaming
-
-```
-Runner                     Redis                      API                       CLI
-  |                          |                          |                        |
-  | PUBLISH task:abc:output  |                          |                        |
-  | "line of agent stdout"   |                          |                        |
-  |------------------------->|                          |                        |
-  |                          | SUBSCRIBE task:abc:output|                        |
-  |                          |<-------------------------|                        |
-  |                          |                          |                        |
-  |                          | message                  |                        |
-  |                          |------------------------->|                        |
-  |                          |                          | WS frame               |
-  |                          |                          |----------------------->|
-  |                          |                          |                        |
-```
-
-The API subscribes to the Redis pub/sub channel when a WebSocket client connects. When the client disconnects, the subscription is dropped. Output is also buffered to a Redis list (`task:abc:buffer`) for late joiners who need to catch up.
+Metadata is declared statically in the Nomad config and updated via Ansible when the fleet topology changes (new project cloned, device moved between nodes). Nomad supports runtime metadata updates via the API as well, which could be used for dynamic device hotplug detection in the future.
 
 ---
 
-## 3. Runner / Worker Daemon
+## 3. Parameterized Job Template
 
-### Process Model
+This is the core of the system. One parameterized job template handles all coding agent dispatches. When the `co` CLI dispatches a task, Nomad creates a child job from this template with the supplied parameters and routes it to an appropriate node.
 
-Each Dell 5070 runs a single TypeScript daemon process managed by systemd:
+### Job Spec
 
-```ini
-# /etc/systemd/system/code-orchestration-runner.service
-[Unit]
-Description=code-orchestration runner daemon
-After=network-online.target tailscaled.service
-Wants=network-online.target
+```hcl
+job "run-coding-agent" {
+  type = "batch"
 
-[Service]
-Type=simple
-User=runner
-Group=runner
-WorkingDirectory=/opt/code-orchestration
-ExecStart=/usr/bin/node --import tsx/esm src/runner/daemon.ts
-Restart=on-failure
-RestartSec=10
-TimeoutStopSec=300
-# Give 5 minutes for current task to finish on stop
-KillSignal=SIGTERM
+  parameterized {
+    payload       = "required"        # prompt text, can be large
+    meta_required = ["project", "runtime", "model"]
+    meta_optional = ["mode", "budget", "session_id", "needs_device"]
+  }
 
-# Security hardening
-NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=/opt/code-orchestration /home/runner/projects
-PrivateTmp=true
+  # Route to a node that has the project
+  constraint {
+    attribute = "${meta.project_${NOMAD_META_project}}"
+    value     = "true"
+  }
 
-# Environment
-EnvironmentFile=/opt/code-orchestration/.env
+  group "agent" {
+    task "execute" {
+      driver = "raw_exec"
 
-[Install]
-WantedBy=multi-user.target
-```
+      config {
+        command = "/opt/code-orchestration/scripts/run-agent.sh"
+        args    = []  # all config via env vars from meta
+      }
 
-### Daemon Lifecycle
+      dispatch_payload {
+        file = "prompt.txt"
+      }
 
-```
-                          Boot
-                           |
-                           v
-                  +------------------+
-                  |  Load config     |
-                  |  (.env, runner   |
-                  |   manifest)      |
-                  +--------+---------+
-                           |
-                           v
-                  +------------------+
-                  |  Self-register   |
-                  |  POST /internal/ |
-                  |  runners/register|
-                  +--------+---------+
-                           |
-                           v
-                  +------------------+
-                  |  Connect Redis   |
-                  |  Start BullMQ    |
-                  |  Worker          |
-                  +--------+---------+
-                           |
-                           v
-            +--------------+--------------+
-            |                             |
-            v                             v
-   +------------------+        +------------------+
-   |  Consume tasks   |        |  Heartbeat loop  |
-   |  from subscribed |        |  every 30s       |
-   |  queues          |        |                  |
-   +--------+---------+        +------------------+
-            |                             |
-            v                             v
-   +------------------+        +------------------+
-   |  Process task    |        |  Device health   |
-   |  (see below)     |        |  check every 60s |
-   +--------+---------+        +------------------+
-            |
-            v
-   +------------------+
-   |  Report result   |
-   |  POST /internal/ |
-   |  tasks/:id/result|
-   +------------------+
-            |
-            v
-   (back to consume)
+      env {
+        CO_PROJECT    = "${NOMAD_META_project}"
+        CO_RUNTIME    = "${NOMAD_META_runtime}"
+        CO_MODEL      = "${NOMAD_META_model}"
+        CO_MODE       = "${NOMAD_META_mode}"
+        CO_BUDGET     = "${NOMAD_META_budget}"
+        CO_SESSION_ID = "${NOMAD_META_session_id}"
+        CO_PROMPT_FILE = "${NOMAD_TASK_DIR}/prompt.txt"
+      }
 
+      resources {
+        cpu    = 500
+        memory = 512
+      }
 
-   SIGTERM received:
-            |
-            v
-   +------------------+
-   |  Stop consuming  |
-   |  new tasks       |
-   +------------------+
-            |
-            v
-   +------------------+
-   |  Wait for current|
-   |  task to finish  |
-   |  (up to 5 min)   |
-   +------------------+
-            |
-            v
-   +------------------+
-   |  Deregister      |
-   |  Disconnect      |
-   |  Exit 0          |
-   +------------------+
-```
-
-### Runner Configuration
-
-Each runner has a manifest file declaring what it can do:
-
-```yaml
-# /opt/code-orchestration/runner.yaml
-runner:
-  id: dell-01
-  hostname: dell-01.ts.net
-
-projects:
-  peer6:
-    repo: git@github.com:link42/peer6.git
-    path: /home/runner/projects/peer6
-    branch: main
-  login2:
-    repo: git@github.com:link42/login2.git
-    path: /home/runner/projects/login2
-    branch: main
-
-queues:
-  - tasks:peer6
-  - tasks:login2
-  - tasks:needs-yubikey    # because this runner has a YubiKey
-  - tasks:general
-
-devices:
-  - type: yubikey
-    udev_name: yubikey0     # /dev/yubikey0 via udev rule
-    serial: "12345678"
-  - type: flipper
-    udev_name: flipper0
-    serial: "FLIP-ABCD"
-
-concurrency: 1              # one task at a time (thin client constraint)
-
-runtimes:
-  crush:
-    command: crush
-    args: ["--non-interactive"]
-  claude:
-    command: claude
-    args: ["--dangerously-skip-permissions"]
-  aider:
-    command: aider
-    args: ["--yes-always"]
-```
-
-### Task Execution Flow
-
-When the BullMQ worker picks up a task:
-
-```typescript
-async function processTask(job: Job<TaskPayload>): Promise<TaskResult> {
-  const { project, prompt, runtime, model, mode, budget } = job.data;
-  const config = loadProjectConfig(project);
-
-  // 1. Ensure latest code
-  await execAsync(`git -C ${config.path} fetch origin`);
-  await execAsync(`git -C ${config.path} reset --hard origin/${config.branch}`);
-
-  // 2. Create isolated worktree
-  const worktreePath = `${config.path}/.worktrees/${job.id}`;
-  const branchName = `task/${job.id}`;
-  await execAsync(
-    `git -C ${config.path} worktree add ${worktreePath} -b ${branchName}`
-  );
-
-  try {
-    // 3. Select runtime adapter
-    const adapter = getAdapter(runtime); // crush | claude | aider
-
-    // 4. Spawn agent process
-    const result = await adapter.run({
-      cwd: worktreePath,
-      prompt,
-      model,
-      mode,
-      budget,
-      onOutput: (line: string) => {
-        // Stream to Redis pub/sub
-        redis.publish(`task:${job.id}:output`, line);
-        // Buffer for late joiners
-        redis.rpush(`task:${job.id}:buffer`, line);
-      },
-      onApprovalNeeded: async (action: string) => {
-        // Pause and wait for human approval via API
-        await requestApproval(job.id, action);
-      },
-    });
-
-    // 5. Commit and push
-    await execAsync(`git -C ${worktreePath} add -A`);
-    await execAsync(
-      `git -C ${worktreePath} commit -m "task(${job.id}): ${truncate(prompt, 72)}" --allow-empty`
-    );
-    await execAsync(`git -C ${worktreePath} push origin ${branchName}`);
-
-    // 6. Optionally create draft PR
-    if (result.filesChanged > 0) {
-      const prUrl = await createDraftPR(config, branchName, prompt, job.id);
-      result.prUrl = prUrl;
+      restart {
+        attempts = 2
+        delay    = "30s"
+        mode     = "fail"
+      }
     }
-
-    return result;
-  } finally {
-    // 7. Clean up worktree
-    await execAsync(`git -C ${config.path} worktree remove ${worktreePath} --force`);
   }
 }
 ```
 
-### Runtime Adapters
+### How It Works
 
-Each coding agent CLI has an adapter that normalizes the interface:
+1. The operator runs `co run peer6 "Add pagination to the mentors list"`.
+2. The `co` CLI sends `POST /v1/job/run-coding-agent/dispatch` with meta `{project: "peer6", runtime: "claude-code", model: "sonnet"}` and the prompt as the payload.
+3. Nomad creates a child batch job (e.g., `run-coding-agent/dispatch-1711100000-abcdef`).
+4. The constraint `${meta.project_peer6} = "true"` routes the job to a node that has peer6 cloned.
+5. Nomad's `raw_exec` driver runs `/opt/code-orchestration/scripts/run-agent.sh` with the meta values injected as environment variables and the prompt written to `${NOMAD_TASK_DIR}/prompt.txt`.
+6. The task runs, stdout/stderr are captured by Nomad's log system, and the exit code determines success/failure.
+7. On failure, Nomad's restart policy retries up to 2 times with a 30-second delay.
 
-```typescript
-interface RuntimeAdapter {
-  name: string;
-  run(opts: RunOptions): Promise<RunResult>;
-  cancel(): Promise<void>;
-}
+### Constraint Interpolation Note
 
-interface RunOptions {
-  cwd: string;
-  prompt: string;
-  model?: string;
-  mode: "implement" | "test" | "review" | "analyze";
-  budget?: number;
-  onOutput: (line: string) => void;
-  onApprovalNeeded: (action: string) => Promise<boolean>;
-}
+Nomad's constraint interpolation has limits. The dynamic attribute `${meta.project_${NOMAD_META_project}}` relies on Nomad interpolating the meta value into the attribute path, which works in recent Nomad versions for parameterized jobs. If this proves unreliable in practice, there are two workarounds:
 
-interface RunResult {
-  status: "complete" | "failed" | "cancelled";
-  cost: number;
-  filesChanged: number;
-  summary: string;
-  prUrl?: string;
-}
+- **Dispatch-time constraint baking**: The `co` CLI generates a non-parameterized job spec on the fly with the constraint hardcoded (e.g., `attribute = "${meta.project_peer6}"`), submits it as a regular batch job, and deletes it after completion.
+- **Node pools**: Nomad Enterprise (or the OSS node pool feature in 1.6+) allows grouping nodes by project, avoiding dynamic constraint interpolation entirely.
+
+---
+
+## 4. Runtime Adapter Script
+
+The `run-agent.sh` script is what Nomad actually executes via `raw_exec`. It bridges the gap between Nomad's job dispatch and the coding agent binaries. All configuration arrives via environment variables set by the job template.
+
+### Script Outline
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+# --- 1. Read configuration from environment ---
+# CO_PROJECT, CO_RUNTIME, CO_MODEL, CO_MODE, CO_BUDGET,
+# CO_SESSION_ID, CO_PROMPT_FILE
+# NOMAD_ALLOC_ID, NOMAD_JOB_ID (set by Nomad automatically)
+
+# --- 2. Resolve project workspace ---
+PROJECT_DIR="/home/runner/workspaces/${CO_PROJECT}"
+cd "$PROJECT_DIR"
+
+# --- 3. Update source ---
+git fetch origin
+git checkout main
+git pull --ff-only
+
+# --- 4. Create isolated worktree ---
+BRANCH="co/${NOMAD_JOB_ID}"
+git worktree add "../worktrees/${BRANCH}" -b "$BRANCH"
+cd "../worktrees/${BRANCH}"
+
+# --- 5. Select runtime and build command ---
+# Maps CO_RUNTIME to binary path and constructs CLI arguments.
+# Supported runtimes: claude-code, codex, aider, goose, amp
+# Applies CO_MODEL, CO_MODE, CO_BUDGET as runtime-specific flags.
+# Reads prompt from CO_PROMPT_FILE.
+# If CO_SESSION_ID is set, passes --resume/--continue flag.
+
+# --- 6. Acquire device lock if needed ---
+# If CO_NEEDS_DEVICE is set, flock the device path before proceeding.
+
+# --- 7. Execute the coding agent ---
+# Runs the constructed command, inheriting stdout/stderr for Nomad log capture.
+
+# --- 8. Post-run: commit and push ---
+git add -A
+git commit -m "co: ${CO_PROJECT} - $(head -c 72 "$CO_PROMPT_FILE")" || true
+git push origin "$BRANCH"
+# Optionally: gh pr create --title "..." --body "..."
+
+# --- 9. Store cost/metadata in Nomad Variables ---
+# Parses cost from agent output (runtime-specific).
+# PUT /v1/var/cost/${NOMAD_JOB_ID} via curl to local Nomad agent.
+
+# --- 10. Notify ---
+# POST to ntfy.sh topic with job result summary.
+
+# --- 11. Cleanup ---
+cd "$PROJECT_DIR"
+git worktree remove "../worktrees/${BRANCH}" --force
 ```
 
-**Crush adapter** (example):
+### Key Design Decisions
 
-```typescript
-class CrushAdapter implements RuntimeAdapter {
-  name = "crush";
-  private proc?: ChildProcess;
+- **git worktree** for isolation instead of Docker containers. Each dispatched job gets its own worktree on a dedicated branch, so multiple jobs for the same project can run concurrently on the same node without interference. Native git, no container overhead.
+- **flock(1)** for device locking. If two jobs need the same YubiKey, the second one blocks on `flock` until the first releases it. POSIX standard, zero dependencies.
+- **Nomad log capture**. The script inherits Nomad's stdout/stderr capture, so all agent output is available via `nomad alloc logs` and the Nomad UI with no additional log infrastructure.
+- **Cost storage via Nomad Variables API**. The script writes cost metadata to Nomad's encrypted KV store using a `curl` call to the local agent's API. The `co cost` command aggregates these later.
 
-  async run(opts: RunOptions): Promise<RunResult> {
-    const args = [
-      "--non-interactive",
-      "--prompt", opts.prompt,
-    ];
+---
 
-    if (opts.model) args.push("--model", opts.model);
-    if (opts.budget) args.push("--max-budget-usd", String(opts.budget));
+## 5. `co` CLI Design
 
-    this.proc = spawn("crush", args, { cwd: opts.cwd });
+The `co` CLI is a thin TypeScript wrapper around Nomad's HTTP API. It exists to provide ergonomic defaults (project name aliases, default runtime/model, prompt templating) and to aggregate data that Nomad stores but doesn't present in the exact format we want (e.g., cost rollups). It does not duplicate any functionality that Nomad provides natively.
 
-    // Stream stdout and stderr
-    this.proc.stdout.on("data", (chunk) => {
-      for (const line of chunk.toString().split("\n")) {
-        if (line) opts.onOutput(line);
-      }
-    });
-    this.proc.stderr.on("data", (chunk) => {
-      for (const line of chunk.toString().split("\n")) {
-        if (line) opts.onOutput(`[stderr] ${line}`);
-      }
-    });
+The CLI communicates with the Nomad server at `co-dell-01.tailnet:4646` over the Tailscale mesh. No additional server process is required.
 
-    const exitCode = await new Promise<number>((resolve) => {
-      this.proc!.on("exit", (code) => resolve(code ?? 1));
-    });
+### Command Mapping
 
-    return {
-      status: exitCode === 0 ? "complete" : "failed",
-      cost: await this.extractCost(),
-      filesChanged: await this.countChangedFiles(opts.cwd),
-      summary: await this.extractSummary(),
-    };
-  }
+Every `co` command maps directly to one or two Nomad API calls:
 
-  async cancel(): Promise<void> {
-    this.proc?.kill("SIGTERM");
-  }
-}
+| `co` command | What it does | Nomad API call |
+|---|---|---|
+| `co run <project> "<prompt>"` | Dispatch a coding agent job | `POST /v1/job/run-coding-agent/dispatch` with meta (`project`, `runtime`, `model`) and prompt as payload |
+| `co status` | List active and recent dispatched jobs | `GET /v1/job/run-coding-agent/allocations` (filter by status) |
+| `co logs <id>` | Stream logs from a running or completed job | Resolve alloc ID from job, then `GET /v1/client/fs/logs/:alloc_id?task=execute&type=stdout&follow=true&plain=true` |
+| `co stop <id>` | Kill a running job | `POST /v1/allocation/:alloc_id/stop` or `DELETE /v1/job/:job_id?purge=true` |
+| `co continue <id> "<prompt>"` | Resume a previous session with new instructions | Dispatch new job with `session_id` set to the previous job's session ID (read from Nomad Variables) |
+| `co runners` | List all nodes in the fleet with their status and metadata | `GET /v1/nodes` |
+| `co drain <node>` | Mark a node as draining (finish current work, accept no new work) | `POST /v1/node/:node_id/drain` with drain spec |
+| `co activate <node>` | Mark a drained node as eligible again | `POST /v1/node/:node_id/eligibility` with `{"Eligibility": "eligible"}` |
+| `co devices` | List devices across the fleet | `GET /v1/nodes` then extract `device_*` metadata from each node |
+| `co cost` | Show cost breakdown by project, model, and time period | `GET /v1/vars?prefix=cost/` then aggregate the JSON values |
+
+### CLI Defaults
+
+The CLI applies sensible defaults to reduce typing:
+
+- **Runtime**: defaults to `claude-code` if not specified.
+- **Model**: defaults to `sonnet` if not specified.
+- **Mode**: defaults to `unspecified-low` if not specified.
+- **Nomad address**: reads from `NOMAD_ADDR` env var or defaults to `http://co-dell-01.tailnet:4646`.
+- **Nomad token**: reads from `NOMAD_TOKEN` env var.
+
+A typical invocation is just:
+
+```
+co run peer6 "Add pagination to the mentors list endpoint"
 ```
 
-### Heartbeat
+This dispatches with `{project: "peer6", runtime: "claude-code", model: "sonnet", mode: "unspecified-low"}`.
 
-Every 30 seconds, the runner POSTs to the API:
+---
+
+## 6. Nomad Variables for State
+
+Nomad includes a built-in encrypted key-value store called [Nomad Variables](https://developer.hashicorp.com/nomad/docs/concepts/variables). Values are encrypted at rest using a key managed by Nomad's keyring. We use this for all persistent state, eliminating the need for SQLite, D1, or any external database.
+
+### Cost Tracking
+
+After each job completes, `run-agent.sh` writes cost data:
+
+```
+PUT /v1/var/cost/{job-id}
+```
 
 ```json
 {
-  "runner_id": "dell-01",
-  "status": "busy",
-  "current_task": "01J5K9XYZABC123",
-  "uptime_seconds": 86400,
-  "load_avg": [0.5, 0.3, 0.2],
-  "memory_used_mb": 1200,
-  "memory_total_mb": 8192,
-  "disk_used_pct": 45,
-  "devices": [
-    {"type": "yubikey", "path": "/dev/yubikey0", "status": "available"},
-    {"type": "flipper", "path": "/dev/flipper0", "status": "in-use"}
-  ]
+  "cost_usd": 0.0342,
+  "input_tokens": 12450,
+  "output_tokens": 3210,
+  "model": "claude-sonnet-4-20250514",
+  "project": "peer6",
+  "runtime": "claude-code",
+  "timestamp": "2026-03-22T14:30:00Z",
+  "duration_seconds": 127
 }
 ```
 
-If the API receives no heartbeat for 90 seconds (3 missed intervals), the runner is marked `unresponsive`. After 5 minutes, any task assigned to it is marked `failed` with error `runner_timeout`.
+The `co cost` command reads all variables under the `cost/` prefix and aggregates them by project, model, time period, or any other dimension. This is a simple read-and-sum operation in the CLI -- no server-side aggregation needed.
 
-### Device Health Monitoring
+### Session Mapping
 
-Every 60 seconds, the runner checks that expected USB devices are still connected:
-
-```typescript
-async function checkDevices(manifest: RunnerManifest): DeviceStatus[] {
-  return manifest.devices.map((device) => {
-    const devPath = `/dev/${device.udev_name}`;
-    const exists = existsSync(devPath);
-    return {
-      type: device.type,
-      path: devPath,
-      status: exists ? "available" : "disconnected",
-    };
-  });
-}
-```
-
-If a device disappears, the runner updates the API immediately (does not wait for next heartbeat). If a task requires that device, it is paused with `device_disconnected` status.
-
----
-
-## 4. CLI
-
-### Installation
-
-```bash
-# Global install
-npm install -g code-orchestration
-
-# Or run via npx
-npx code-orchestration run peer6 "add rate limiting"
-```
-
-### Configuration
-
-```yaml
-# ~/.config/code-orchestration/config.yaml
-api:
-  url: https://api.ts.net:3000
-  # or: http://dell-01.ts.net:3000
-  key: co_live_abc123...
-
-defaults:
-  runtime: crush
-  priority: normal
-  mode: implement
-```
-
-### Commands
-
-#### `co run <project> "<prompt>"`
-
-Submit a task to the fleet.
+For `co continue` to work, we need to map a human-readable job reference back to a session ID that the coding agent runtime understands:
 
 ```
-co run peer6 "Add rate limiting middleware using sliding window. 100 req/min per IP."
-
-Options:
-  --runtime <name>        Agent runtime: crush, claude, aider       [default: crush]
-  --model <provider/model> Model to use                             [default: per-project]
-  --mode <mode>           Task mode: implement, test, review, analyze [default: implement]
-  --runner <id>           Target specific runner                     [optional]
-  --needs <device>        Require a device type (e.g., yubikey)      [optional]
-  --budget <usd>          Maximum cost in USD                        [optional]
-  --priority <level>      low, normal, high, critical                [default: normal]
-  --no-stream             Submit and exit (don't stream output)      [default: false]
-
-Examples:
-  co run peer6 "fix the auth middleware bug" --budget 1.00
-  co run login2 "add GitHub OAuth" --runtime claude --model anthropic/claude-sonnet-4-20250514
-  co run rule1 "write tests for parser" --mode test --priority high
-  co run peer6 "test YubiKey FIDO2 flow" --needs yubikey --runner dell-01
+PUT /v1/var/sessions/{session-id}
 ```
-
-Default behavior: submits the task, then streams output until completion. Use `--no-stream` for fire-and-forget.
-
-#### `co status`
-
-Show all active tasks across the fleet.
-
-```
-$ co status
-
-ID                STATUS    PROJECT  RUNNER    RUNTIME  COST     AGE
-01J5K9XYZ123      running   peer6    dell-01   crush    $1.23    4m
-01J5K9XYZ456      queued    login2   -         claude   -        2m
-01J5K9XYZ789      paused    rule1    dell-02   crush    $0.45    12m
-                            (awaiting approval: "delete migrations/")
-```
-
-#### `co logs <task-id|project>`
-
-Stream or tail logs.
-
-```
-co logs 01J5K9XYZ123           # stream specific task
-co logs peer6                  # stream latest task for project
-co logs 01J5K9XYZ123 --tail 50 # last 50 lines
-```
-
-#### `co approve <task-id>` / `co deny <task-id>`
-
-Handle approval requests from paused tasks.
-
-```
-$ co approve 01J5K9XYZ789
-Approved action for task 01J5K9XYZ789: "delete migrations/"
-Task resumed.
-```
-
-#### `co cancel <task-id>`
-
-Cancel a running or queued task.
-
-```
-$ co cancel 01J5K9XYZ123
-Task 01J5K9XYZ123 cancelled. Agent process terminated.
-```
-
-#### `co continue <task-id> "<prompt>"`
-
-Resume a completed session with new instructions. Reuses the same worktree/branch.
-
-```
-$ co continue 01J5K9XYZ123 "also add tests for the rate limiter"
-Resuming task 01J5K9XYZ123 on dell-01...
-```
-
-#### `co runners`
-
-Fleet overview.
-
-```
-$ co runners
-
-RUNNER    STATUS    TASK              PROJECTS        DEVICES          UPTIME
-dell-01   busy      01J5K9XYZ123     peer6, login2   YubiKey, Flipper 3d 4h
-dell-02   idle      -                rule1, threat10 (none)           7d 12h
-dell-03   maint     -                peer6, login2   Arduino, BusPir  0s
-```
-
-#### `co runner <id> [action]`
-
-Manage individual runners.
-
-```
-co runner dell-01 drain        # finish current task, stop accepting new ones
-co runner dell-01 maintenance  # mark offline
-co runner dell-01 activate     # return to service
-```
-
-#### `co devices`
-
-Device inventory across all runners.
-
-```
-$ co devices
-
-DEVICE         TYPE       RUNNER    PATH             STATUS
-dell-01:yubi   yubikey    dell-01   /dev/yubikey0    available
-dell-01:flip   flipper    dell-01   /dev/flipper0    in-use
-dell-03:ardu   arduino    dell-03   /dev/arduino0    disconnected
-dell-03:busp   bus-pirate dell-03   /dev/buspirate0  available
-```
-
-#### `co cost`
-
-Cost reporting.
-
-```
-$ co cost --period week
-
-Period: 2026-03-16 to 2026-03-22
-
-PROJECT   TASKS   TOTAL COST   AVG COST
-peer6     23      $34.12       $1.48
-login2    8       $11.45       $1.43
-rule1     15      $18.90       $1.26
-------    ----    ----------   --------
-TOTAL     46      $64.47       $1.40
-
-Daily cap: $50.00 (current today: $12.34 = 25%)
-Monthly cap: $500.00 (current month: $187.22 = 37%)
-```
-
----
-
-## 5. Technology Choices
-
-### Decision Records
-
-Each technology choice is documented with rationale and rejected alternatives.
-
-#### Task Queue: BullMQ + Redis
-
-**Choice:** BullMQ 5.x on Redis 7.x (or Valkey 8.x)
-
-**Why:**
-- TypeScript-native with first-class types. No codegen, no protobuf, no foreign function calls.
-- Named queues with per-queue concurrency, priorities, and rate limiting -- maps directly to our per-project, per-capability routing model.
-- Built-in pub/sub via Redis for live output streaming. No additional infrastructure needed.
-- Battle-tested: 15M+ npm weekly downloads. Used at scale by GitLab, Automattic, and others.
-- Redis also serves as the pub/sub transport for output streaming and the buffer store for late joiners. One dependency, three use cases.
-- Bull Board provides a free monitoring dashboard that plugs in directly.
-
-**Rejected alternatives:**
-
-| Alternative | Why rejected |
-|-------------|-------------|
-| Temporal | Excellent for complex multi-step workflows with compensation logic. Overkill for v1 where tasks are fire-and-forget with simple status tracking. Earmarked for v3 when we need inter-project coordination and multi-step workflows. |
-| pg-boss | Good PostgreSQL-based queue. We do not run PostgreSQL anywhere in our stack. Redis is faster for pub/sub streaming, which is a core requirement. |
-| Inngest | Event-driven, good DX. Self-hosted story is less mature. Adds a dependency we would need to operate. |
-| RabbitMQ | Proven, but requires a separate service with its own operational burden (Erlang runtime). BullMQ piggybacking on Redis is simpler for a 3-node fleet. |
-| AWS SQS / GCP Pub/Sub | We are not on cloud. These are physical machines on a Tailscale mesh. |
-
----
-
-#### API Framework: Hono
-
-**Choice:** Hono 4.x
-
-**Why:**
-- Already the standard across link42 projects (peer6 apps/api, login2). Team familiarity is high.
-- Runs on Cloudflare Workers, Node.js, Deno, and Bun with zero code changes. If we start self-hosted and later move to Workers, no rewrite needed.
-- Middleware ecosystem covers our needs: bearer auth, CORS, logger, WebSocket upgrade.
-- Tiny bundle (~14KB). Matters for Workers (which have a 1MB limit after compression).
-
-**Rejected:** Express (heavier, no edge runtime support), Fastify (good but less portable to Workers), Elysia (Bun-only in practice).
-
----
-
-#### Fleet Networking: Tailscale
-
-**Choice:** Tailscale (managed WireGuard mesh)
-
-**Why:**
-- Zero-config WireGuard mesh. Each Dell gets a stable hostname (`dell-01.ts.net`) and IP. No port forwarding, no dynamic DNS, no firewall rules.
-- SSH access to any runner from any authorized device without exposing SSH to the public internet.
-- ACLs in the Tailscale admin console control which machines can talk to which services. Runners can reach Redis and the API; the API can reach runners for management; nothing else.
-- MagicDNS means we reference `redis.ts.net` in config, not IP addresses that change.
-- Free tier covers up to 100 devices. We have 3-10.
-
-**Rejected:** Headscale (self-hosted Tailscale coordination server -- good but more ops burden for no gain at our scale), plain WireGuard (manual key exchange, no MagicDNS, no ACLs dashboard), ZeroTier (similar but less mature ACL story).
-
----
-
-#### Fleet Provisioning: Ansible
-
-**Choice:** Ansible 2.16+ (community edition)
-
-**Why:**
-- Agentless. Uses SSH (which we already have via Tailscale). No daemon to install or maintain on the thin clients.
-- Industry standard. The Dell 5070s run Ubuntu 22.04 LTS -- Ansible's bread and butter.
-- YAML playbooks are version-controlled alongside this repo. Infrastructure as code without a separate tool.
-- Idempotent by design. Run the playbook 10 times, get the same result. Safe for iterative provisioning.
-- Covers our provisioning needs: install packages, configure systemd, set up udev rules, distribute SSH keys, manage environment files.
-
-**Rejected:** Salt (requires a minion agent on each node), Chef/Puppet (heavier, agent-based, more suited to hundreds of machines), plain bash scripts (not idempotent, hard to maintain).
-
----
-
-#### Device Naming: udev rules
-
-**Choice:** Custom udev rules for stable device paths.
-
-**Why:**
-- Linux-native, zero dependencies. Part of systemd/udev which is already on every Ubuntu machine.
-- Solves the `/dev/ttyUSB0` vs `/dev/ttyUSB1` ordering problem. Devices get stable symlinks like `/dev/yubikey0`, `/dev/flipper0`, `/dev/arduino0`.
-- Rules are simple text files, version-controlled, deployed via Ansible.
-
-```
-# /etc/udev/rules.d/99-code-orchestration.rules
-# YubiKey 5
-SUBSYSTEM=="usb", ATTR{idVendor}=="1050", ATTR{idProduct}=="0407", \
-  SYMLINK+="yubikey0", MODE="0660", GROUP="plugdev"
-
-# Flipper Zero
-SUBSYSTEM=="tty", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5740", \
-  SYMLINK+="flipper0", MODE="0660", GROUP="plugdev"
-
-# Arduino Uno
-SUBSYSTEM=="tty", ATTRS{idVendor}=="2341", ATTRS{idProduct}=="0043", \
-  SYMLINK+="arduino0", MODE="0660", GROUP="dialout"
-
-# Bus Pirate v4
-SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", \
-  ATTRS{serial}=="BUSPIR-ABCD", \
-  SYMLINK+="buspirate0", MODE="0660", GROUP="dialout"
-```
-
-**Rejected:** Custom daemon to poll `/dev` (unnecessary when udev does this natively), labgrid (full lab automation framework -- powerful but massive overkill for device naming).
-
----
-
-#### Device Locking: flock(1)
-
-**Choice:** POSIX `flock(1)` advisory file locks.
-
-**Why:**
-- POSIX standard, available on every Linux system. Zero dependencies.
-- Prevents two tasks from accessing the same device simultaneously.
-- Automatically released when the process exits (even on crash). No stale locks.
-- Wrapper scripts use `flock --nonblock /var/lock/dev-yubikey0.lock <command>`. If the lock is held, the command fails immediately with a clear error.
-
-```bash
-#!/bin/bash
-# /opt/code-orchestration/bin/yubikey-tool
-# Wrapper that agents call instead of accessing /dev/yubikey0 directly
-exec flock --nonblock /var/lock/dev-yubikey0.lock \
-  ykman --device /dev/yubikey0 "$@"
-```
-
-**Rejected:** labgrid (full lab automation with resource locking -- overkill for <10 devices), custom lock service (unnecessary when `flock` exists), database locks (network round-trip for something that should be local).
-
----
-
-#### Git Isolation: git worktree
-
-**Choice:** `git worktree` for per-task isolation.
-
-**Why:**
-- Native git feature. No additional tools, no overhead.
-- Each task gets its own worktree with its own branch. Tasks running in parallel on the same project (on different runners) do not interfere with each other.
-- Both Claude Code and Crush support working in a subdirectory. The agent sees a normal git repo.
-- Cleanup is one command: `git worktree remove`.
-- No Docker overhead. The Dell 5070s have 8GB RAM and quad-core Pentium J5005 CPUs. Docker's memory overhead matters on these machines.
-
-**Rejected:** Docker (adds 200-500MB memory overhead per container, complex device passthrough for USB), chroot (complex setup, brittle), separate full clones (wastes disk and network bandwidth).
-
----
-
-#### Monitoring: Bull Board
-
-**Choice:** Bull Board 6.x
-
-**Why:**
-- Free and open-source. MIT licensed.
-- Plugs directly into BullMQ with zero configuration. `new BullMQAdapter(queue)` and it works.
-- Shows queue depth, job status, job data, retry history, and processing times.
-- Mounts as a middleware on our existing Hono server. No separate process.
-- Good enough for v1. We need to see what is queued, what is running, what failed. Bull Board does this.
-
-**Rejected:** Grafana (requires Prometheus, adds two services to operate), custom dashboard (unnecessary for v1), Datadog/New Relic (paid, cloud-hosted, we are on a private mesh).
-
----
-
-#### Notifications: ntfy.sh
-
-**Choice:** ntfy.sh (self-hosted or public instance)
-
-**Why:**
-- Dead simple. Send a push notification to a phone with a single HTTP POST:
-  ```bash
-  curl -d "Task abc123 complete ($1.47)" ntfy.sh/code-orchestration
-  ```
-- Self-hostable (single Go binary) or use the free public instance.
-- Native apps for Android and iOS. Web UI available.
-- No webhook configuration, no bot tokens, no OAuth flows. Just HTTP POST to a topic.
-- Supports priority levels, tags, actions, and click URLs.
-
-Also supported: Discord webhooks (for team channels), configured per-project.
-
-**Rejected:** Slack (requires app registration, OAuth, heavier API), PagerDuty (overkill, paid), email (too slow for real-time notifications).
-
----
-
-#### Serial Access: ser2net
-
-**Choice:** ser2net 4.x for network-accessible serial ports.
-
-**Why:**
-- Lightweight daemon that maps serial ports to TCP sockets. Other machines on the Tailscale mesh can access a serial device on `dell-01.ts.net:3001` as if it were local.
-- Standard tool, packaged in Ubuntu repos (`apt install ser2net`).
-- Supports connection parameters (baud rate, parity, stop bits) in config.
-- Useful when a task needs a serial device but is routed to a runner that does not have it physically attached.
-
-```yaml
-# /etc/ser2net.yaml
-connection: &arduino
-  accepter: tcp,3001
-  connector: serialdev,/dev/arduino0,115200n81,local
-  options:
-    kickolduser: true
-```
-
-**Rejected:** USB/IP (higher latency, less reliable for serial, exposes raw USB which is a security concern), custom WebSocket bridge (unnecessary when ser2net exists).
-
----
-
-#### HSM Remote Access: p11-kit PKCS#11
-
-**Choice:** p11-kit with PKCS#11 forwarding for remote HSM/YubiKey access.
-
-**Why:**
-- Forwards the PKCS#11 cryptographic API, not the raw USB device. The YubiKey's private keys never leave the machine it is physically connected to.
-- Standard interface: any application that speaks PKCS#11 (OpenSSL, GnuTLS, Firefox, ssh-agent) can use the remote token transparently.
-- p11-kit supports remoting via Unix socket forwarding over SSH (which we have via Tailscale).
-
-```bash
-# On the machine that needs the YubiKey (remote):
-export P11_KIT_SERVER_ADDRESS=unix:path=/tmp/p11-kit-remote.sock
-ssh -L /tmp/p11-kit-remote.sock:/run/p11-kit/pkcs11 dell-01.ts.net
-
-# Now local PKCS#11 calls are forwarded to dell-01's YubiKey
-pkcs11-tool --module p11-kit-proxy.so --list-objects
-```
-
-**Rejected:** USB/IP (exposes raw USB device over network -- the YubiKey's private keys could theoretically be extracted by a malicious host), direct USB passthrough (requires physical proximity).
-
----
-
-## 6. Security Model
-
-### Principles
-
-1. **No inbound ports on runners.** Runners poll outbound to Redis for tasks and POST outbound to the API for results. The only inbound access is Tailscale SSH for maintenance, which is authenticated via Tailscale's identity system.
-
-2. **Zero-trust API access.** The API is behind Cloudflare Access (if on Workers) or requires a bearer token (if self-hosted). Two token types: operator tokens (for the CLI) and runner tokens (for the daemon).
-
-3. **Least-privilege git access.** Each project uses a deploy key (read-write) scoped to that single repository. No personal access tokens, no blanket SSH keys. If a runner is compromised, only the repos it is configured for are exposed.
-
-4. **Comprehensive audit logging.** Every tool call the coding agent makes is logged to the audit table: timestamp, runner ID, task ID, tool name, input (truncated), output (truncated), cost. This is non-negotiable for security-sensitive environments.
-
-5. **Secrets isolation.** API keys, deploy keys, and service credentials live in `/opt/code-orchestration/.env` on each runner, deployed via Ansible vault. They are never included in task prompts or passed through the queue. The agent process inherits them from the systemd environment.
-
-6. **Device access mediation.** Coding agents never access `/dev/*` directly. They call wrapper scripts (e.g., `/opt/code-orchestration/bin/yubikey-tool`) which:
-   - Acquire a file lock (`flock`)
-   - Validate the command against an allowlist
-   - Execute with appropriate permissions
-   - Log the interaction to the audit trail
-
-7. **USB device whitelisting.** USBGuard runs on each runner with a strict whitelist policy. Only known devices (by vendor ID, product ID, and serial number) are allowed. Unknown USB devices are blocked at the kernel level.
-
-```ini
-# /etc/usbguard/rules.conf
-# Allow only known devices
-allow id 1050:0407 serial "12345678"  # YubiKey 5
-allow id 0483:5740 serial "FLIP-ABCD" # Flipper Zero
-allow id 2341:0043                     # Arduino Uno (no serial)
-allow id 0403:6001 serial "BUSPIR-XY"  # Bus Pirate
-reject                                 # Block everything else
-```
-
-8. **Fail-closed runner behavior.** If a runner cannot reach the API for 5 minutes, it stops accepting new tasks and pauses the current task (if any). It does not continue operating independently. The operator is notified via ntfy.sh.
-
-9. **Unprivileged execution.** The runner daemon and all agent processes run as the `runner` user (UID 1001), which has:
-   - Read/write access to `/home/runner/projects` (git repos)
-   - Read/write access to `/opt/code-orchestration` (daemon code, config)
-   - Group membership in `plugdev` and `dialout` (for USB/serial devices)
-   - No sudo access
-   - No access to other users' home directories
-
-### Authentication Flow
-
-```
-CLI                          API                         Runner
- |                            |                            |
- | POST /api/tasks            |                            |
- | Authorization: Bearer      |                            |
- |   co_op_xxx (operator key) |                            |
- |--------------------------->|                            |
- |                            | Validate operator token    |
- |                            | Check budget caps          |
- |                            | Enqueue to BullMQ          |
- |                            |                            |
- |                            |     BullMQ job pickup      |
- |                            |                            |
- |                            | POST /internal/tasks/:id/  |
- |                            |   started                  |
- |                            | Authorization: Bearer      |
- |                            |   co_run_yyy (runner key)  |
- |                            |<---------------------------|
- |                            | Validate runner token      |
- |                            | Check runner is registered |
- |                            |                            |
-```
-
-### Network Security Diagram
-
-```
-+------------------------------------------------------------------+
-|                    Tailscale ACL Policy                           |
-|                                                                  |
-|  Runners (tag:runner):                                           |
-|    - CAN reach: redis.ts.net:6379 (Redis)                       |
-|    - CAN reach: api.ts.net:3000 (API, if self-hosted)            |
-|    - CAN reach: github.com:22 (git SSH)                          |
-|    - CANNOT reach: each other (no lateral movement)              |
-|    - CANNOT reach: operator devices                              |
-|                                                                  |
-|  Operator (tag:operator):                                        |
-|    - CAN reach: api.ts.net:3000 (API)                            |
-|    - CAN reach: any runner via SSH (maintenance)                 |
-|    - CAN reach: redis.ts.net:6379 (direct queue inspection)      |
-|                                                                  |
-|  Redis (tag:infra):                                              |
-|    - Accepts from: tag:runner, tag:operator                      |
-|    - No outbound connections                                     |
-|                                                                  |
-+------------------------------------------------------------------+
-```
-
----
-
-## 7. Cost Control
-
-### Three-Layer Budget System
-
-```
-                    +-----------------------------------+
-                    |        Monthly Cap: $500          |
-                    |  Notification at $400 (80%)       |
-                    |  Hard stop at $500                |
-                    +-----------------------------------+
-                                    |
-                    +-----------------------------------+
-                    |         Daily Cap: $50            |
-                    |  Notification at $40 (80%)        |
-                    |  Hard stop at $50                 |
-                    +-----------------------------------+
-                                    |
-                    +-----------------------------------+
-                    |       Per-Task Budget Cap         |
-                    |  Passed to agent CLI              |
-                    |  e.g., --max-budget-usd 2.00      |
-                    +-----------------------------------+
-```
-
-### Layer 1: Per-Task Budget
-
-The CLI accepts `--budget <usd>` which is passed through to the agent runtime:
-
-- **Crush:** `--max-budget-usd 2.00`
-- **Claude Code:** Budget enforcement via provider API config
-- **Aider:** Model-specific token limits translated from USD budget
-
-If no per-task budget is specified, the project default applies. If no project default, the system default ($5.00) applies. Every task has a budget -- there is no unbounded execution.
-
-### Layer 2: Daily Cap
-
-Before enqueueing a task, the API checks the `cost_daily` table:
-
-```typescript
-async function checkDailyBudget(taskBudget: number): Promise<boolean> {
-  const today = new Date().toISOString().split("T")[0];
-  const result = await db
-    .select({ total: sql`SUM(total_usd)` })
-    .from(costDaily)
-    .where(eq(costDaily.date, today))
-    .get();
-
-  const currentSpend = result?.total ?? 0;
-  const dailyCap = parseFloat(process.env.DAILY_BUDGET_CAP ?? "50");
-
-  if (currentSpend >= dailyCap * 0.8) {
-    await notify(`Daily spend at ${((currentSpend / dailyCap) * 100).toFixed(0)}%: $${currentSpend.toFixed(2)} / $${dailyCap.toFixed(2)}`);
-  }
-
-  if (currentSpend + taskBudget > dailyCap) {
-    return false; // Reject task
-  }
-
-  return true;
-}
-```
-
-### Layer 3: Monthly Cap
-
-Same logic, aggregated across the month. Checked alongside the daily cap at task submission time.
-
-### Cost Tracking Flow
-
-```
-Runner completes task
-        |
-        v
-POST /internal/tasks/:id/result
-  { cost_usd: 1.47 }
-        |
-        v
-API updates tasks table
-  SET cost_usd = 1.47, status = 'complete'
-        |
-        v
-API upserts cost_daily table
-  INSERT INTO cost_daily (date, project, runner_id, total_usd, task_count)
-  VALUES ('2026-03-22', 'peer6', 'dell-01', 1.47, 1)
-  ON CONFLICT (date, project, runner_id) DO UPDATE
-    SET total_usd = total_usd + 1.47, task_count = task_count + 1
-        |
-        v
-Check daily/monthly thresholds
-  If 80%+ -> ntfy notification
-  If 100%+ -> reject future tasks
-```
-
-### Cost Reporting
-
-The API exposes `/api/cost` which aggregates the `cost_daily` table:
 
 ```json
 {
-  "period": "week",
-  "from": "2026-03-16",
-  "to": "2026-03-22",
-  "projects": {
-    "peer6": {"tasks": 23, "cost": 34.12, "avg": 1.48},
-    "login2": {"tasks": 8, "cost": 11.45, "avg": 1.43},
-    "rule1": {"tasks": 15, "cost": 18.90, "avg": 1.26}
-  },
-  "total": {"tasks": 46, "cost": 64.47, "avg": 1.40},
-  "caps": {
-    "daily": {"limit": 50.00, "current": 12.34, "pct": 25},
-    "monthly": {"limit": 500.00, "current": 187.22, "pct": 37}
-  }
+  "job_id": "run-coding-agent/dispatch-1711100000-abcdef",
+  "alloc_id": "a1b2c3d4",
+  "project": "peer6",
+  "runtime": "claude-code",
+  "status": "complete",
+  "branch": "co/run-coding-agent/dispatch-1711100000-abcdef"
 }
 ```
 
----
+### Why Not an External Database
 
-## 8. Scaling Path
-
-### v1: Minimal Viable Fleet (current target)
-
-- **3 Dell 5070 thin clients**, each with 8GB RAM, 128GB SSD, Pentium J5005.
-- **Single Redis instance** running on `dell-01` (or whichever Dell is most reliable). No replication. If Redis goes down, tasks queue in the API and runners wait.
-- **API on Cloudflare Workers** (or on `dell-01` alongside Redis if we want everything on the mesh).
-- **Bull Board** for monitoring, mounted on the API.
-- **Concurrency: 1 task per runner.** The thin clients do not have enough RAM for parallel agent execution.
-- **3 concurrent tasks max** across the fleet.
-- **Estimated throughput:** 50-100 tasks/day depending on average task duration.
-
-### v2: Expanded Fleet + High Availability
-
-- **5-10 Dells.** Add machines as needed. Provisioning is a single Ansible playbook run.
-- **Redis Sentinel** for high availability. Three Sentinel processes across three Dells. Automatic failover if the Redis primary goes down.
-- **Runner tagging** becomes important. Tag runners by project expertise, device availability, location.
-- **Queue priorities** and rate limiting tuned based on v1 usage patterns.
-- **Estimated throughput:** 100-300 tasks/day.
-
-### v3: Workflow Orchestration
-
-- **Temporal replaces BullMQ** for complex multi-step workflows. BullMQ is excellent for single-step task queuing but cannot express workflows like:
-  - "Implement feature, then run tests, then if tests pass create PR, else fix and retry."
-  - "Run security scan on PR, wait for human review, then deploy to staging."
-- **Temporal server** runs on one Dell (or multiple for HA). Workers connect the same way as BullMQ workers.
-- **BullMQ retained** for simple fire-and-forget tasks. Temporal for multi-step workflows.
-- **Inter-project coordination:** a single workflow can span multiple projects (e.g., "update the shared package in peer6, then update login2 and rule1 to use the new version").
-
-### v4: Web Dashboard
-
-- **SvelteKit dashboard** replaces Bull Board. Custom UI tailored to our workflow:
-  - Real-time task status with live output streaming
-  - Fleet map showing runner status and device inventory
-  - Cost dashboards with charts and trend analysis
-  - Approval queue for paused tasks (approve/deny from the browser)
-  - Audit log viewer with search and filtering
-  - Project configuration management
-- **WebSocket-native.** The dashboard connects to the API's WebSocket endpoints for real-time updates.
-- SvelteKit is the team's frontend standard (peer6 apps/web).
-
-### Future Considerations
-
-- **Scheduled tasks / cron:** recurring work like "run the full test suite nightly" or "check for dependency updates every Monday." Implementable as Temporal schedules in v3.
-- **Inter-runner communication:** tasks on different runners coordinating (e.g., "runner A builds the library, runner B tests the consumer"). Temporal workflows handle this naturally.
-- **Auto-scaling:** if the queue depth exceeds a threshold, notify the operator to plug in another Dell. Full auto-provisioning with PXE boot is possible but likely overkill.
-- **Multi-tenancy:** if other teams want to use the fleet, add team-scoped API keys, project ACLs, and per-team budget caps.
-- **Artifact storage:** R2 or MinIO for build artifacts, test reports, and agent session recordings. Currently just git branches.
+- Nomad Variables are encrypted at rest with zero configuration.
+- They are replicated via Raft (when running multi-server), so they survive server restarts.
+- They are accessible via the same HTTP API the CLI already talks to.
+- They support ACL policies for access control.
+- For the volume of data we produce (dozens of cost records per day), the performance is more than adequate.
 
 ---
 
-## Appendix A: Dell 5070 Specifications
+## 7. Technology Choices
 
-| Spec | Value |
-|------|-------|
-| CPU | Intel Pentium Silver J5005 (4 cores, 1.5-2.8 GHz) |
-| RAM | 8 GB DDR4 (upgradeable to 32 GB, 2x SO-DIMM) |
-| Storage | 128 GB M.2 SATA SSD (replaceable) |
-| Network | 1x Gigabit Ethernet, optional Wi-Fi |
-| USB | 5x USB 3.0 (2 front, 3 rear), 1x USB-C |
-| Power | 35W TDP, fanless or single small fan |
-| OS | Ubuntu 22.04 LTS (or 24.04 LTS) |
-| Cost | ~$60-80 used on eBay |
+| Component | Choice | Why |
+|---|---|---|
+| Orchestrator | **Nomad** | Replaces five or more custom components (API server, BullMQ, Redis, worker daemon, Bull Board). Single Go binary. Parameterized batch jobs, raw_exec driver, built-in web UI, ACL system, log streaming, encrypted variables, restart policies, node drain, health checks. Battle-tested at scale by HashiCorp and the industry. |
+| CLI | **Custom TypeScript (`co`)** | Ergonomic wrapper around Nomad API. Adds project aliases, default runtime/model, prompt templating, cost aggregation. Approximately 200 lines. No framework, no build step beyond `tsc`. |
+| Networking | **Tailscale** | Zero-config WireGuard mesh. Every node gets a stable DNS name (`co-dell-01.tailnet`). The Nomad server is accessible from the operator's laptop over Tailscale without port forwarding or VPN configuration. Encrypted by default. |
+| Provisioning | **Ansible** | Installs Nomad, coding agent runtimes (Claude Code, Codex, Aider, Goose, Amp), udev rules, and clones project repos. Agentless (runs over SSH). Playbooks are idempotent and version-controlled. |
+| Device naming | **udev** | Linux-native. Writes rules that create stable symlinks like `/dev/yubikey-1` regardless of USB enumeration order. Survives reboots and re-plugging. |
+| Device locking | **flock(1)** | POSIX standard file locking. Zero dependencies. The adapter script calls `flock /var/lock/device-yubikey-1 ...` to get exclusive access. If the device is in use, the second caller blocks until it is released. |
+| Git isolation | **git worktree** | Native git feature. Each dispatched job gets its own worktree on a dedicated branch. Multiple jobs for the same project can run concurrently on the same node. No Docker, no container overhead. |
+| Notifications | **Ntfy.sh** | Simple HTTP POST from `run-agent.sh` on job completion or failure. Free, self-hostable, supports mobile push. No SDK, no dependencies -- just `curl`. |
 
-These are former enterprise thin clients -- cheap, quiet, low power, and purpose-built for 24/7 operation. The USB port density is excellent for device-heavy workloads.
+---
 
-## Appendix B: Directory Structure
+## 8. Security Model
 
-```
-code-orchestration/
-  packages/
-    api/                   # Hono API (control plane)
-      src/
-        routes/
-          tasks.ts
-          runners.ts
-          devices.ts
-          audit.ts
-          cost.ts
-        middleware/
-          auth.ts
-          budget.ts
-        queue/
-          setup.ts         # BullMQ queue definitions
-          routing.ts       # Queue selection logic
-        db/
-          schema.ts        # Drizzle schema
-          migrate.ts
-        bull-board.ts      # Bull Board setup
-        index.ts           # Hono app entry
-      package.json
+### Network
 
-    runner/                # Runner daemon
-      src/
-        daemon.ts          # Main entry, lifecycle management
-        heartbeat.ts       # Heartbeat loop
-        devices.ts         # Device health monitoring
-        adapters/
-          crush.ts         # Crush runtime adapter
-          claude.ts        # Claude Code runtime adapter
-          aider.ts         # Aider runtime adapter
-          base.ts          # RuntimeAdapter interface
-        worktree.ts        # Git worktree management
-        stream.ts          # Redis pub/sub output streaming
-      runner.yaml          # Runner manifest (per-machine)
-      package.json
+- The Nomad API (port 4646) is only reachable over the Tailscale mesh. It is not exposed to the public internet. Tailscale provides WireGuard encryption for all traffic between nodes and the operator's laptop.
 
-    cli/                   # CLI tool
-      src/
-        commands/
-          run.ts
-          status.ts
-          logs.ts
-          approve.ts
-          deny.ts
-          cancel.ts
-          continue.ts
-          runners.ts
-          runner.ts
-          devices.ts
-          cost.ts
-        api-client.ts      # HTTP client for API
-        config.ts          # Config file loading
-        output.ts          # Table formatting, streaming display
-        index.ts           # CLI entry (commander or citty)
-      package.json
+### Authentication and Authorization
 
-    shared/                # Shared types and utilities
-      src/
-        types.ts           # TaskPayload, RunResult, RunnerStatus, etc.
-        constants.ts       # Priority maps, status enums
-      package.json
+- **Nomad ACL tokens** control access to the API. A management token is used for fleet administration (drain, metadata changes). A client-scoped token is used by the `co` CLI for job dispatch, log streaming, and variable reads.
+- The `co` CLI reads the token from the `NOMAD_TOKEN` environment variable, consistent with Nomad's own CLI conventions.
 
-  ansible/                 # Fleet provisioning
-    inventory.yaml
-    playbooks/
-      provision-runner.yaml
-      deploy-runner.yaml
-      update-udev-rules.yaml
-    roles/
-      base/                # Ubuntu base setup, packages
-      tailscale/           # Tailscale install + join
-      redis/               # Redis server (single node)
-      runner/              # Runner daemon install + systemd
-      udev/                # USB device udev rules
-      usbguard/            # USBGuard whitelist
+### Execution Isolation
 
-  docs/
-    architecture.md        # This document
+- `raw_exec` runs jobs as the `runner` Linux user, which is unprivileged. It has read/write access to project workspaces under `/home/runner/workspaces/` and read/execute access to scripts under `/opt/code-orchestration/`. It does not have root access.
+- Device access is mediated by wrapper scripts and udev rules. The `runner` user is added to the appropriate groups (e.g., `plugdev`) for USB device access. USBGuard whitelists are configured on each Dell to prevent unauthorized device connections.
 
-  package.json             # Root workspace config (pnpm workspaces)
-  pnpm-workspace.yaml
-  tsconfig.base.json
-```
+### Data at Rest
+
+- Nomad Variables (cost data, session mappings) are encrypted at rest using Nomad's built-in keyring. No additional encryption configuration is needed.
+
+### Audit
+
+- **Nomad event stream** captures all job lifecycle events (dispatch, start, complete, fail, stop) with timestamps and metadata. This provides a complete audit trail of what was run, when, on which node, and by whom.
+- **run-agent.sh** logs all tool calls and agent output to stdout/stderr, which Nomad captures and retains. These logs are accessible via the API and the web UI.
+
+---
+
+## 9. Scaling Path
+
+- **v1 (current target)**: Single Nomad server on co-dell-01, which also runs as a client. Two additional client-only Dells (co-dell-02, co-dell-03). Three nodes total. This handles the expected workload of dozens of concurrent agent dispatches.
+
+- **v2 (add capacity)**: Add more Dell 5070s as Nomad clients. Provisioning is: install Nomad via Ansible, join the server, set node metadata. A new node can go from unboxing to accepting jobs in under 30 minutes.
+
+- **v3 (high availability)**: If the single server becomes a reliability concern, add two more server nodes (any two of the existing Dells can be promoted) to form a 3-node Raft cluster. Nomad handles leader election and state replication automatically.
+
+- **v4 (observability)**: For richer dashboards beyond what the Nomad UI provides, build a lightweight web frontend that consumes the Nomad event stream API. Alternatively, the built-in Nomad UI may be sufficient indefinitely.
+
+---
+
+## 10. What We Don't Build
+
+The entire value proposition of this architecture is the volume of custom code we avoid writing. Nomad provides battle-tested implementations of everything below. Each item in this list represents hundreds to thousands of lines of custom code that would need to be written, tested, debugged, and maintained.
+
+| Previously planned custom component | Replaced by |
+|---|---|
+| Custom API server (Hono, REST endpoints, route handlers) | Nomad HTTP API |
+| BullMQ task queue (producer, consumer, job definitions) | Nomad parameterized batch jobs + scheduler |
+| Redis (queue backend, pub/sub, state) | Not needed. Nomad is self-contained. |
+| Worker daemon (systemd service, queue consumer, heartbeat) | Nomad client agent + raw_exec driver |
+| Cloudflare Workers (control plane hosting) | Not needed. Nomad server runs on the Dell. |
+| D1/SQLite (cost tracking, audit log, session state) | Nomad Variables (encrypted KV) |
+| Bull Board (queue monitoring UI) | Nomad built-in web UI |
+| Custom heartbeat/health check protocol | Nomad node health monitoring |
+| Custom node drain logic | `nomad node drain` (built-in) |
+| Custom retry/backoff logic | Nomad restart policies |
+| Custom log streaming (WebSocket server, pub/sub) | Nomad log API (`/v1/client/fs/logs` with `follow=true`) |
+
+The system reduces to: one HCL job template, one shell script, and a 200-line CLI wrapper. Everything else is Nomad.
