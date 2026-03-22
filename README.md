@@ -15,11 +15,11 @@ A system for running AI coding agents (Claude Code, Crush/OpenCode, Aider) auton
 
 ## Architecture
 
-Nomad is the core orchestrator. It handles job scheduling, fleet management, log streaming, health checks, retries, and metadata storage natively. There are only two custom components: the `co` CLI and a set of parameterized HCL job templates.
+Nomad is the core orchestrator. It handles job scheduling, fleet management, log streaming, health checks, retries, and metadata storage natively. There are only two custom components: the `yeet` CLI and a set of parameterized HCL job templates.
 
 ```
 ┌──────────┐                ┌──────────────────────────────────┐
-│  co CLI  │─── Nomad API ─▶│  Nomad Server  (co-dell-01)      │
+│ yeet CLI │─── Nomad API ─▶│  Nomad Server  (co-dell-01)      │
 │  (laptop)│    :4646/v1    │                                  │
 │          │◀── HTTP ───────│  Schedules onto:                 │
 └──────────┘                │  ┌─────────┬─────────┬─────────┐ │
@@ -35,7 +35,7 @@ Nomad is the core orchestrator. It handles job scheduling, fleet management, log
      └──────────────────────┴──────────────────────────────────┘
 ```
 
-- The `co` CLI runs on your laptop and talks to the Nomad HTTP API (port 4646) over Tailscale.
+- The `yeet` CLI runs on your laptop and talks to the Nomad HTTP API (port 4646) over Tailscale.
 - One Dell runs the Nomad server in single-server mode (`bootstrap_expect = 1`).
 - All Dells (including the server) run Nomad clients.
 - Each Dell has projects cloned locally and optionally has USB devices attached.
@@ -43,11 +43,11 @@ Nomad is the core orchestrator. It handles job scheduling, fleet management, log
 
 ## How It Works
 
-1. You run `co run peer6 "implement feature X"` from your laptop.
-2. The `co` CLI templates a Nomad parameterized job dispatch with your parameters.
+1. You run `yeet run peer6 "implement feature X"` from your laptop.
+2. The `yeet` CLI templates a Nomad parameterized job dispatch with your parameters.
 3. Nomad schedules it onto an available Dell that has `peer6` cloned (via node metadata constraints).
 4. Nomad's `raw_exec` driver runs the coding agent CLI (Crush, Claude Code, etc.) directly on the host.
-5. You stream logs with `co logs <job-id>` (wraps `nomad alloc logs -f`).
+5. You stream logs with `yeet logs <job-id>` (wraps `nomad alloc logs -f`).
 6. On completion, results are committed to a branch and optionally a draft PR is created.
 
 ## What Nomad Gives Us For Free
@@ -69,7 +69,7 @@ Nomad is the core orchestrator. It handles job scheduling, fleet management, log
 ## CLI Commands
 
 ```
-co run <project> "<prompt>"     Submit a task
+yeet run <project> "<prompt>"     Submit a task
   --runtime crush|claude|aider  Runtime (default: crush)
   --model <provider/model>      Model (default: per-project config)
   --mode implement|test|review  Task mode
@@ -77,18 +77,18 @@ co run <project> "<prompt>"     Submit a task
   --budget <usd>                Cost cap
   --priority low|normal|high    Priority
 
-co status                       List all active tasks
-co logs <job-id>                Stream task output
-co stop <job-id>                Cancel a running task
-co continue <job-id> "<prompt>" Resume with new instructions
-co runners                      Fleet overview
-co drain <node>                 Drain a runner
-co activate <node>              Reactivate a runner
-co devices                      Device inventory
-co cost [--period day|week|month] Cost report
+yeet status                       List all active tasks
+yeet logs <job-id>                Stream task output
+yeet stop <job-id>                Cancel a running task
+yeet continue <job-id> "<prompt>" Resume with new instructions
+yeet runners                      Fleet overview
+yeet drain <node>                 Drain a runner
+yeet activate <node>              Reactivate a runner
+yeet devices                      Device inventory
+yeet cost [--period day|week|month] Cost report
 ```
 
-The `co` CLI is roughly 200 lines of TypeScript -- a thin wrapper around Nomad's HTTP API with opinionated defaults.
+The `yeet` CLI is roughly 200 lines of TypeScript -- a thin wrapper around Nomad's HTTP API with opinionated defaults.
 
 ## Supported Runtimes
 
@@ -121,7 +121,7 @@ code-orchestration/
     run-coding-agent.nomad.hcl   # Parameterized job template
     scripts/
       run-agent.sh               # Runtime adapter entry point
-  cli/                           # co CLI source
+  cli/                           # yeet CLI source
   ansible/                       # Fleet provisioning playbooks
   README.md
 ```

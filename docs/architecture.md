@@ -13,7 +13,7 @@ Last updated: 2026-03-22
 2. [Nomad Configuration](#2-nomad-configuration)
 3. [Parameterized Job Template](#3-parameterized-job-template)
 4. [Runtime Adapter Script](#4-runtime-adapter-script)
-5. [`co` CLI Design](#5-co-cli-design)
+5. [`yeet` CLI Design](#5-yeet-cli-design)
 6. [Nomad Variables for State](#6-nomad-variables-for-state)
 7. [Technology Choices](#7-technology-choices)
 8. [Security Model](#8-security-model)
@@ -28,7 +28,7 @@ The system has two custom components and several off-the-shelf tools. Nomad does
 
 ### Custom Components
 
-- **`co` CLI** -- a thin TypeScript wrapper around Nomad's HTTP API. Roughly 200 lines. It provides ergonomic defaults, prompt templating, and cost aggregation. It does not contain business logic that Nomad already handles.
+- **`yeet` CLI** -- a thin TypeScript wrapper around Nomad's HTTP API. Roughly 200 lines. It provides ergonomic defaults, prompt templating, and cost aggregation. It does not contain business logic that Nomad already handles.
 - **Job templates** -- parameterized HCL job specs and a runtime adapter shell script (`run-agent.sh`) that wires up git worktrees, coding agent binaries, and post-run cleanup.
 
 ### Off-the-Shelf
@@ -46,11 +46,11 @@ The system has two custom components and several off-the-shelf tools. Nomad does
                         |       (laptop)            |
                         +---------------------------+
                                     |
-                                    | co run / co status / co logs
+                                    | yeet run / yeet status / yeet logs
                                     | (HTTP to Nomad API via Tailscale)
                                     v
 +-----------------------------------------------------------------------+
-|                         co CLI (~200 lines TS)                        |
+|                         yeet CLI (~200 lines TS)                      |
 |  Thin wrapper: translates commands to Nomad HTTP API calls.           |
 |  No server process. No database. Just a script.                       |
 +-----------------------------------------------------------------------+
@@ -173,7 +173,7 @@ Metadata is declared statically in the Nomad config and updated via Ansible when
 
 ## 3. Parameterized Job Template
 
-This is the core of the system. One parameterized job template handles all coding agent dispatches. When the `co` CLI dispatches a task, Nomad creates a child job from this template with the supplied parameters and routes it to an appropriate node.
+This is the core of the system. One parameterized job template handles all coding agent dispatches. When the `yeet` CLI dispatches a task, Nomad creates a child job from this template with the supplied parameters and routes it to an appropriate node.
 
 ### Job Spec
 
@@ -233,8 +233,8 @@ job "run-coding-agent" {
 
 ### How It Works
 
-1. The operator runs `co run peer6 "Add pagination to the mentors list"`.
-2. The `co` CLI sends `POST /v1/job/run-coding-agent/dispatch` with meta `{project: "peer6", runtime: "claude-code", model: "sonnet"}` and the prompt as the payload.
+1. The operator runs `yeet run peer6 "Add pagination to the mentors list"`.
+2. The `yeet` CLI sends `POST /v1/job/run-coding-agent/dispatch` with meta `{project: "peer6", runtime: "claude-code", model: "sonnet"}` and the prompt as the payload.
 3. Nomad creates a child batch job (e.g., `run-coding-agent/dispatch-1711100000-abcdef`).
 4. The constraint `${meta.project_peer6} = "true"` routes the job to a node that has peer6 cloned.
 5. Nomad's `raw_exec` driver runs `/opt/code-orchestration/scripts/run-agent.sh` with the meta values injected as environment variables and the prompt written to `${NOMAD_TASK_DIR}/prompt.txt`.
@@ -245,7 +245,7 @@ job "run-coding-agent" {
 
 Nomad's constraint interpolation has limits. The dynamic attribute `${meta.project_${NOMAD_META_project}}` relies on Nomad interpolating the meta value into the attribute path, which works in recent Nomad versions for parameterized jobs. If this proves unreliable in practice, there are two workarounds:
 
-- **Dispatch-time constraint baking**: The `co` CLI generates a non-parameterized job spec on the fly with the constraint hardcoded (e.g., `attribute = "${meta.project_peer6}"`), submits it as a regular batch job, and deletes it after completion.
+- **Dispatch-time constraint baking**: The `yeet` CLI generates a non-parameterized job spec on the fly with the constraint hardcoded (e.g., `attribute = "${meta.project_peer6}"`), submits it as a regular batch job, and deletes it after completion.
 - **Node pools**: Nomad Enterprise (or the OSS node pool feature in 1.6+) allows grouping nodes by project, avoiding dynamic constraint interpolation entirely.
 
 ---
@@ -275,7 +275,7 @@ git checkout main
 git pull --ff-only
 
 # --- 4. Create isolated worktree ---
-BRANCH="co/${NOMAD_JOB_ID}"
+BRANCH="yeet/${NOMAD_JOB_ID}"
 git worktree add "../worktrees/${BRANCH}" -b "$BRANCH"
 cd "../worktrees/${BRANCH}"
 
@@ -294,7 +294,7 @@ cd "../worktrees/${BRANCH}"
 
 # --- 8. Post-run: commit and push ---
 git add -A
-git commit -m "co: ${CO_PROJECT} - $(head -c 72 "$CO_PROMPT_FILE")" || true
+git commit -m "yeet: ${CO_PROJECT} - $(head -c 72 "$CO_PROMPT_FILE")" || true
 git push origin "$BRANCH"
 # Optionally: gh pr create --title "..." --body "..."
 
@@ -315,32 +315,32 @@ git worktree remove "../worktrees/${BRANCH}" --force
 - **git worktree** for isolation instead of Docker containers. Each dispatched job gets its own worktree on a dedicated branch, so multiple jobs for the same project can run concurrently on the same node without interference. Native git, no container overhead.
 - **flock(1)** for device locking. If two jobs need the same YubiKey, the second one blocks on `flock` until the first releases it. POSIX standard, zero dependencies.
 - **Nomad log capture**. The script inherits Nomad's stdout/stderr capture, so all agent output is available via `nomad alloc logs` and the Nomad UI with no additional log infrastructure.
-- **Cost storage via Nomad Variables API**. The script writes cost metadata to Nomad's encrypted KV store using a `curl` call to the local agent's API. The `co cost` command aggregates these later.
+- **Cost storage via Nomad Variables API**. The script writes cost metadata to Nomad's encrypted KV store using a `curl` call to the local agent's API. The `yeet cost` command aggregates these later.
 
 ---
 
-## 5. `co` CLI Design
+## 5. `yeet` CLI Design
 
-The `co` CLI is a thin TypeScript wrapper around Nomad's HTTP API. It exists to provide ergonomic defaults (project name aliases, default runtime/model, prompt templating) and to aggregate data that Nomad stores but doesn't present in the exact format we want (e.g., cost rollups). It does not duplicate any functionality that Nomad provides natively.
+The `yeet` CLI is a thin TypeScript wrapper around Nomad's HTTP API. It exists to provide ergonomic defaults (project name aliases, default runtime/model, prompt templating) and to aggregate data that Nomad stores but doesn't present in the exact format we want (e.g., cost rollups). It does not duplicate any functionality that Nomad provides natively.
 
 The CLI communicates with the Nomad server at `co-dell-01.tailnet:4646` over the Tailscale mesh. No additional server process is required.
 
 ### Command Mapping
 
-Every `co` command maps directly to one or two Nomad API calls:
+Every `yeet` command maps directly to one or two Nomad API calls:
 
-| `co` command | What it does | Nomad API call |
+| `yeet` command | What it does | Nomad API call |
 |---|---|---|
-| `co run <project> "<prompt>"` | Dispatch a coding agent job | `POST /v1/job/run-coding-agent/dispatch` with meta (`project`, `runtime`, `model`) and prompt as payload |
-| `co status` | List active and recent dispatched jobs | `GET /v1/job/run-coding-agent/allocations` (filter by status) |
-| `co logs <id>` | Stream logs from a running or completed job | Resolve alloc ID from job, then `GET /v1/client/fs/logs/:alloc_id?task=execute&type=stdout&follow=true&plain=true` |
-| `co stop <id>` | Kill a running job | `POST /v1/allocation/:alloc_id/stop` or `DELETE /v1/job/:job_id?purge=true` |
-| `co continue <id> "<prompt>"` | Resume a previous session with new instructions | Dispatch new job with `session_id` set to the previous job's session ID (read from Nomad Variables) |
-| `co runners` | List all nodes in the fleet with their status and metadata | `GET /v1/nodes` |
-| `co drain <node>` | Mark a node as draining (finish current work, accept no new work) | `POST /v1/node/:node_id/drain` with drain spec |
-| `co activate <node>` | Mark a drained node as eligible again | `POST /v1/node/:node_id/eligibility` with `{"Eligibility": "eligible"}` |
-| `co devices` | List devices across the fleet | `GET /v1/nodes` then extract `device_*` metadata from each node |
-| `co cost` | Show cost breakdown by project, model, and time period | `GET /v1/vars?prefix=cost/` then aggregate the JSON values |
+| `yeet run <project> "<prompt>"` | Dispatch a coding agent job | `POST /v1/job/run-coding-agent/dispatch` with meta (`project`, `runtime`, `model`) and prompt as payload |
+| `yeet status` | List active and recent dispatched jobs | `GET /v1/job/run-coding-agent/allocations` (filter by status) |
+| `yeet logs <id>` | Stream logs from a running or completed job | Resolve alloc ID from job, then `GET /v1/client/fs/logs/:alloc_id?task=execute&type=stdout&follow=true&plain=true` |
+| `yeet stop <id>` | Kill a running job | `POST /v1/allocation/:alloc_id/stop` or `DELETE /v1/job/:job_id?purge=true` |
+| `yeet continue <id> "<prompt>"` | Resume a previous session with new instructions | Dispatch new job with `session_id` set to the previous job's session ID (read from Nomad Variables) |
+| `yeet runners` | List all nodes in the fleet with their status and metadata | `GET /v1/nodes` |
+| `yeet drain <node>` | Mark a node as draining (finish current work, accept no new work) | `POST /v1/node/:node_id/drain` with drain spec |
+| `yeet activate <node>` | Mark a drained node as eligible again | `POST /v1/node/:node_id/eligibility` with `{"Eligibility": "eligible"}` |
+| `yeet devices` | List devices across the fleet | `GET /v1/nodes` then extract `device_*` metadata from each node |
+| `yeet cost` | Show cost breakdown by project, model, and time period | `GET /v1/vars?prefix=cost/` then aggregate the JSON values |
 
 ### CLI Defaults
 
@@ -355,7 +355,7 @@ The CLI applies sensible defaults to reduce typing:
 A typical invocation is just:
 
 ```
-co run peer6 "Add pagination to the mentors list endpoint"
+yeet run peer6 "Add pagination to the mentors list endpoint"
 ```
 
 This dispatches with `{project: "peer6", runtime: "claude-code", model: "sonnet", mode: "unspecified-low"}`.
@@ -387,11 +387,11 @@ PUT /v1/var/cost/{job-id}
 }
 ```
 
-The `co cost` command reads all variables under the `cost/` prefix and aggregates them by project, model, time period, or any other dimension. This is a simple read-and-sum operation in the CLI -- no server-side aggregation needed.
+The `yeet cost` command reads all variables under the `cost/` prefix and aggregates them by project, model, time period, or any other dimension. This is a simple read-and-sum operation in the CLI -- no server-side aggregation needed.
 
 ### Session Mapping
 
-For `co continue` to work, we need to map a human-readable job reference back to a session ID that the coding agent runtime understands:
+For `yeet continue` to work, we need to map a human-readable job reference back to a session ID that the coding agent runtime understands:
 
 ```
 PUT /v1/var/sessions/{session-id}
@@ -404,7 +404,7 @@ PUT /v1/var/sessions/{session-id}
   "project": "peer6",
   "runtime": "claude-code",
   "status": "complete",
-  "branch": "co/run-coding-agent/dispatch-1711100000-abcdef"
+  "branch": "yeet/run-coding-agent/dispatch-1711100000-abcdef"
 }
 ```
 
@@ -423,7 +423,7 @@ PUT /v1/var/sessions/{session-id}
 | Component | Choice | Why |
 |---|---|---|
 | Orchestrator | **Nomad** | Replaces five or more custom components (API server, BullMQ, Redis, worker daemon, Bull Board). Single Go binary. Parameterized batch jobs, raw_exec driver, built-in web UI, ACL system, log streaming, encrypted variables, restart policies, node drain, health checks. Battle-tested at scale by HashiCorp and the industry. |
-| CLI | **Custom TypeScript (`co`)** | Ergonomic wrapper around Nomad API. Adds project aliases, default runtime/model, prompt templating, cost aggregation. Approximately 200 lines. No framework, no build step beyond `tsc`. |
+| CLI | **Custom TypeScript (`yeet-cli`)** | Ergonomic wrapper around Nomad API. Adds project aliases, default runtime/model, prompt templating, cost aggregation. Approximately 200 lines. No framework, no build step beyond `tsc`. |
 | Networking | **Tailscale** | Zero-config WireGuard mesh. Every node gets a stable DNS name (`co-dell-01.tailnet`). The Nomad server is accessible from the operator's laptop over Tailscale without port forwarding or VPN configuration. Encrypted by default. |
 | Provisioning | **Ansible** | Installs Nomad, coding agent runtimes (Claude Code, Codex, Aider, Goose, Amp), udev rules, and clones project repos. Agentless (runs over SSH). Playbooks are idempotent and version-controlled. |
 | Device naming | **udev** | Linux-native. Writes rules that create stable symlinks like `/dev/yubikey-1` regardless of USB enumeration order. Survives reboots and re-plugging. |
@@ -441,8 +441,8 @@ PUT /v1/var/sessions/{session-id}
 
 ### Authentication and Authorization
 
-- **Nomad ACL tokens** control access to the API. A management token is used for fleet administration (drain, metadata changes). A client-scoped token is used by the `co` CLI for job dispatch, log streaming, and variable reads.
-- The `co` CLI reads the token from the `NOMAD_TOKEN` environment variable, consistent with Nomad's own CLI conventions.
+- **Nomad ACL tokens** control access to the API. A management token is used for fleet administration (drain, metadata changes). A client-scoped token is used by the `yeet` CLI for job dispatch, log streaming, and variable reads.
+- The `yeet` CLI reads the token from the `NOMAD_TOKEN` environment variable, consistent with Nomad's own CLI conventions.
 
 ### Execution Isolation
 

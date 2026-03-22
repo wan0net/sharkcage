@@ -921,12 +921,12 @@ nomad acl bootstrap
 
 This prints a management token. Save it securely (password manager). This token has full access and should only be used for administration.
 
-### Step 2: Create policy for `co` CLI
+### Step 2: Create policy for `yeet` CLI
 
 Write the policy file:
 
 ```bash
-cat > /tmp/co-cli-policy.hcl << 'EOF'
+cat > /tmp/yeet-cli-policy.hcl << 'EOF'
 namespace "default" {
   policy = "write"
   capabilities = ["submit-job", "dispatch-job", "read-job", "read-logs", "alloc-exec", "alloc-lifecycle"]
@@ -952,13 +952,13 @@ Apply it:
 
 ```bash
 export NOMAD_TOKEN=<management-token>
-nomad acl policy apply co-cli-policy /tmp/co-cli-policy.hcl
+nomad acl policy apply yeet-cli-policy /tmp/yeet-cli-policy.hcl
 ```
 
 ### Step 3: Create client token
 
 ```bash
-nomad acl token create -name="co-cli" -policy="co-cli-policy"
+nomad acl token create -name="yeet-cli" -policy="yeet-cli-policy"
 ```
 
 This prints the client token. Save it -- this is what your laptop uses to talk to Nomad.
@@ -966,14 +966,14 @@ This prints the client token. Save it -- this is what your laptop uses to talk t
 ### Step 4: Configure token on laptop
 
 ```bash
-export NOMAD_TOKEN=<co-cli-token>
+export NOMAD_TOKEN=<yeet-cli-token>
 ```
 
-Or set it in the `co` config file (see section 5).
+Or set it in the `yeet` config file (see section 5).
 
 ---
 
-## 5. `co` CLI Installation on Laptop
+## 5. `yeet` CLI Installation on Laptop
 
 ### Install
 
@@ -992,10 +992,10 @@ npm link
 
 ### Configure
 
-Create `~/.config/co/config.yaml`:
+Create `~/.config/yeet/config.yaml`:
 
 ```yaml
-# ~/.config/co/config.yaml
+# ~/.config/yeet/config.yaml
 nomad_addr: http://co-dell-01.tailnet:4646
 nomad_token: <acl-token>
 
@@ -1012,14 +1012,14 @@ projects:
     model: opus
 
 notifications:
-  ntfy_topic: co-notifications
+  ntfy_topic: yeet-notifications
 ```
 
 Verify connectivity:
 
 ```bash
-co runners        # Should list all Nomad client nodes
-co status         # Should show registered jobs
+yeet runners        # Should list all Nomad client nodes
+yeet status         # Should show registered jobs
 ```
 
 ---
@@ -1031,7 +1031,7 @@ co status         # Should show registered jobs
 Every Dell and your laptop join the same Tailnet. This provides:
 
 - **SSH from anywhere**: `ssh runner@co-dell-01` via MagicDNS (e.g., `co-dell-01.tail-net.ts.net`)
-- **Nomad API access**: `co` CLI on your laptop talks to Nomad server over Tailscale
+- **Nomad API access**: `yeet` CLI on your laptop talks to Nomad server over Tailscale
 - **Cross-network routing**: If a Dell is on a different subnet or physical location, Tailscale routes traffic
 - **ACLs**: Configure Tailscale ACLs to restrict which devices can reach the runners
 
@@ -1088,7 +1088,7 @@ http://co-dell-01.tailnet:4646/ui
 
 ### Authentication
 
-Click the ACL token icon in the top-right corner and paste your management token or `co-cli` token. The UI respects ACL policies -- you see only what your token permits.
+Click the ACL token icon in the top-right corner and paste your management token or `yeet-cli` token. The UI respects ACL policies -- you see only what your token permits.
 
 ### What You Get
 
@@ -1113,8 +1113,8 @@ nomad node status
 # Detailed info on a specific node
 nomad node status -verbose <node-id>
 
-# From your laptop via co CLI
-co runners
+# From your laptop via yeet CLI
+yeet runners
 ```
 
 ### Live Logs
@@ -1126,8 +1126,8 @@ nomad alloc logs -f <alloc-id> execute
 # Stream stderr
 nomad alloc logs -f -stderr <alloc-id> execute
 
-# Via co CLI
-co logs <task-id>
+# Via yeet CLI
+yeet logs <task-id>
 ```
 
 ### Nomad Service Logs
@@ -1226,7 +1226,7 @@ ansible-playbook -i ansible/inventory.ini ansible/playbook.yml --limit co-dell-0
 
 ```bash
 nomad node status    # New node appears
-co runners           # Shows in fleet
+yeet runners           # Shows in fleet
 ```
 
 Total recovery time: approximately 15 minutes from bare metal to accepting jobs.
@@ -1243,7 +1243,7 @@ The Nomad HTTP API binds to the Tailscale IP, not a public address. UFW rules re
 
 ### ACL Tokens
 
-All API access requires a valid ACL token. The management token is used only for administration. The `co-cli` token has scoped permissions (submit jobs, read logs, manage variables). No anonymous access is permitted.
+All API access requires a valid ACL token. The management token is used only for administration. The `yeet-cli` token has scoped permissions (submit jobs, read logs, manage variables). No anonymous access is permitted.
 
 ### raw_exec as Unprivileged User
 
@@ -1374,7 +1374,7 @@ Re-run the playbook or restart Nomad for metadata changes to take effect.
 ```bash
 # From your laptop
 nomad node status          # New node appears with "ready" status
-co runners                 # Shows the new runner in the fleet
+yeet runners                 # Shows the new runner in the fleet
 
 # From the new Dell
 nomad node status -self     # Confirms client is connected to server
@@ -1403,10 +1403,10 @@ ansible-playbook -i ansible/inventory.ini ansible/playbook.yml --tags runtimes
 ssh runner@co-dell-01
 
 # Check all runners
-co runners
+yeet runners
 
 # Check job status
-co status
+yeet status
 
 # Nomad cluster overview
 nomad node status

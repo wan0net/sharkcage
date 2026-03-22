@@ -2,9 +2,9 @@
 
 Concrete scenarios showing how code-orchestration works from the user's perspective. Each use case includes the exact CLI command, what Nomad does under the hood, and what the user gets back.
 
-Throughout these examples, the CLI tool is called `co`. The user's laptop is not a runner -- it only runs the CLI, which wraps Nomad's HTTP API over Tailscale. The runners are Dell 5070 thin clients registered as Nomad clients on the same Tailscale mesh. There is no custom API server -- Nomad is the control plane.
+Throughout these examples, the CLI tool is called `yeet`. The user's laptop is not a runner -- it only runs the CLI, which wraps Nomad's HTTP API over Tailscale. The runners are Dell 5070 thin clients registered as Nomad clients on the same Tailscale mesh. There is no custom API server -- Nomad is the control plane.
 
-The core Nomad job is a parameterized job called `run-coding-agent`. When the user runs `co run`, the CLI dispatches this job with metadata (project, prompt, model, runtime, etc.). Nomad schedules it to a Dell based on constraints and node metadata. The job's `raw_exec` task runs `run-agent.sh`, which sets up the environment and executes the chosen coding agent.
+The core Nomad job is a parameterized job called `run-coding-agent`. When the user runs `yeet run`, the CLI dispatches this job with metadata (project, prompt, model, runtime, etc.). Nomad schedules it to a Dell based on constraints and node metadata. The job's `raw_exec` task runs `run-agent.sh`, which sets up the environment and executes the chosen coding agent.
 
 ---
 
@@ -17,7 +17,7 @@ You want to implement the notification system described in PLAN.md phase 2 for t
 ### Command
 
 ```bash
-co run peer6 "Implement the notification system from PLAN.md phase 2. \
+yeet run peer6 "Implement the notification system from PLAN.md phase 2. \
   This covers in-app notifications for session requests, approvals, \
   and cancellations. Follow the existing patterns in src/routes for \
   SvelteKit pages and src/api/routes for Hono endpoints. \
@@ -26,7 +26,7 @@ co run peer6 "Implement the notification system from PLAN.md phase 2. \
 
 ### Under the Hood
 
-1. The `co` CLI calls Nomad's job dispatch API:
+1. The `yeet` CLI calls Nomad's job dispatch API:
    ```
    POST /v1/job/run-coding-agent/dispatch
    ```
@@ -46,24 +46,24 @@ co run peer6 "Implement the notification system from PLAN.md phase 2. \
 3. On the chosen Dell (say `co-dell-01`), Nomad starts the `raw_exec` task. The task's command is `run-agent.sh`, which receives the metadata as environment variables: `NOMAD_META_project=peer6`, `NOMAD_META_runtime=crush`, `NOMAD_META_prompt=...`, etc.
 4. `run-agent.sh` does the following:
    - Pulls the latest code from the peer6 repo into the Dell's local workspace.
-   - Checks out a working branch (`co/<dispatch-id>`).
+   - Checks out a working branch (`yeet/<dispatch-id>`).
    - Launches the Crush coding agent (or Claude Code, depending on `runtime`) with the prompt.
    - Streams structured output to stdout, which Nomad captures in its alloc logs.
 5. The agent reads PLAN.md, implements the notification system across multiple files, runs `pnpm test`. All 79 existing tests pass plus the new ones.
 6. `run-agent.sh` commits all changes on the working branch, pushes it, and creates a draft PR.
-7. The script writes results (cost, duration, files changed, test results) to Nomad Variables at `co/results/<dispatch-id>`.
+7. The script writes results (cost, duration, files changed, test results) to Nomad Variables at `yeet/results/<dispatch-id>`.
 8. The Nomad allocation completes. The user receives an Ntfy push notification.
 
 ### Result
 
 ```bash
-$ co status <dispatch-id>
+$ yeet status <dispatch-id>
 Job:      run-coding-agent/dispatch-a1b2c3d4
 Node:     co-dell-01
 Status:   complete
 Duration: 14m 32s
 Cost:     $2.18
-Branch:   co/dispatch-a1b2c3d4
+Branch:   yeet/dispatch-a1b2c3d4
 PR:       https://github.com/link42/peer6/pull/47 (draft)
 Files:    12 changed, 847 insertions, 23 deletions
 Tests:    94 passed, 0 failed
@@ -82,20 +82,20 @@ You want to add a feature to peer6 and write tests for login2 at the same time. 
 ### Command
 
 ```bash
-co run peer6 "Add the mentor availability calendar component. \
+yeet run peer6 "Add the mentor availability calendar component. \
   Use the existing DatePicker from @peer6/shared as a base. \
   Render a weekly grid view. Follow Svelte 5 runes patterns."
 
-co run login2 "Write comprehensive tests for the auth session validation flow. \
+yeet run login2 "Write comprehensive tests for the auth session validation flow. \
   Cover: valid session, expired session, missing cookie, malformed token, \
   and rate limiting. Use Vitest. Run 'pnpm test' to confirm they pass."
 ```
 
-Two separate commands, fired one after the other (or backgrounded with `&`). Each is an independent `co run`, which means each is an independent Nomad job dispatch.
+Two separate commands, fired one after the other (or backgrounded with `&`). Each is an independent `yeet run`, which means each is an independent Nomad job dispatch.
 
 ### Under the Hood
 
-1. Each `co run` calls `POST /v1/job/run-coding-agent/dispatch` with its respective metadata. Two dispatches, two evaluations.
+1. Each `yeet run` calls `POST /v1/job/run-coding-agent/dispatch` with its respective metadata. Two dispatches, two evaluations.
 2. Nomad schedules them independently. If `co-dell-01` and `co-dell-03` are both idle, each dispatch lands on a different Dell. If only one Dell is idle, both may land on the same Dell (Nomad allows concurrent allocations if resources permit -- the job spec uses `count = 1` per dispatch, not per Dell).
 3. Each Dell independently pulls its respective repo, checks out a branch, and runs the agent. The two agents have no awareness of each other.
 4. Both allocations stream logs independently. Both write their results to Nomad Variables under separate dispatch IDs.
@@ -103,13 +103,13 @@ Two separate commands, fired one after the other (or backgrounded with `&`). Eac
 ### Result
 
 ```bash
-$ co ps
+$ yeet ps
 DISPATCH      PROJECT  NODE         RUNTIME  MODEL                      ELAPSED
 dispatch-e5f6 peer6    co-dell-01   crush    anthropic/claude-sonnet-4  6m 12s
 dispatch-g7h8 login2   co-dell-03   crush    anthropic/claude-sonnet-4  6m 12s
 
 # Later:
-$ co ps --done --since 1h
+$ yeet ps --done --since 1h
 DISPATCH      PROJECT  COST    DURATION  STATUS
 dispatch-g7h8 login2   $0.94   12m 08s   complete
 dispatch-e5f6 peer6    $1.37   18m 41s   complete
@@ -128,7 +128,7 @@ You want an AI to review the ISM data import pipeline in rule1 for security issu
 ### Command
 
 ```bash
-co run rule1 "Review the ISM data import pipeline for security issues. \
+yeet run rule1 "Review the ISM data import pipeline for security issues. \
   Focus on: input validation, XML parsing (XXE risks), file path handling, \
   privilege escalation vectors, and any hardcoded credentials or secrets. \
   Produce a structured report with severity ratings." \
@@ -137,7 +137,7 @@ co run rule1 "Review the ISM data import pipeline for security issues. \
 
 ### Under the Hood
 
-1. The `co` CLI dispatches the job with `mode=review` in the metadata:
+1. The `yeet` CLI dispatches the job with `mode=review` in the metadata:
    ```
    POST /v1/job/run-coding-agent/dispatch
    Meta: { "project": "rule1", "mode": "review", ... }
@@ -152,7 +152,7 @@ co run rule1 "Review the ISM data import pipeline for security issues. \
 ### Result
 
 ```bash
-$ co logs <dispatch-id>
+$ yeet logs <dispatch-id>
 --- Security Review: ISM Data Import Pipeline ---
 
 CRITICAL:
@@ -186,7 +186,7 @@ You need to test the FIDO2 authentication flow end-to-end, which requires a phys
 ### Command
 
 ```bash
-co run login2 "Run the FIDO2 WebAuthn registration and authentication integration tests. \
+yeet run login2 "Run the FIDO2 WebAuthn registration and authentication integration tests. \
   The YubiKey is available at the USB device path provided in the environment. \
   Use the libfido2 CLI tools to interact with the key. \
   Run the full FIDO2 test suite and report pass/fail for each test case." \
@@ -195,7 +195,7 @@ co run login2 "Run the FIDO2 WebAuthn registration and authentication integratio
 
 ### Under the Hood
 
-1. The `co` CLI dispatches with an additional constraint in the metadata:
+1. The `yeet` CLI dispatches with an additional constraint in the metadata:
    ```
    Meta: { "project": "login2", "device": "yubikey", ... }
    ```
@@ -217,7 +217,7 @@ co run login2 "Run the FIDO2 WebAuthn registration and authentication integratio
 ### Result
 
 ```bash
-$ co status <dispatch-id>
+$ yeet status <dispatch-id>
 Job:      run-coding-agent/dispatch-m3n4o5
 Node:     co-dell-01
 Device:   yubikey (locked for duration)
@@ -246,7 +246,7 @@ You need to flash new firmware to an ESP32 dev board connected to `co-dell-02`, 
 ### Command
 
 ```bash
-co run threat10 "Flash the firmware in firmware/sensor-v2.3.bin to the ESP32 using esptool.py. \
+yeet run threat10 "Flash the firmware in firmware/sensor-v2.3.bin to the ESP32 using esptool.py. \
   After flashing, open the serial console at 115200 baud and verify the boot message \
   contains 'sensor-v2.3 ready'. Then run the integration test suite in tests/integration/ \
   which sends commands over serial and validates responses. \
@@ -266,7 +266,7 @@ co run threat10 "Flash the firmware in firmware/sensor-v2.3.bin to the ESP32 usi
 ### Result
 
 ```bash
-$ co logs <dispatch-id>
+$ yeet logs <dispatch-id>
 Flash:    sensor-v2.3.bin written successfully (438,272 bytes)
 Boot:     "threat10 sensor-v2.3 ready [heap: 245760]"
 
@@ -292,7 +292,7 @@ You want a deep architectural analysis of the entire peer6 codebase overnight. T
 ### Command
 
 ```bash
-co run peer6 "Perform a comprehensive architectural analysis of the peer6 codebase. \
+yeet run peer6 "Perform a comprehensive architectural analysis of the peer6 codebase. \
   Cover: \
   1. Dependency graph between packages (apps/api, apps/web, packages/shared) \
   2. API endpoint inventory with auth requirements \
@@ -309,11 +309,11 @@ co run peer6 "Perform a comprehensive architectural analysis of the peer6 codeba
 
 ### Under the Hood
 
-1. The `co` CLI dispatches with `mode=review` and `budget=15` in the metadata.
+1. The `yeet` CLI dispatches with `mode=review` and `budget=15` in the metadata.
 2. Nomad schedules it to an available Dell. There is no built-in priority in Nomad's batch scheduler for this -- it just runs when a Dell is free. If all Dells are busy, it queues until one becomes available.
 3. `run-agent.sh` reads `NOMAD_META_budget=15` and configures cost tracking. The script monitors token usage in real time (via the agent's streaming output or a sidecar cost tracker). If the estimated cost approaches $15, the script sends a graceful termination signal, giving the agent 60 seconds to produce a partial report before killing it.
 4. The agent methodically reads through the entire codebase -- hundreds of files across three packages. It builds up its analysis iteratively.
-5. The agent finishes its report at $11.87, well under the cap. The allocation completes at 2:14 AM. Results are written to Nomad Variables under `co/results/<dispatch-id>`.
+5. The agent finishes its report at $11.87, well under the cap. The allocation completes at 2:14 AM. Results are written to Nomad Variables under `yeet/results/<dispatch-id>`.
 6. An Ntfy notification fires on completion.
 
 ### Result
@@ -321,11 +321,11 @@ co run peer6 "Perform a comprehensive architectural analysis of the peer6 codeba
 The next morning:
 
 ```bash
-$ co ps --done --since 12h
+$ yeet ps --done --since 12h
 DISPATCH      PROJECT  COST     DURATION  STATUS
 dispatch-s9t0 peer6    $11.87   7h 27m    complete
 
-$ co logs dispatch-s9t0
+$ yeet logs dispatch-s9t0
 --- Architectural Analysis: peer6 ---
 
 1. Dependency Graph
@@ -366,7 +366,7 @@ A task tries to modify the CI/CD pipeline configuration. The `run-agent.sh` wrap
 The user submitted a normal implementation task:
 
 ```bash
-co run peer6 "Set up GitHub Actions to run the test suite on every PR. \
+yeet run peer6 "Set up GitHub Actions to run the test suite on every PR. \
   Create the workflow file and configure it for the pnpm monorepo."
 ```
 
@@ -374,7 +374,7 @@ co run peer6 "Set up GitHub Actions to run the test suite on every PR. \
 
 1. The task starts normally on `co-dell-01`. The agent begins working.
 2. The agent attempts to create `.github/workflows/ci.yml`. `run-agent.sh` has a file-watch or hook that detects writes to paths matching `*.github/workflows/*`, `*wrangler.toml`, `*.env*`, and other patterns defined in its risky-paths config.
-3. The script pauses the agent process (SIGSTOP or equivalent). It writes a pending approval record to Nomad Variables at `co/approvals/<dispatch-id>`:
+3. The script pauses the agent process (SIGSTOP or equivalent). It writes a pending approval record to Nomad Variables at `yeet/approvals/<dispatch-id>`:
    ```json
    {
      "action": "file_write",
@@ -386,23 +386,23 @@ co run peer6 "Set up GitHub Actions to run the test suite on every PR. \
 4. The script sends an Ntfy notification:
    ```
    Task dispatch-v1w2 wants to write: .github/workflows/ci.yml
-   Approve: co approve dispatch-v1w2
-   Reject:  co reject dispatch-v1w2
-   Stop:    co stop dispatch-v1w2
+   Approve: yeet approve dispatch-v1w2
+   Reject:  yeet reject dispatch-v1w2
+   Stop:    yeet stop dispatch-v1w2
    ```
 5. The Nomad allocation remains running (the process is paused, not exited). Nomad's `max_client_disconnect` or a generous `kill_timeout` keeps it alive during the wait.
 6. The user reviews and approves:
    ```bash
-   $ co approve dispatch-v1w2
+   $ yeet approve dispatch-v1w2
    ```
    This writes `"status": "approved"` to the Nomad Variable. The script polls the variable, sees the approval, resumes the agent (SIGCONT), and the file write proceeds.
-7. If the user runs `co stop dispatch-v1w2` instead, the script kills the agent and the allocation fails.
-8. If the user runs `co reject dispatch-v1w2`, the script tells the agent to skip that file and continue (or terminates, depending on config).
+7. If the user runs `yeet stop dispatch-v1w2` instead, the script kills the agent and the allocation fails.
+8. If the user runs `yeet reject dispatch-v1w2`, the script tells the agent to skip that file and continue (or terminates, depending on config).
 
 ### Result
 
 ```bash
-$ co status dispatch-v1w2
+$ yeet status dispatch-v1w2
 Job:      run-coding-agent/dispatch-v1w2
 Node:     co-dell-01
 Status:   complete
@@ -424,14 +424,14 @@ A task completed 80% of the work -- it implemented the notification API endpoint
 
 ```bash
 # Check what the previous job did:
-$ co logs dispatch-a1b2c3d4
+$ yeet logs dispatch-a1b2c3d4
 ...
 Session: session_a1b2c3d4
-Branch:  co/dispatch-a1b2c3d4
+Branch:  yeet/dispatch-a1b2c3d4
 Note:    Implemented notification API endpoints. Frontend components not yet created.
 
 # Continue the session:
-$ co continue dispatch-a1b2c3d4 "Good work on the API endpoints. Now create the frontend: \
+$ yeet continue dispatch-a1b2c3d4 "Good work on the API endpoints. Now create the frontend: \
   1. NotificationBell.svelte - icon in the header that shows unread count \
   2. NotificationPanel.svelte - dropdown listing recent notifications \
   3. Wire up the WebSocket connection in a Svelte store for real-time updates \
@@ -441,7 +441,7 @@ $ co continue dispatch-a1b2c3d4 "Good work on the API endpoints. Now create the 
 
 ### Under the Hood
 
-1. The `co continue` command reads the `session_id` from Nomad Variables at `co/results/dispatch-a1b2c3d4`. It finds `session_id = session_a1b2c3d4`.
+1. The `yeet continue` command reads the `session_id` from Nomad Variables at `yeet/results/dispatch-a1b2c3d4`. It finds `session_id = session_a1b2c3d4`.
 2. The CLI dispatches a new job:
    ```
    POST /v1/job/run-coding-agent/dispatch
@@ -453,7 +453,7 @@ $ co continue dispatch-a1b2c3d4 "Good work on the API endpoints. Now create the 
    }
    ```
 3. Nomad schedules this to any Dell with `project_peer6 = true`. Ideally the same Dell that ran the original task (so the branch and session state are local), but it works on any Dell since the branch was pushed to the remote.
-4. `run-agent.sh` reads `NOMAD_META_session_id`. It checks out the existing branch `co/dispatch-a1b2c3d4`, pulls the latest, and launches the agent with the session resume flag:
+4. `run-agent.sh` reads `NOMAD_META_session_id`. It checks out the existing branch `yeet/dispatch-a1b2c3d4`, pulls the latest, and launches the agent with the session resume flag:
    - For Claude Code: `claude --resume session_a1b2c3d4 -p "..."`
    - For Crush: equivalent session continuation mechanism
 5. The agent resumes with full context of the previous session. It implements the three frontend components, wires up the store, runs tests and type checks.
@@ -462,7 +462,7 @@ $ co continue dispatch-a1b2c3d4 "Good work on the API endpoints. Now create the 
 ### Result
 
 ```bash
-$ co status <new-dispatch-id>
+$ yeet status <new-dispatch-id>
 Job:      run-coding-agent/dispatch-x3y4z5
 Node:     co-dell-01
 Parent:   dispatch-a1b2c3d4
@@ -470,7 +470,7 @@ Session:  session_a1b2c3d4 (resumed)
 Status:   complete
 Duration: 8m 55s
 Cost:     $1.42 (session total: $3.60)
-Branch:   co/dispatch-a1b2c3d4
+Branch:   yeet/dispatch-a1b2c3d4
 PR:       https://github.com/link42/peer6/pull/47 (updated)
 Files:    5 changed, 312 insertions, 8 deletions
 Tests:    97 passed, 0 failed
@@ -489,7 +489,7 @@ You have a complex refactoring task and want to compare how different runtimes a
 ### Command
 
 ```bash
-co run peer6 "Refactor the mentor matching algorithm in src/lib/matching.ts. \
+yeet run peer6 "Refactor the mentor matching algorithm in src/lib/matching.ts. \
   Currently it's a single 200-line function. Break it into: \
   1. A scoring module that weights different match criteria \
   2. A filtering module that eliminates incompatible pairs \
@@ -497,7 +497,7 @@ co run peer6 "Refactor the mentor matching algorithm in src/lib/matching.ts. \
   Each module should be independently testable. Write tests." \
   --runtime crush --model anthropic/claude-sonnet-4
 
-co run peer6 "Refactor the mentor matching algorithm in src/lib/matching.ts. \
+yeet run peer6 "Refactor the mentor matching algorithm in src/lib/matching.ts. \
   Currently it's a single 200-line function. Break it into: \
   1. A scoring module that weights different match criteria \
   2. A filtering module that eliminates incompatible pairs \
@@ -510,14 +510,14 @@ co run peer6 "Refactor the mentor matching algorithm in src/lib/matching.ts. \
 
 1. Two independent dispatches to Nomad, each with different `runtime` and `model` metadata.
 2. Nomad schedules them to different Dells (or the same Dell if one is idle and can handle both). Each gets its own allocation.
-3. Each Dell checks out a separate branch: `co/dispatch-<id-1>` and `co/dispatch-<id-2>`.
+3. Each Dell checks out a separate branch: `yeet/dispatch-<id-1>` and `yeet/dispatch-<id-2>`.
 4. The first runs Crush with Claude Sonnet. The second runs Claude Code with Opus. Both work on the same refactoring task independently.
 5. Both produce separate branches, separate draft PRs, and separate results in Nomad Variables.
 
 ### Result
 
 ```bash
-$ co ps --done --since 1h
+$ yeet ps --done --since 1h
 DISPATCH      RUNTIME  MODEL                      COST    DURATION  STATUS
 dispatch-r1s2 crush    anthropic/claude-sonnet-4   $1.89   15m 03s  complete
 dispatch-t3u4 claude   opus                        $3.41   22m 18s  complete
@@ -538,14 +538,14 @@ You want the peer6 test suite to run every morning at 6:00 AM AEST and notify yo
 Option A -- Use Nomad's periodic job type:
 
 ```bash
-co schedule peer6 "Pull the latest main branch. Run 'pnpm install' then 'pnpm test'. \
+yeet schedule peer6 "Pull the latest main branch. Run 'pnpm install' then 'pnpm test'. \
   Report the results. If any tests fail, analyze the failure and suggest a fix. \
   Do not modify any files." \
   --every "0 7 * * *" \
   --mode review
 ```
 
-Under the hood, the `co schedule` command creates (or updates) a separate Nomad job called `scheduled-peer6-tests` with a `periodic` stanza:
+Under the hood, the `yeet schedule` command creates (or updates) a separate Nomad job called `scheduled-peer6-tests` with a `periodic` stanza:
 
 ```hcl
 periodic {
@@ -561,7 +561,7 @@ Option B -- Simple cron on a Dell:
 
 ```bash
 # In the crontab of co-dell-03:
-0 20 * * * /usr/local/bin/co run peer6 "Pull latest main. Run pnpm test. Report results." --mode review
+0 20 * * * /usr/local/bin/yeet run peer6 "Pull latest main. Run pnpm test. Report results." --mode review
 ```
 
 This is simpler but less visible to Nomad (it shows up as a regular dispatch, not a periodic job).
@@ -591,7 +591,7 @@ POST /api/sessions - 500: D1 binding not found
 Suggested fix: Update vitest.config.ts D1 binding from "DB" to "PEER6_DB"
 to match the wrangler.toml change in commit a3f8e21.
 
-View logs: co logs scheduled-peer6-tests/periodic-20260322
+View logs: yeet logs scheduled-peer6-tests/periodic-20260322
 Cost: $0.23
 ```
 
@@ -611,17 +611,17 @@ This is manual coordination. There is no built-in dependency chain in Nomad's jo
 
 ```bash
 # Step 1: Make the change in login2
-co run login2 "Add 'organization_id' to the session response in the auth middleware. \
+yeet run login2 "Add 'organization_id' to the session response in the auth middleware. \
   Update the session type in types.ts, the session creation in auth.ts, \
   and the GET /api/auth/get-session endpoint to include the org ID. \
   Run tests to confirm."
 
 # Wait for it to complete, review the result:
-$ co logs <dispatch-id-1>
+$ yeet logs <dispatch-id-1>
 # ... looks good ...
 
 # Step 2: Update peer6, referencing what was done in step 1
-co run peer6 "The login2 auth service now returns 'organization_id' in the session response. \
+yeet run peer6 "The login2 auth service now returns 'organization_id' in the session response. \
   Update peer6's auth client in src/lib/auth/client.ts to: \
   1. Add organization_id to the Session type \
   2. Store it in the auth store \
@@ -632,14 +632,14 @@ co run peer6 "The login2 auth service now returns 'organization_id' in the sessi
 
 ### Under the Hood
 
-1. Each `co run` is a standard Nomad job dispatch. There is no `depends-on` flag. The user is the orchestrator for cross-project work.
+1. Each `yeet run` is a standard Nomad job dispatch. There is no `depends-on` flag. The user is the orchestrator for cross-project work.
 2. The user reviews the first task's output before triggering the second. This is intentional -- cross-project changes need human review at the boundary.
-3. Future enhancement: `run-agent.sh` could support dispatching a follow-up job from within a task (by calling `co run` itself), enabling automated chains. But for now, the human reviews and triggers.
+3. Future enhancement: `run-agent.sh` could support dispatching a follow-up job from within a task (by calling `yeet run` itself), enabling automated chains. But for now, the human reviews and triggers.
 
 ### Result
 
 ```bash
-$ co ps --done --since 2h
+$ yeet ps --done --since 2h
 DISPATCH      PROJECT  STATUS    DURATION
 dispatch-ab11 login2   complete  9m 33s
 dispatch-ab22 peer6    complete  11m 07s
@@ -659,12 +659,12 @@ You want to see the state of your Dell fleet, drain a node for maintenance, and 
 
 ```bash
 # See all nodes
-$ co runners
+$ yeet runners
 ```
 
 ### Under the Hood
 
-The `co runners` command calls:
+The `yeet runners` command calls:
 ```
 GET /v1/nodes
 ```
@@ -674,7 +674,7 @@ It filters nodes by a naming convention or metadata tag (e.g., `role = coding-ru
 ### Result
 
 ```bash
-$ co runners
+$ yeet runners
 NODE          STATUS    ALLOCS  DEVICES          PROJECTS                UPTIME
 co-dell-01    ready     1       yubikey          peer6,login2,rule1      14d 3h
 co-dell-02    ready     2       esp32,hsm        peer6,threat10,patch8   14d 3h
@@ -684,7 +684,7 @@ co-dell-03    ready     0       (none)           peer6,login2,rule1      14d 3h
 To drain a node for maintenance:
 
 ```bash
-$ co drain co-dell-02
+$ yeet drain co-dell-02
 ```
 
 This calls:
@@ -696,7 +696,7 @@ Body: { "DrainSpec": { "Deadline": 3600000000000 }, "MarkEligible": false }
 Nomad stops scheduling new allocations to `co-dell-02`. Existing allocations are given up to 1 hour to complete (the deadline). Once drained:
 
 ```bash
-$ co runners
+$ yeet runners
 NODE          STATUS     ALLOCS  DEVICES          PROJECTS
 co-dell-01    ready      1       yubikey          peer6,login2,rule1
 co-dell-02    draining   1       esp32,hsm        peer6,threat10,patch8
@@ -709,7 +709,7 @@ co-dell-02    ineligible 0       esp32,hsm        peer6,threat10,patch8
 Perform maintenance (SSH in, update kernel, reboot). Then bring it back:
 
 ```bash
-$ co activate co-dell-02
+$ yeet activate co-dell-02
 ```
 
 This calls:
@@ -721,7 +721,7 @@ Body: { "Eligibility": "eligible" }
 The node becomes schedulable again:
 
 ```bash
-$ co runners
+$ yeet runners
 NODE          STATUS    ALLOCS  DEVICES          PROJECTS
 co-dell-01    ready     1       yubikey          peer6,login2,rule1
 co-dell-02    ready     0       esp32,hsm        peer6,threat10,patch8
@@ -741,12 +741,12 @@ You want to see how much you have spent on AI coding tasks across projects and t
 ### Command
 
 ```bash
-$ co cost
+$ yeet cost
 ```
 
 ### Under the Hood
 
-The `co cost` command reads Nomad Variables stored under the `co/cost/` prefix. Every completed task writes its cost to a variable like `co/cost/2026-03/dispatch-a1b2c3d4`:
+The `yeet cost` command reads Nomad Variables stored under the `yeet/cost/` prefix. Every completed task writes its cost to a variable like `yeet/cost/2026-03/dispatch-a1b2c3d4`:
 
 ```json
 {
@@ -761,29 +761,29 @@ The `co cost` command reads Nomad Variables stored under the `co/cost/` prefix. 
 }
 ```
 
-The `co cost` CLI reads all variables under the prefix, aggregates them by project, model, and time period, and formats the output.
+The `yeet cost` CLI reads all variables under the prefix, aggregates them by project, model, and time period, and formats the output.
 
 ```
-GET /v1/var?prefix=co/cost/2026-03
+GET /v1/var?prefix=yeet/cost/2026-03
 ```
 
 ### Result
 
 ```bash
-$ co cost
+$ yeet cost
 Period       Total     Tasks   Avg/Task
 Today        $4.82     3       $1.61
 This week    $31.47    22      $1.43
 This month   $127.93   89      $1.44
 
-$ co cost --by project
+$ yeet cost --by project
 PROJECT   TOTAL     TASKS   PCT
 peer6     $68.41    47      53%
 login2    $31.22    23      24%
 rule1     $18.90    12      15%
 threat10  $9.40     7       8%
 
-$ co cost --by model
+$ yeet cost --by model
 MODEL                       TOTAL     TASKS
 anthropic/claude-opus-4     $72.18    31
 anthropic/claude-sonnet-4   $41.90    42
@@ -806,13 +806,13 @@ Something is going wrong -- an agent is writing unexpected files, costs are spik
 Stop a single job:
 
 ```bash
-$ co stop dispatch-ef44
+$ yeet stop dispatch-ef44
 ```
 
 Stop all running jobs:
 
 ```bash
-$ co stop --all
+$ yeet stop --all
 WARNING: This will terminate 3 running allocations on 2 nodes.
 Confirm? [y/N]: y
 
@@ -838,7 +838,7 @@ This tells Nomad to stop the job. Nomad sends a kill signal to the allocation. T
 
 If the process does not exit within the `kill_timeout` (configured in the job spec, e.g., 30 seconds), Nomad sends SIGKILL.
 
-For `co stop --all`, the CLI:
+For `yeet stop --all`, the CLI:
 1. Lists all running allocations: `GET /v1/allocations?filter=JobID==run-coding-agent&filter=ClientStatus==running`
 2. For each, stops the parent dispatch job: `DELETE /v1/job/<dispatch-job-id>`
 
@@ -847,7 +847,7 @@ Any uncommitted file changes are left on the working branches (not pushed). Noth
 ### Result
 
 ```bash
-$ co ps --done --since 1h
+$ yeet ps --done --since 1h
 DISPATCH      PROJECT  NODE         STATUS      STOPPED-BY
 dispatch-ef44 peer6    co-dell-01   stopped     manual
 dispatch-ef55 peer6    co-dell-01   stopped     manual
@@ -884,9 +884,9 @@ No user command -- this is an automatic failure handling scenario.
    ```
 5. The script sends an Ntfy notification:
    ```
-   [co] Task dispatch-m3n4 FAILED: YubiKey disconnected
+   [yeet] Task dispatch-m3n4 FAILED: YubiKey disconnected
    The YubiKey was unplugged from co-dell-01 while the FIDO2 tests were running.
-   Reconnect the device and re-run: co run login2 "..." --needs yubikey
+   Reconnect the device and re-run: yeet run login2 "..." --needs yubikey
    ```
 6. The Nomad allocation exits with a non-zero status. Nomad's restart policy in the job spec determines what happens next:
    - If `restart { attempts = 2, delay = "30s" }`, Nomad will restart the task. `run-agent.sh` checks for the device on startup -- if the YubiKey was reconnected within 30 seconds, the retry succeeds.
@@ -895,7 +895,7 @@ No user command -- this is an automatic failure handling scenario.
 ### Result
 
 ```bash
-$ co status dispatch-m3n4
+$ yeet status dispatch-m3n4
 Job:      run-coding-agent/dispatch-m3n4
 Node:     co-dell-01
 Status:   failed
@@ -912,7 +912,7 @@ The task was never silently lost. The user gets a clear notification of what hap
 
 ### Scenario
 
-The `co` CLI covers the common workflows, but Nomad's own CLI and UI are always available for anything `co` does not cover. Since there is no custom API -- just Nomad -- you can always fall back to the standard Nomad tooling.
+The `yeet` CLI covers the common workflows, but Nomad's own CLI and UI are always available for anything `yeet` does not cover. Since there is no custom API -- just Nomad -- you can always fall back to the standard Nomad tooling.
 
 ### Command Examples
 
@@ -941,7 +941,7 @@ Stream live logs from a running task:
 ```bash
 $ nomad alloc logs -f <alloc-id> execute
 [2026-03-22 10:15:03] Cloning peer6 repo...
-[2026-03-22 10:15:08] Checking out branch co/dispatch-xyz
+[2026-03-22 10:15:08] Checking out branch yeet/dispatch-xyz
 [2026-03-22 10:15:10] Starting crush with model anthropic/claude-sonnet-4
 [2026-03-22 10:15:11] Agent reading PLAN.md...
 ...
@@ -1001,7 +1001,7 @@ The Nomad UI shows all jobs, allocations, nodes, and logs in a web dashboard. Us
 
 ### Under the Hood
 
-There is no "under the hood" here. These are direct Nomad API calls. The `co` CLI is a convenience wrapper, not a gatekeeper. Everything it does maps to documented Nomad HTTP API endpoints. If you need something `co` does not support, use `nomad` directly.
+There is no "under the hood" here. These are direct Nomad API calls. The `yeet` CLI is a convenience wrapper, not a gatekeeper. Everything it does maps to documented Nomad HTTP API endpoints. If you need something `yeet` does not support, use `nomad` directly.
 
 ### Result
 
@@ -1015,19 +1015,19 @@ These sixteen use cases cover the primary interaction patterns with code-orchest
 
 | # | Use Case | Key Feature |
 |---|----------|-------------|
-| 1 | Basic implementation | `co run` dispatches parameterized Nomad job, agent executes, branch + PR created |
+| 1 | Basic implementation | `yeet run` dispatches parameterized Nomad job, agent executes, branch + PR created |
 | 2 | Multi-project parallel | Independent dispatches, Nomad schedules to available Dells |
 | 3 | Code review | `--mode review` restricts agent to read-only, report output only |
 | 4 | Device-dependent testing | Node metadata constraints, `flock` device locking |
 | 5 | Firmware/hardware | Serial device routing via Nomad constraints + environment variables |
 | 6 | Long-running analysis | Budget caps in `run-agent.sh`, overnight execution |
 | 7 | Approval gate | Script-level pause/resume, Nomad Variables for approval state |
-| 8 | Session continuation | `co continue` reads session_id from Nomad Variables, dispatches with resume |
+| 8 | Session continuation | `yeet continue` reads session_id from Nomad Variables, dispatches with resume |
 | 9 | Model/runtime switching | Multiple dispatches with different metadata, compare results |
-| 10 | Scheduled/recurring | Nomad periodic jobs or cron-triggered `co run` |
+| 10 | Scheduled/recurring | Nomad periodic jobs or cron-triggered `yeet run` |
 | 11 | Cross-project coordination | Manual sequencing by user, future: in-script dispatch chaining |
-| 12 | Fleet management | `co runners/drain/activate` wrapping Nomad node API |
+| 12 | Fleet management | `yeet runners/drain/activate` wrapping Nomad node API |
 | 13 | Cost monitoring | Nomad Variables as cost store, CLI aggregation |
 | 14 | Emergency stop | `DELETE /v1/job/:id` for each running dispatch |
 | 15 | Device disconnection | Script-level detection, Nomad restart policy, Ntfy notification |
-| 16 | Using Nomad directly | Full access to `nomad` CLI, API, and UI for anything `co` does not cover |
+| 16 | Using Nomad directly | Full access to `nomad` CLI, API, and UI for anything `yeet` does not cover |

@@ -12,7 +12,7 @@ The flow is:
 
 1. Devices are plugged into Dell 5070 runners and given stable names via udev rules.
 2. The Nomad client on each runner advertises attached devices via its `meta` block (e.g., `device_yubikey = true`).
-3. When a task requires a device, the `co` CLI adds a Nomad constraint targeting that device's metadata key, and Nomad schedules the job on a node that satisfies the constraint.
+3. When a task requires a device, the `yeet` CLI adds a Nomad constraint targeting that device's metadata key, and Nomad schedules the job on a node that satisfies the constraint.
 4. The `run-agent.sh` entrypoint acquires an exclusive flock on the device before starting the task.
 5. The coding agent (Crush/Claude/Aider) accesses the device only through wrapper scripts.
 6. After the task completes, the lock is released and the device becomes available again.
@@ -184,10 +184,10 @@ meta {
 
 ### Querying the Device Inventory
 
-The `co devices` command queries all Nomad nodes and extracts device metadata:
+The `yeet devices` command queries all Nomad nodes and extracts device metadata:
 
 ```bash
-co devices
+yeet devices
 ```
 
 Output:
@@ -201,7 +201,7 @@ dell-03     esp32_front      /dev/esp32-front    available
 dell-03     esp32_rear       /dev/esp32-rear     available
 ```
 
-Under the hood, `co devices` calls the Nomad API:
+Under the hood, `yeet devices` calls the Nomad API:
 
 ```bash
 # List all nodes
@@ -258,17 +258,17 @@ Nomad will only schedule this job on nodes where `device_yubikey = "true"` in th
 
 ### The `--needs` Flag
 
-The `co` CLI's `--needs` flag translates device requirements into Nomad constraints automatically:
+The `yeet` CLI's `--needs` flag translates device requirements into Nomad constraints automatically:
 
 ```bash
 # Single device requirement
-co run --needs yubikey -- "sign the release artifacts with the YubiKey"
+yeet run --needs yubikey -- "sign the release artifacts with the YubiKey"
 
 # Multiple device requirements (all must be on the same node)
-co run --needs yubikey --needs yubihsm -- "generate a key on the HSM and enroll it on the YubiKey"
+yeet run --needs yubikey --needs yubihsm -- "generate a key on the HSM and enroll it on the YubiKey"
 
 # Specific device variant
-co run --needs esp32_front -- "flash firmware to the front ESP32"
+yeet run --needs esp32_front -- "flash firmware to the front ESP32"
 ```
 
 Each `--needs <device>` flag adds a constraint block to the dispatched Nomad job:
@@ -287,7 +287,7 @@ The device path is made available to the task via the Nomad meta interpolation. 
 If a task needs two devices (e.g., both a YubiKey and an HSM), both constraints must be satisfied by the same node. Nomad handles this naturally -- all constraints on a job must be satisfied by the placed node:
 
 ```bash
-co run --needs yubikey --needs yubihsm -- "enroll the HSM key onto the YubiKey"
+yeet run --needs yubikey --needs yubihsm -- "enroll the HSM key onto the YubiKey"
 ```
 
 This produces:
@@ -982,7 +982,7 @@ systemctl restart usbguard
 ### 10. Verify
 
 ```bash
-co devices
+yeet devices
 ```
 
 This should show the new device as available on the node. You can also verify directly via the Nomad API:
@@ -995,5 +995,5 @@ curl -s http://localhost:4646/v1/node/$(nomad node status -self -json | jq -r '.
 The device is now available for task routing. Any task dispatched with `--needs yourdevice` will be routed to this node:
 
 ```bash
-co run --needs yourdevice -- "test the new device"
+yeet run --needs yourdevice -- "test the new device"
 ```

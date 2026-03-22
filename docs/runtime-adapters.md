@@ -60,7 +60,7 @@ PROMPT=$(cat "$CO_PROMPT_FILE")
 WORKSPACE="/opt/code-orchestration/workspaces/$PROJECT"
 cd "$WORKSPACE"
 git fetch origin && git reset --hard origin/main
-BRANCH="co/${PROJECT}-$(echo $NOMAD_JOB_ID | cut -c1-8)"
+BRANCH="yeet/${PROJECT}-$(echo $NOMAD_JOB_ID | cut -c1-8)"
 git worktree add "/tmp/$BRANCH" -b "$BRANCH"
 cd "/tmp/$BRANCH"
 
@@ -76,10 +76,10 @@ esac
 "${CMD[@]}" < "$CO_PROMPT_FILE" | tee /tmp/output.log
 
 # 5. Post-run: commit and push
-git add -A && git commit -m "co: $PROJECT task via $RUNTIME"
+git add -A && git commit -m "yeet: $PROJECT task via $RUNTIME"
 git push origin "$BRANCH"
 gh pr create --draft \
-  --title "co: $PROJECT task" \
+  --title "yeet: $PROJECT task" \
   --body "Automated by code-orchestration. Job: $NOMAD_JOB_ID"
 
 # 6. Record cost
@@ -96,7 +96,7 @@ curl -s -X PUT \
   }}"
 
 # 7. Notify
-curl -d "Task complete: $PROJECT ($RUNTIME)" ntfy.sh/co-notifications
+curl -d "Task complete: $PROJECT ($RUNTIME)" ntfy.sh/yeet-notifications
 
 # 8. Cleanup
 git worktree remove "/tmp/$BRANCH"
@@ -299,7 +299,7 @@ curl -s -X PUT \
 2. Handle command construction for each task mode (implement, test, review, analyze).
 3. Handle session resume if the runtime supports it.
 4. Add cost extraction logic for the new runtime's output format.
-5. Test with a simple dispatch: `co run <project> "hello world" --runtime newruntime`
+5. Test with a simple dispatch: `yeet run <project> "hello world" --runtime newruntime`
 
 There is no adapter class to implement, no registry to update, and no TypeScript to write. The entire integration is a shell `case` branch plus a cost-parsing function.
 
@@ -329,10 +329,10 @@ What `run-agent.sh` can do with each runtime:
 
 ## 10. Configuration
 
-Runtime availability is per-Dell, configured via Ansible (which binaries are installed, which API keys are present). Project-level defaults and runtime preferences are in a config file read by the `co` CLI before dispatch:
+Runtime availability is per-Dell, configured via Ansible (which binaries are installed, which API keys are present). Project-level defaults and runtime preferences are in a config file read by the `yeet` CLI before dispatch:
 
 ```yaml
-# ~/.config/co/config.yaml
+# ~/.config/yeet/config.yaml
 defaults:
   runtime: crush
   model: anthropic/claude-sonnet-4
@@ -349,13 +349,13 @@ projects:
     model: google/gemini-2.5-pro
 ```
 
-The `co` CLI reads these defaults and passes them as meta fields in the Nomad job dispatch. Task-level overrides (via `--runtime` and `--model` flags on the `co` command) take precedence over project defaults.
+The `yeet` CLI reads these defaults and passes them as meta fields in the Nomad job dispatch. Task-level overrides (via `--runtime` and `--model` flags on the `yeet` command) take precedence over project defaults.
 
 ### Resolution Order
 
 When resolving which runtime and model to use for a task:
 
-1. **CLI flags** -- explicit `--runtime` and `--model` on the `co run` command.
-2. **Project configuration** -- project entry in `~/.config/co/config.yaml`.
-3. **Global defaults** -- top-level `defaults` in `~/.config/co/config.yaml`.
+1. **CLI flags** -- explicit `--runtime` and `--model` on the `yeet run` command.
+2. **Project configuration** -- project entry in `~/.config/yeet/config.yaml`.
+3. **Global defaults** -- top-level `defaults` in `~/.config/yeet/config.yaml`.
 4. **Hard-coded fallback** -- Crush with `anthropic/claude-sonnet-4`.

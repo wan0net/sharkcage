@@ -9,7 +9,7 @@ placement, execution, health, and state.
 
 | Abbreviation | Component | Description |
 |-------------|-----------|-------------|
-| co CLI | `co` binary | Runs on user's laptop |
+| yeet CLI | `yeet` binary | Runs on user's laptop |
 | Nomad Server | Nomad server agent | Runs on co-dell-01, single-node server cluster |
 | Nomad Client | Nomad client agent | Runs on each Dell (including dell-01) |
 | raw_exec | Nomad task driver | Spawns processes directly (no container isolation) |
@@ -28,7 +28,7 @@ Nomad evaluates constraints, places the allocation on a matching node, and
 raw_exec launches run-agent.sh, which manages the full git + runtime lifecycle.
 
 ```
-co run peer6 "implement feature X" --runtime crush --category quick
+yeet run peer6 "implement feature X" --runtime crush --category quick
 ```
 
 ### Dispatch Payload
@@ -55,7 +55,7 @@ Nomad creates an evaluation, which triggers the scheduler.
 ### Sequence Diagram
 
 ```
-  co CLI           Nomad Server       Nomad Client        run-agent.sh       Runtime (Crush)
+  yeet CLI         Nomad Server       Nomad Client        run-agent.sh       Runtime (Crush)
    |                    |                  |                    |                    |
    |-- POST /v1/job/    |                  |                    |                    |
    |   run-coding-agent |                  |                    |                    |
@@ -98,14 +98,14 @@ Nomad creates an evaluation, which triggers the scheduler.
    |                    |                  |                    |      main           |
    |                    |                  |                    |                    |
    |                    |                  |                    |-- git worktree add  |
-   |                    |                  |                    |   /tmp/co-abc12     |
-   |                    |                  |                    |   -b co/peer6-abc12 |
+   |                    |                  |                    |   /tmp/yeet-abc12   |
+   |                    |                  |                    |   -b yeet/peer6-abc12
    |                    |                  |                    |                    |
    |                    |                  |                    |-- spawn ----------->|
    |                    |                  |                    |   crush --prompt    |
    |                    |                  |                    |   "<decoded payload>"|
    |                    |                  |                    |   --model haiku     |
-   |                    |                  |                    |   (cwd=/tmp/co-abc12|
+   |                    |                  |                    |   (cwd=/tmp/yeet-abc|
    |                    |                  |                    |                    |
    |                    |                  |                    |                    |-- work...
    |                    |                  |                    |                    |-- writes files
@@ -115,9 +115,9 @@ Nomad creates an evaluation, which triggers the scheduler.
    |                    |                  |                    |                    |
    |                    |                  |                    |-- git add -A        |
    |                    |                  |                    |-- git commit -m     |
-   |                    |                  |                    |   "co: <summary>"   |
+   |                    |                  |                    |   "yeet: <summary>" |
    |                    |                  |                    |-- git push origin   |
-   |                    |                  |                    |   co/peer6-abc12    |
+   |                    |                  |                    |   yeet/peer6-abc12  |
    |                    |                  |                    |                    |
    |                    |                  |                    |-- gh pr create      |
    |                    |                  |                    |   --draft           |
@@ -143,7 +143,7 @@ Nomad creates an evaluation, which triggers the scheduler.
    |                    |                  |                    |                    |
    |                    |                  |                    |-- git worktree      |
    |                    |                  |                    |   remove            |
-   |                    |                  |                    |   /tmp/co-abc12     |
+   |                    |                  |                    |   /tmp/yeet-abc12   |
    |                    |                  |                    |                    |
    |                    |                  |<-- task complete --|                    |
    |                    |<-- alloc done ---|                    |                    |
@@ -157,7 +157,7 @@ Nomad creates an evaluation, which triggers the scheduler.
 2. Set up signal traps (SIGTERM, SIGINT) for graceful shutdown
 3. Acquire flock if device-specific (see Flow 2)
 4. `git fetch && git pull` on the base branch
-5. `git worktree add` with a branch named `co/<project>-<short-id>`
+5. `git worktree add` with a branch named `yeet/<project>-<short-id>`
 6. Spawn the runtime (Crush/Claude Code/Aider) with the prompt, working in the worktree
 7. Wait for runtime exit
 8. On success (exit 0): commit, push, create PR, store cost + session in Nomad Variables, notify via Ntfy
@@ -173,7 +173,7 @@ adds constraint metadata. Nomad evaluates node metadata to place the allocation
 on a node that has the required device.
 
 ```
-co run peer6 "sign release" --needs yubikey
+yeet run peer6 "sign release" --needs yubikey
 ```
 
 ### How Constraints Flow
@@ -209,7 +209,7 @@ This constraint is only evaluated when the dispatched job's meta includes
 ### Sequence Diagram
 
 ```
-  co CLI           Nomad Server       co-dell-01          co-dell-02
+  yeet CLI         Nomad Server       co-dell-01          co-dell-02
                                       (no yubikey)        (has yubikey)
    |                    |                  |                    |
    |-- POST /v1/job/    |                  |                    |
@@ -437,13 +437,13 @@ allocation ID from the job, then opens a streaming HTTP connection to the
 Nomad client's filesystem API.
 
 ```
-co logs abc12
+yeet logs abc12
 ```
 
 ### Sequence Diagram
 
 ```
-  co CLI           Nomad Server       Nomad Client
+  yeet CLI         Nomad Server       Nomad Client
    |                    |                  |
    |-- GET /v1/job/     |                  |
    |   run-coding-agent |                  |
@@ -512,13 +512,13 @@ runtime missed), the CLI reads the stored session ID from Nomad Variables and
 dispatches a new job that resumes the runtime's context.
 
 ```
-co continue abc12 "fix the edge case in error handling"
+yeet continue abc12 "fix the edge case in error handling"
 ```
 
 ### Sequence Diagram
 
 ```
-  co CLI           Nomad Server       Nomad Client        run-agent.sh       Runtime
+  yeet CLI         Nomad Server       Nomad Client        run-agent.sh       Runtime
    |                    |                  |                    |                |
    |-- GET /v1/var/     |                  |                    |                |
    |   sessions/abc12 ->|                  |                    |                |
@@ -532,7 +532,7 @@ co continue abc12 "fix the edge case in error handling"
    |    project:        |                  |                    |                |
    |    "peer6",        |                  |                    |                |
    |    branch:         |                  |                    |                |
-   |    "co/peer6-abc12"|                  |                    |                |
+   |    "yeet/peer6-abc12"|                  |                    |                |
    |  }                 |                  |                    |                |
    | } -----------------                  |                    |                |
    |                    |                  |                    |                |
@@ -545,7 +545,7 @@ co continue abc12 "fix the edge case in error handling"
    |    session_id:     |                  |                    |                |
    |     s_prev123      |                  |                    |                |
    |    branch:         |                  |                    |                |
-   |     co/peer6-abc12 |                  |                    |                |
+   |     yeet/peer6-abc12|                 |                    |                |
    |   Payload:         |                  |                    |                |
    |    "fix the edge..."                  |                    |                |
    |                    |                  |                    |                |
@@ -556,11 +556,11 @@ co continue abc12 "fix the edge case in error handling"
    |                    |                  |                    |                |
    |                    |                  |                    |-- git fetch     |
    |                    |                  |                    |-- git worktree  |
-   |                    |                  |                    |   add /tmp/co-  |
+   |                    |                  |                    |   add /tmp/yeet-|
    |                    |                  |                    |   xyz99 using   |
    |                    |                  |                    |   existing      |
    |                    |                  |                    |   branch        |
-   |                    |                  |                    |   co/peer6-abc12|
+   |                    |                  |                    |   yeet/peer6-abc12|
    |                    |                  |                    |                |
    |                    |                  |                    |-- spawn ------->|
    |                    |                  |                    |   crush         |
@@ -605,13 +605,13 @@ User stops a running task. The CLI can either deregister the entire job or stop
 a specific allocation.
 
 ```
-co stop abc12
+yeet stop abc12
 ```
 
 ### Sequence Diagram (Job Deregister)
 
 ```
-  co CLI           Nomad Server       Nomad Client        run-agent.sh       Runtime
+  yeet CLI         Nomad Server       Nomad Client        run-agent.sh       Runtime
    |                    |                  |                    |                |
    |-- DELETE /v1/job/  |                  |                    |                |
    |   run-coding-agent |                  |                    |                |
@@ -652,7 +652,7 @@ co stop abc12
 For stopping a specific allocation without deregistering the job:
 
 ```
-  co CLI           Nomad Server       Nomad Client
+  yeet CLI         Nomad Server       Nomad Client
    |                    |                  |
    |-- POST /v1/       |                  |
    |   allocation/      |                  |
@@ -778,13 +778,13 @@ stops scheduling new work to the node and optionally waits for current
 allocations to finish.
 
 ```
-co drain co-dell-02
+yeet drain co-dell-02
 ```
 
 ### Sequence Diagram
 
 ```
-  co CLI           Nomad Server       co-dell-02          co-dell-01
+  yeet CLI         Nomad Server       co-dell-02          co-dell-01
    |                    |                  |                    |
    |-- look up node ID  |                  |                    |
    |   GET /v1/nodes    |                  |                    |
@@ -836,11 +836,11 @@ co drain co-dell-02
 ### Re-activating a Node
 
 ```
-co activate co-dell-02
+yeet activate co-dell-02
 ```
 
 ```
-  co CLI           Nomad Server       co-dell-02
+  yeet CLI         Nomad Server       co-dell-02
    |                    |                  |
    |-- POST /v1/node/   |                  |
    |   node-xyz/        |                  |
@@ -906,14 +906,14 @@ in Nomad Variables. The CLI reads and aggregates these for reporting.
    |                    |
 ```
 
-### Retrieval (co cost)
+### Retrieval (yeet cost)
 
 ```
-co cost --project peer6 --period 7d
+yeet cost --project peer6 --period 7d
 ```
 
 ```
-  co CLI           Nomad Server
+  yeet CLI         Nomad Server
    |                    |
    |-- GET /v1/vars     |
    |   ?prefix=cost/ -->|
@@ -973,13 +973,13 @@ committing, pushing, and PR creation.
    |                    |                    |                  |
    |-- git worktree     |                    |                  |
    |   add              |                    |                  |
-   |   /tmp/co-abc12    |                    |                  |
-   |   -b co/peer6-     |                    |                  |
+   |   /tmp/yeet-abc12  |                    |                  |
+   |   -b yeet/peer6-   |                    |                  |
    |   abc12 ---------->|                    |                  |
    |                    |-- create worktree  |                  |
-   |                    |   at /tmp/co-abc12 |                  |
+   |                    |   at /tmp/yeet-abc12|                 |
    |                    |-- create branch    |                  |
-   |                    |   co/peer6-abc12   |                  |
+   |                    |   yeet/peer6-abc12 |                  |
    |                    |   from origin/main |                  |
    |                    |                    |                  |
    |   [runtime works in /tmp/co-abc12]      |                  |
@@ -990,18 +990,18 @@ committing, pushing, and PR creation.
    |                    |   changes          |                  |
    |                    |                    |                  |
    |-- git commit -m    |                    |                  |
-   |   "co: implement   |                    |                  |
+   |   "yeet: implement |                    |                  |
    |    feature X" ---->|                    |                  |
    |                    |-- create commit    |                  |
    |                    |                    |                  |
    |-- git push origin  |                    |                  |
-   |   co/peer6-abc12 ->|-- push ---------->|                  |
+   |   yeet/peer6-abc12->|-- push ---------->|                  |
    |                    |                    |-- branch created |
    |                    |                    |                  |
    |-- gh pr create ----|--------------------|----- ---------->|
    |   --draft          |                    |                  |
    |   --title          |                    |                  |
-   |   "co: implement   |                    |                  |
+   |   "yeet: implement |                    |                  |
    |    feature X"      |                    |                  |
    |   --body           |                    |                  |
    |   "Job: abc12      |                    |                  |
@@ -1013,7 +1013,7 @@ committing, pushing, and PR creation.
    |                    |                    |                  |
    |-- git worktree     |                    |                  |
    |   remove           |                    |                  |
-   |   /tmp/co-abc12 -->|                    |                  |
+   |   /tmp/yeet-abc12 ->|                    |                  |
    |                    |-- remove worktree  |                  |
    |                    |   (branch ref      |                  |
    |                    |    preserved)      |                  |
@@ -1023,18 +1023,18 @@ committing, pushing, and PR creation.
 ### Branch Naming Convention
 
 ```
-co/<project>-<short-id>
+yeet/<project>-<short-id>
 ```
 
 Examples:
-- `co/peer6-abc12`
-- `co/rule1-def34`
-- `co/login2-ghi56`
+- `yeet/peer6-abc12`
+- `yeet/rule1-def34`
+- `yeet/login2-ghi56`
 
 ### Worktree Paths
 
 ```
-/tmp/co-<short-id>
+/tmp/yeet-<short-id>
 ```
 
 Worktrees are in /tmp so they are cleaned up on reboot. The branch reference
@@ -1149,7 +1149,7 @@ notification script.
 
 ```
   Consumer           Nomad Server
-  (co watch /        (co-dell-01)
+  (yeet watch /      (co-dell-01)
    dashboard /
    script)
    |                    |
@@ -1210,9 +1210,9 @@ curl -s -N "http://co-dell-01:4646/v1/event/stream?topic=Allocation" | \
     failed=$(echo "$line" | jq -r '.Payload.Allocation.TaskStates.execute.Failed // empty')
     if [ "$state" = "dead" ]; then
       if [ "$failed" = "true" ]; then
-        curl -d "FAILED: $job" ntfy.sh/co-tasks
+        curl -d "FAILED: $job" ntfy.sh/yeet-tasks
       else
-        curl -d "DONE: $job" ntfy.sh/co-tasks
+        curl -d "DONE: $job" ntfy.sh/yeet-tasks
       fi
     fi
   done
@@ -1246,7 +1246,7 @@ job "nightly-tests" {
       driver = "raw_exec"
 
       config {
-        command = "/opt/co/run-agent.sh"
+        command = "/opt/yeet/run-agent.sh"
       }
 
       meta {
@@ -1358,7 +1358,7 @@ Job-level metadata (set at dispatch time):
 | `runtime` | `"crush"` | Which coding agent to use |
 | `category` | `"quick"` | Task sizing category |
 | `session_id` | `"s_prev123"` | Resume from previous session |
-| `branch` | `"co/peer6-abc12"` | Use existing branch (for continue) |
+| `branch` | `"yeet/peer6-abc12"` | Use existing branch (for continue) |
 | `branch_base` | `"main"` | Base branch for new worktree |
 | `pr_draft` | `"true"` | Whether to create PR as draft |
 | `device_yubikey` | `"true"` | Constraint: requires YubiKey |
