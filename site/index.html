@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>yeet - Throw code tasks at cheap hardware and walk away</title>
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --bg-surface: #12121a;
+    --bg-code: #1a1a26;
+    --text: #e0e0e8;
+    --text-dim: #8888a0;
+    --accent: #39ff14;
+    --accent-dim: rgba(57, 255, 20, 0.15);
+    --accent-glow: rgba(57, 255, 20, 0.3);
+    --border: #2a2a3a;
+    --font: 'SF Mono', 'Cascadia Code', 'Fira Code', 'JetBrains Mono', ui-monospace, monospace;
+    --max-w: 720px;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 15px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .container { max-width: var(--max-w); margin: 0 auto; padding: 0 24px; }
+
+  /* Hero */
+  .hero {
+    padding: 120px 0 80px;
+    text-align: center;
+    animation: fadeUp 0.6s ease-out;
+  }
+  .hero h1 {
+    font-size: clamp(4rem, 12vw, 8rem);
+    font-weight: 900;
+    letter-spacing: -0.04em;
+    color: var(--accent);
+    text-shadow: 0 0 60px var(--accent-glow);
+    line-height: 1;
+  }
+  .hero .tagline {
+    margin-top: 24px;
+    font-size: clamp(1rem, 2.5vw, 1.2rem);
+    color: var(--text-dim);
+    max-width: 520px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  /* Sections */
+  section { padding: 60px 0; }
+  section + section { border-top: 1px solid var(--border); }
+  h2 {
+    font-size: 1.4rem;
+    font-weight: 700;
+    margin-bottom: 24px;
+    color: var(--accent);
+  }
+  h3 {
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+  p { margin-bottom: 16px; color: var(--text-dim); }
+  p strong { color: var(--text); }
+
+  /* Code blocks */
+  pre {
+    background: var(--bg-code);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px 24px;
+    overflow-x: auto;
+    margin-bottom: 24px;
+    font-size: 13px;
+    line-height: 1.8;
+  }
+  pre .comment { color: #555570; }
+  pre .cmd { color: var(--accent); }
+  pre .arg { color: var(--text); }
+
+  /* Flow diagram */
+  .flow {
+    background: var(--bg-code);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 24px;
+    text-align: center;
+    font-size: 13px;
+    overflow-x: auto;
+    white-space: nowrap;
+    margin-bottom: 24px;
+    color: var(--text-dim);
+  }
+  .flow .node {
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .flow .arrow { color: var(--text-dim); padding: 0 4px; }
+
+  /* Comparison columns */
+  .compare {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+  .compare-col {
+    background: var(--bg-code);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+  }
+  .compare-col.reality { border-color: var(--accent); }
+  .compare-col h3 { color: var(--text-dim); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  .compare-col.reality h3 { color: var(--accent); }
+  .compare-col ul { list-style: none; padding: 0; margin-top: 12px; }
+  .compare-col li { padding: 4px 0; color: var(--text-dim); font-size: 0.9rem; }
+  .compare-col.reality li { color: var(--text); }
+
+  /* Feature grid */
+  .features {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+  .feature {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    transition: border-color 0.2s;
+  }
+  .feature:hover { border-color: var(--accent); }
+  .feature h3 { color: var(--text); font-size: 0.95rem; }
+  .feature p { color: var(--text-dim); font-size: 0.85rem; margin-bottom: 0; }
+
+  /* Hardware stats */
+  .hw-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+  .hw-stat {
+    background: var(--bg-code);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    text-align: center;
+  }
+  .hw-stat .val {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: var(--accent);
+    display: block;
+  }
+  .hw-stat .label {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    margin-top: 4px;
+    display: block;
+  }
+
+  /* Footer */
+  footer {
+    border-top: 1px solid var(--border);
+    padding: 40px 0;
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 0.85rem;
+  }
+  footer a {
+    color: var(--accent);
+    text-decoration: none;
+    border-bottom: 1px solid var(--accent-dim);
+    transition: border-color 0.2s;
+  }
+  footer a:hover { border-color: var(--accent); }
+  footer p { margin-bottom: 8px; }
+
+  /* Animations */
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .fade-in { animation: fadeUp 0.5s ease-out both; }
+  .fade-in:nth-child(2) { animation-delay: 0.1s; }
+  .fade-in:nth-child(3) { animation-delay: 0.2s; }
+
+  /* Responsive */
+  @media (max-width: 600px) {
+    .hero { padding: 80px 0 60px; }
+    .compare, .features { grid-template-columns: 1fr; }
+    .hw-grid { grid-template-columns: 1fr 1fr; }
+    pre { font-size: 11px; padding: 14px 16px; }
+    section { padding: 40px 0; }
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+
+  <header class="hero">
+    <h1>yeet</h1>
+    <p class="tagline">Yeet your code tasks at a fleet of Dell 5070s and walk away.</p>
+  </header>
+
+  <section class="fade-in">
+    <h2>The pitch</h2>
+    <p>You have tasks. You have small computers. You <strong>yeet</strong> the tasks at the computers.</p>
+    <p>The computers run AI coding agents -- Claude Code, Crush, Aider -- autonomously.
+       You go get coffee. Or sleep. Or touch grass. Whatever people do when they're not
+       babysitting AI.</p>
+    <p>When you come back, there are <strong>draft PRs</strong> waiting for you. Reviewed, tested, ready to merge.
+       Like a very cheap, very quiet development team that never asks about sprint velocity.</p>
+    <p>If something scary happens -- like the AI wanting to <code>rm -rf /</code> -- yeet
+       <strong>pauses and texts you</strong>. Because even reckless abandonment has limits.</p>
+  </section>
+
+  <section class="fade-in">
+    <h2>The stack</h2>
+    <div class="compare">
+      <div class="compare-col">
+        <h3>What you'd expect</h3>
+        <ul>
+          <li>Kubernetes</li>
+          <li>47 microservices</li>
+          <li>A dedicated DevOps team</li>
+          <li>$2,000/month in cloud bills</li>
+          <li>A Slack channel called #incidents</li>
+        </ul>
+      </div>
+      <div class="compare-col reality">
+        <h3>What yeet uses</h3>
+        <ul>
+          <li>Nomad</li>
+          <li>Some shell scripts</li>
+          <li>Dell thin clients from eBay</li>
+          <li>~$5/year in electricity per node</li>
+          <li>About 200 lines of CLI code</li>
+        </ul>
+      </div>
+    </div>
+    <p>Orchestration: <strong>Nomad</strong>. Networking: <strong>Tailscale</strong>.
+       Provisioning: <strong>Ansible</strong>. Device routing: <strong>udev + flock</strong>.
+       Vibes: <strong>immaculate</strong>.</p>
+  </section>
+
+  <section class="fade-in">
+    <h2>How it works</h2>
+    <div class="flow">
+      <span class="node">You</span>
+      <span class="arrow">--></span>
+      <span class="node">yeet run</span>
+      <span class="arrow">--></span>
+      <span class="node">Nomad</span>
+      <span class="arrow">--></span>
+      <span class="node">Dell 5070</span>
+      <span class="arrow">--></span>
+      <span class="node">AI Agent</span>
+      <span class="arrow">--></span>
+      <span class="node">Draft PR</span>
+      <span class="arrow">--></span>
+      <span class="node">You</span>
+      <span style="color:var(--text-dim);font-size:11px;"> (hours later, caffeinated)</span>
+    </div>
+    <p>That's it. That's the architecture diagram. No, there isn't a second slide.</p>
+  </section>
+
+  <section class="fade-in">
+    <h2>Features</h2>
+    <div class="features">
+      <div class="feature">
+        <h3>Agent-agnostic</h3>
+        <p>We don't play favorites. Claude, Crush, Aider -- whoever gets the job done. Bring your own agent if you want. We're not your mom.</p>
+      </div>
+      <div class="feature">
+        <h3>Device-aware routing</h3>
+        <p>Need a YubiKey plugged in? yeet knows which Dell has one. It's like Uber but for USB devices.</p>
+      </div>
+      <div class="feature">
+        <h3>Cost controls</h3>
+        <p>Set a budget so your AI doesn't spend your rent money on API calls. Capitalism requires guardrails.</p>
+      </div>
+      <div class="feature">
+        <h3>Approval gates</h3>
+        <p>If the AI tries something sketchy, yeet pauses and asks you first. Like a responsible adult.</p>
+      </div>
+      <div class="feature">
+        <h3>Fleet management</h3>
+        <p>Drain a runner, take it offline, bring it back. Like managing a very small, very cheap data center.</p>
+      </div>
+      <div class="feature">
+        <h3>Nomad-powered</h3>
+        <p>We literally just wrapped Nomad's API. Standing on the shoulders of HashiCorp giants.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="fade-in">
+    <h2>CLI</h2>
+    <pre>
+<span class="comment"># Yeet a task and forget about it</span>
+<span class="cmd">yeet run</span> <span class="arg">peer6 "implement the notification system"</span>
+
+<span class="comment"># Yeet two tasks at once because you're ambitious</span>
+<span class="cmd">yeet run</span> <span class="arg">peer6 "add dark mode"</span> &amp;
+<span class="cmd">yeet run</span> <span class="arg">login2 "write all the tests"</span> &amp;
+
+<span class="comment"># Check on your fleet of discount workstations</span>
+<span class="cmd">yeet runners</span>
+
+<span class="comment"># Oh no, what's it doing</span>
+<span class="cmd">yeet logs</span> <span class="arg">peer6-abc123</span>
+
+<span class="comment"># STOP STOP STOP</span>
+<span class="cmd">yeet stop</span> <span class="arg">peer6-abc123</span></pre>
+  </section>
+
+  <section class="fade-in">
+    <h2>The Dell 5070</h2>
+    <p>The unsung hero of this whole operation. A thin client so modest it doesn't even have fans.</p>
+    <div class="hw-grid">
+      <div class="hw-stat">
+        <span class="val">$50</span>
+        <span class="label">on eBay</span>
+      </div>
+      <div class="hw-stat">
+        <span class="val">15W</span>
+        <span class="label">your phone charger draws more</span>
+      </div>
+      <div class="hw-stat">
+        <span class="val">$5/yr</span>
+        <span class="label">electricity cost</span>
+      </div>
+      <div class="hw-stat">
+        <span class="val">0 dB</span>
+        <span class="label">silent, fanless</span>
+      </div>
+      <div class="hw-stat">
+        <span class="val">24/7</span>
+        <span class="label">runs forever</span>
+      </div>
+    </div>
+    <p>It fits in a desk drawer. It runs Ubuntu. The AI runs in the cloud anyway -- these just
+       manage repos, shuttle files, and look unassuming. More computing power than the job
+       requires, which is exactly the vibe we're going for.</p>
+  </section>
+
+</div>
+
+<footer>
+  <div class="container">
+    <p><a href="https://github.com/wan0net/code-orchestration">wan0net/yeet</a></p>
+    <p>Built by someone who got tired of babysitting AI coding sessions.</p>
+  </div>
+</footer>
+
+</body>
+</html>
