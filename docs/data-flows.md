@@ -20,7 +20,8 @@ placement, execution, health, and state.
 | Nomad Client | Nomad client agent | Runs on each node (including yeet-01) |
 | raw_exec | Nomad task driver | Spawns processes directly (no container isolation) |
 | run-agent.sh | Runtime adapter | Shell script launched by raw_exec, manages git + runtime lifecycle |
-| Runtime | Coding agent | OpenCode, Claude Code, or Aider -- spawned by run-agent.sh |
+| openshell-sandbox | Sandbox wrapper (v2) | NVIDIA OpenShell binary -- applies Landlock, seccomp, and network namespace isolation around the runtime |
+| Runtime | Coding agent | OpenCode, Claude Code, or Aider -- spawned inside openshell-sandbox |
 | Git | GitHub | Remote repository hosting |
 | Ntfy | Ntfy server | Push notification service |
 | Nomad Variables | Built-in KV store | Stores cost data, session IDs, task metadata |
@@ -107,15 +108,34 @@ Nomad creates an evaluation, which triggers the scheduler.
    |                    |                  |                    |   /tmp/yeet-abc12   |
    |                    |                  |                    |   -b yeet/peer6-abc12
    |                    |                  |                    |                    |
-   |                    |                  |                    |-- spawn ----------->|
-   |                    |                  |                    |   opencode --prompt    |
+   |                    |                  |                    |-- generate policy   |
+   |                    |                  |                    |   YAML from task    |
+   |                    |                  |                    |   metadata (see     |
+   |                    |                  |                    |   Flow 15)          |
+   |                    |                  |                    |                    |
+   |                    |                  |                    |-- openshell-sandbox |
+   |                    |                  |                    |   --policy-rules    |
+   |                    |                  |                    |   --policy-data     |
+   |                    |                  |                    |   /tmp/policy-      |
+   |                    |                  |                    |   ${ALLOC_ID}.yaml  |
+   |                    |                  |                    |   -- opencode       |
+   |                    |                  |                    |   --prompt          |
    |                    |                  |                    |   "<decoded payload>"|
    |                    |                  |                    |   --model haiku     |
    |                    |                  |                    |   (cwd=/tmp/yeet-abc|
    |                    |                  |                    |                    |
+   |                    |                  |                    |   [openshell-sandbox|
+   |                    |                  |                    |    applies Landlock |
+   |                    |                  |                    |    + seccomp +      |
+   |                    |                  |                    |    network namespace|
+   |                    |                  |                    |    then execs       |
+   |                    |                  |                    |    runtime inside   |
+   |                    |                  |                    |    sandbox]         |
+   |                    |                  |                    |                    |
    |                    |                  |                    |                    |-- work...
    |                    |                  |                    |                    |-- writes files
    |                    |                  |                    |                    |-- runs tests
+   |                    |                  |                    |                    |   (sandboxed)
    |                    |                  |                    |                    |
    |                    |                  |                    |<-- stdout/exit 0 ---|
    |                    |                  |                    |                    |
@@ -164,11 +184,12 @@ Nomad creates an evaluation, which triggers the scheduler.
 3. Acquire flock if device-specific (see Flow 2)
 4. `git fetch && git pull` on the base branch
 5. `git worktree add` with a branch named `yeet/<project>-<short-id>`
-6. Spawn the runtime (OpenCode/Claude Code/Aider) with the prompt, working in the worktree
-7. Wait for runtime exit
-8. On success (exit 0): commit, push, create PR, store cost + session in Nomad Variables, notify via Ntfy
-9. On failure (exit non-zero): store error info, notify via Ntfy, exit non-zero (triggers Nomad restart policy)
-10. Clean up worktree
+6. Generate sandbox policy YAML from task metadata (see Flow 15)
+7. Spawn the runtime inside `openshell-sandbox` with the generated policy, working in the worktree
+8. Wait for runtime exit (sandbox tears down automatically on process exit)
+9. On success (exit 0): commit, push, create PR, store cost + session in Nomad Variables, notify via Ntfy
+10. On failure (exit non-zero): store error info, notify via Ntfy, exit non-zero (triggers Nomad restart policy)
+11. Clean up worktree and remove policy YAML
 
 ---
 
@@ -256,8 +277,19 @@ This constraint is only evaluated when the dispatched job's meta includes
    |                    |                  |               prevents concurrent
    |                    |                  |               device access)
    |                    |                  |                    |
+   |                    |                  |              policy YAML includes
+   |                    |                  |              /dev/yubikey-1 in
+   |                    |                  |              read_write allowlist
+   |                    |                  |              (sandboxed agent can
+   |                    |                  |               access device)
+   |                    |                  |                    |
+   |                    |                  |              openshell-sandbox
+   |                    |                  |              wraps runtime with
+   |                    |                  |              device access granted
+   |                    |                  |                    |
    |                    |                  |              runtime works
-   |                    |                  |              with yubikey...
+   |                    |                  |              with yubikey
+   |                    |                  |              (inside sandbox)...
    |                    |                  |                    |
 ```
 
@@ -1315,6 +1347,144 @@ job "nightly-tests" {
 - Child jobs are named with a timestamp suffix for identification
 - Results are stored in Nomad Variables under a date-keyed path
 - Failed runs trigger Ntfy notifications; successful runs are silent (or summary-only)
+
+---
+
+## 15. Sandbox Policy Generation (v2)
+
+> **Note:** This flow applies from v2 onwards. OpenShell sandboxing is not present in v1.
+
+run-agent.sh generates a per-task sandbox policy YAML from dispatch metadata and
+environment variables. The policy is passed to `openshell-sandbox`, which enforces
+Landlock filesystem allowlists, seccomp syscall filtering, and network namespace +
+HTTP proxy isolation around the agent runtime.
+
+### Sequence Diagram
+
+```
+  run-agent.sh                         openshell-sandbox          Runtime
+   |                                        |                        |
+   |-- read env:                            |                        |
+   |   CO_PROJECT (from NOMAD_META_project) |                        |
+   |   CO_RUNTIME (from NOMAD_META_runtime) |                        |
+   |   CO_MODE (from NOMAD_META_category)   |                        |
+   |   CO_NEEDS_DEVICE (from               |                        |
+   |     NOMAD_META_device_*)               |                        |
+   |                                        |                        |
+   |-- build policy YAML:                   |                        |
+   |                                        |                        |
+   |   filesystem:                          |                        |
+   |     read_write:                        |                        |
+   |       - /tmp/yeet-<alloc-id>/          |                        |
+   |         (project workspace)            |                        |
+   |       - /tmp/                          |                        |
+   |       - /var/lock/yeet/                |                        |
+   |     read_only:                         |                        |
+   |       - /usr/                          |                        |
+   |       - /lib/                          |                        |
+   |       - /etc/                          |                        |
+   |       - /opt/yeet/devices/             |                        |
+   |                                        |                        |
+   |   [if CO_NEEDS_DEVICE set]:            |                        |
+   |     filesystem.read_write +=           |                        |
+   |       - /dev/<device>                  |                        |
+   |         (e.g. /dev/yubikey-1)          |                        |
+   |                                        |                        |
+   |   [if CO_MODE == review|analyze]:      |                        |
+   |     move workspace from                |                        |
+   |     read_write -> read_only            |                        |
+   |     (agent cannot modify files)        |                        |
+   |                                        |                        |
+   |   network:                             |                        |
+   |     allowed_hosts:                     |                        |
+   |       - api.anthropic.com              |                        |
+   |         (or openai.com, etc.           |                        |
+   |          based on CO_RUNTIME)          |                        |
+   |       - github.com                     |                        |
+   |       - npm registry / pypi / etc.     |                        |
+   |         (based on project type)        |                        |
+   |                                        |                        |
+   |-- write policy to                      |                        |
+   |   /tmp/policy-${NOMAD_ALLOC_ID}.yaml   |                        |
+   |                                        |                        |
+   |-- exec: openshell-sandbox ------------>|                        |
+   |   --policy-rules /opt/yeet/sandbox.rego|                        |
+   |   --policy-data                        |                        |
+   |   /tmp/policy-${NOMAD_ALLOC_ID}.yaml   |                        |
+   |   -- opencode --prompt "..."           |                        |
+   |                                        |                        |
+   |                                        |-- apply Landlock:      |
+   |                                        |   filesystem allowlists|
+   |                                        |   from policy YAML     |
+   |                                        |                        |
+   |                                        |-- apply seccomp:       |
+   |                                        |   syscall filter       |
+   |                                        |   (block dangerous     |
+   |                                        |    syscalls)           |
+   |                                        |                        |
+   |                                        |-- create network       |
+   |                                        |   namespace +          |
+   |                                        |   HTTP proxy           |
+   |                                        |   (only allowed_hosts  |
+   |                                        |    reachable)          |
+   |                                        |                        |
+   |                                        |-- exec runtime ------->|
+   |                                        |   (inside sandbox)     |
+   |                                        |                        |
+   |                                        |                        |-- work...
+   |                                        |                        |-- fs writes
+   |                                        |                        |   restricted
+   |                                        |                        |   to allowlist
+   |                                        |                        |-- network
+   |                                        |                        |   restricted
+   |                                        |                        |   to proxy
+   |                                        |                        |
+   |                                        |<-- exit code ---------|
+   |                                        |                        |
+   |<-- exit code (passthrough) ------------|                        |
+   |                                        |                        |
+   |-- cleanup:                             |                        |
+   |   rm /tmp/policy-${NOMAD_ALLOC_ID}.yaml|                        |
+   |                                        |                        |
+```
+
+### Policy YAML Structure
+
+```yaml
+# /tmp/policy-${NOMAD_ALLOC_ID}.yaml
+filesystem:
+  read_write:
+    - /tmp/yeet-abc12/    # project workspace (read_only if review/analyze mode)
+    - /tmp/
+    - /var/lock/yeet/
+    # - /dev/yubikey-1    # added if CO_NEEDS_DEVICE=yubikey
+  read_only:
+    - /usr/
+    - /lib/
+    - /etc/
+    - /opt/yeet/devices/
+
+network:
+  allowed_hosts:
+    - api.anthropic.com   # varies by CO_RUNTIME
+    - github.com
+    - registry.npmjs.org  # varies by project type
+```
+
+### Mode-Based Policy Differences
+
+| Mode | Workspace Access | Device Access | Network |
+|------|-----------------|---------------|---------|
+| `quick`, `deep`, `unspecified-low` | read_write | if needed | LLM + git + packages |
+| `review`, `analyze` | read_only | if needed | LLM + git (no packages) |
+
+### Lifecycle
+
+1. Policy YAML is generated before runtime spawn
+2. Written to `/tmp/policy-${NOMAD_ALLOC_ID}.yaml` (unique per allocation)
+3. Passed to `openshell-sandbox --policy-data`
+4. Sandbox enforced for entire runtime lifetime
+5. On task completion (success or failure), policy file is removed during cleanup
 
 ---
 

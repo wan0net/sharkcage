@@ -39,6 +39,8 @@ The multiple USB 3.0 ports matter for device-attached tasks (YubiKeys, ESP32 boa
 
 Ubuntu Server 24.04 LTS, minimal installation. No desktop environment, no snaps beyond what ships by default.
 
+**Kernel requirement:** OpenShell sandboxing uses Landlock LSM for filesystem isolation, which requires kernel 5.13+. Ubuntu 22.04+ ships a compatible kernel. Ubuntu 24.04 (kernel 6.8) has full Landlock v3 support. If Landlock is unavailable, OpenShell degrades gracefully in `best_effort` mode but filesystem isolation will be reduced.
+
 ### Autoinstall via USB
 
 Use Ubuntu's autoinstall (cloud-init) mechanism for repeatable, hands-off installs. Flash the Ubuntu Server 24.04 ISO to a USB drive, then add an autoinstall config.
@@ -170,6 +172,7 @@ Create `ansible/playbook.yml`:
     google_api_key: "{{ lookup('env', 'GOOGLE_API_KEY') | default('', true) }}"
     github_deploy_key: "{{ lookup('file', '~/.ssh/co-github-deploy') }}"
     node_version: "22"
+    openshell_version: "0.1.0"
     co_repo: "git@github.com:wan0net/yeet.git"
     co_base_dir: "/opt/yeet"
 
@@ -179,6 +182,7 @@ Create `ansible/playbook.yml`:
     - node
     - nomad
     - runtimes
+    - sandbox
     - git
     - devices
     - jobs
@@ -641,6 +645,68 @@ Place handlers in `ansible/roles/nomad/handlers/main.yml`:
 - name: Print runtime versions
   debug:
     msg: "Claude Code: {{ claude_ver.stdout | default('not installed') }}"
+```
+
+### Role: sandbox
+
+`ansible/roles/sandbox/tasks/main.yml`:
+
+Installs NVIDIA OpenShell (`openshell-sandbox`), a standalone Rust binary that provides kernel-level sandboxing for agent processes. Requires Linux kernel 5.13+ with Landlock LSM support (Ubuntu 22.04+ has this by default).
+
+```yaml
+---
+- name: Download openshell-sandbox binary
+  get_url:
+    url: "https://github.com/NVIDIA/OpenShell/releases/download/v{{ openshell_version }}/openshell-sandbox-linux-amd64"
+    dest: /usr/local/bin/openshell-sandbox
+    mode: '0755'
+
+- name: Verify openshell-sandbox installation
+  command: openshell-sandbox --version
+  register: openshell_ver
+  changed_when: false
+
+- name: Print OpenShell version
+  debug:
+    msg: "OpenShell: {{ openshell_ver.stdout }}"
+
+- name: Create policy directories
+  file:
+    path: /opt/yeet/policies
+    state: directory
+    owner: runner
+    group: runner
+    mode: '0755'
+
+- name: Deploy base OPA/Rego policy rules
+  copy:
+    src: policies/agent.rego
+    dest: /opt/yeet/policies/agent.rego
+    owner: runner
+    group: runner
+    mode: '0644'
+
+- name: Deploy per-project policy templates
+  copy:
+    src: "policies/projects/"
+    dest: /opt/yeet/policies/projects/
+    owner: runner
+    group: runner
+    mode: '0644'
+
+- name: Check Landlock LSM availability
+  shell: cat /sys/kernel/security/lsm
+  register: lsm_list
+  changed_when: false
+  ignore_errors: true
+
+- name: Warn if Landlock is not available
+  debug:
+    msg: >-
+      WARNING: Landlock LSM not detected in kernel. OpenShell will run in
+      best_effort mode with reduced filesystem isolation. Upgrade to kernel
+      5.13+ or Ubuntu 22.04+ for full sandboxing.
+  when: lsm_list.stdout is not search("landlock")
 ```
 
 ### Role: git
@@ -1323,6 +1389,16 @@ sudo usbguard list-devices
 - Deployed by Ansible from environment variables on your control machine
 - Rotate keys by updating the env vars and re-running Ansible
 
+### Agent Sandboxing (OpenShell)
+
+NVIDIA OpenShell provides kernel-level sandboxing for agent processes via the `openshell-sandbox` binary. Each agent execution is confined with three layers of isolation:
+
+- **Landlock**: Filesystem access control -- agents can only read/write paths explicitly allowed by the policy (e.g., the project worktree, `/tmp`). Prevents reading secrets, `.env` files, SSH keys, or other project directories.
+- **Seccomp**: Syscall filtering -- blocks dangerous syscalls (e.g., `ptrace`, `mount`, `reboot`) while allowing normal file I/O, network, and process operations.
+- **Network namespaces**: Confines network access per policy -- agents can reach `api.anthropic.com` and `github.com` but not the local network or Nomad API.
+
+Policies are defined in OPA/Rego format at `/opt/yeet/policies/agent.rego`, with per-project overrides in `/opt/yeet/policies/projects/`. The `sandbox` Ansible role deploys both the binary and policies. See the [architecture doc](./architecture.md) for the full sandboxing design.
+
 ### Unattended Security Upgrades
 
 Configured by the `base` Ansible role. Security patches from Ubuntu are applied automatically. Automatic reboots are disabled -- schedule reboots during maintenance windows if kernel updates require them.
@@ -1431,6 +1507,9 @@ nomad job status
 | USB device not found | `lsusb` and `ls /dev/yubikey*` |
 | Disk full | `df -h /`, clean worktrees, `nomad system gc` |
 | API key expired | Update env var, re-run Ansible runtimes role |
+| Sandbox not isolating filesystem | `cat /sys/kernel/security/lsm` -- must include `landlock` |
+| openshell-sandbox not found | Verify binary at `/usr/local/bin/openshell-sandbox`, re-run `sandbox` role |
+| Sandbox test fails | `openshell-sandbox --policy-data /opt/yeet/policies/test.yaml -- echo "sandbox works"` |
 
 ### File Locations
 
@@ -1448,4 +1527,7 @@ nomad job status
 | `/var/lock/yeet/` | Device lock files |
 | `/var/log/yeet/` | Application logs |
 | `/etc/udev/rules.d/90-yeet.rules` | USB device rules |
+| `/usr/local/bin/openshell-sandbox` | OpenShell sandbox binary |
+| `/opt/yeet/policies/` | Sandbox policy directory |
+| `/opt/yeet/policies/agent.rego` | Base OPA/Rego sandbox policy |
 | `/etc/usbguard/rules.conf` | USB device whitelist |

@@ -380,6 +380,15 @@ flock -n /var/lock/yeet/device-yubikey-1.lock -c "echo free" || echo "busy"
 7. **Task completes** (success or failure).
 8. **`run-agent.sh` exits**, which **releases the flock** automatically.
 
+### Sandbox Reinforcement (v2)
+
+In v2, the OpenShell sandbox provides a second layer of device access control alongside flock. Each task's Landlock policy declares which `/dev/` paths appear in the `read_write` allowlist -- only devices specified via `--needs` are included. The two mechanisms complement each other:
+
+- **flock** prevents concurrent access (two tasks using the same device at the same time).
+- **Landlock** prevents unauthorized access (a task opening a device it never declared).
+
+Even if a task were to somehow bypass the flock check, the Landlock allowlist would block any `open()` call to a device path not listed in the task's policy YAML. This is a strict improvement over v1, where the `runner` user's group-level `devices` membership granted access to all devices on the node.
+
 ### Error Cases
 
 **Device locked by another task:**
@@ -410,6 +419,13 @@ The coding agent (Claude Code, OpenCode, Aider) accesses devices through wrapper
 ```
 
 All wrapper scripts live in this directory and are added to the runtime's `PATH`.
+
+In v2, the sandbox policy must grant access to these scripts and their target devices:
+
+- `/opt/yeet/devices/` is in the Landlock `read_only` allowlist (the agent can execute the wrappers but not modify them).
+- The specific `/dev/{device-name}` path is in the Landlock `read_write` allowlist (only for devices declared via `--needs`).
+
+The wrapper script verifies the flock is held, then the sandbox policy ensures only declared devices are accessible. A task that runs `yubikey.sh` without having declared `--needs yubikey` will fail at the Landlock layer before the wrapper even checks the flock.
 
 ### What Every Wrapper Does
 
@@ -866,6 +882,15 @@ The audit log is append-only (set with `chattr +a`) and rotated daily via logrot
 
 The `serial.sh` wrapper prevents arbitrary serial commands. It restricts operations to a known set (`send`, `flash`, `monitor`, `baud`) and does not expose raw port access. This prevents a coding agent from sending arbitrary AT commands or initiating firmware flashing without going through the wrapper's safety checks (lock verification, timeout, logging).
 
+### Defense in Depth: v1 vs v2
+
+Device access security has improved significantly with the OpenShell sandbox in v2:
+
+- **v1:** wrapper scripts + flock + group permissions (`devices` group on the `runner` user)
+- **v2:** wrapper scripts + flock + Landlock per-device allowlists + seccomp + network isolation
+
+The key difference is granularity. In v1, any task running on a node with a YubiKey and an HSM could potentially access both devices, because the `runner` user has group-level access to all devices. In v2, a task that declares `--needs yubikey` physically cannot open `/dev/yubihsm-1`, even though the `runner` user has group access to it -- the Landlock allowlist only includes `/dev/yubikey-1`. Combined with seccomp filtering and network namespace isolation, the attack surface for device access is substantially reduced.
+
 ---
 
 ## Adding a New Device
@@ -985,7 +1010,22 @@ usbguard allow-device XXXX:YYYY
 systemctl restart usbguard
 ```
 
-### 10. Verify
+### 10. Add Sandbox Policy Template Entry (v2)
+
+Update the device policy templates so that tasks requesting this device get the correct `/dev/` path in their OpenShell sandbox policy. Add an entry to the device-to-path mapping used by the sandbox policy generator:
+
+```yaml
+# In the sandbox policy templates (e.g., /opt/yeet/policies/devices.yaml)
+devices:
+  # ... existing devices ...
+  yourdevice:
+    dev_path: /dev/your-device-name
+    access: read_write
+```
+
+When a task is dispatched with `--needs yourdevice`, the sandbox builder reads this mapping and adds `/dev/your-device-name` to the Landlock `read_write` allowlist in the task's per-execution policy YAML. Without this entry, the sandbox will not grant access to the device even if flock and Nomad routing succeed.
+
+### 11. Verify
 
 ```bash
 yeet devices

@@ -78,8 +78,15 @@ case "$RUNTIME" in
   *)      echo "Unknown runtime: $RUNTIME" >&2; exit 1 ;;
 esac
 
-# 4. Execute
-"${CMD[@]}" < "$CO_PROMPT_FILE" | tee /tmp/output.log
+# 3.5 Generate sandbox policy (v2)
+POLICY="/tmp/policy-${NOMAD_ALLOC_ID}.yaml"
+generate_policy "$PROJECT" "$MODE" "$CO_NEEDS_DEVICE" > "$POLICY"
+
+# 4. Execute (sandboxed)
+openshell-sandbox \
+  --policy-rules /opt/yeet/policies/agent.rego \
+  --policy-data "$POLICY" \
+  -- "${CMD[@]}" < "$CO_PROMPT_FILE" | tee /tmp/output.log
 
 # 5. Post-run: commit and push
 git add -A && git commit -m "yeet: $PROJECT task via $RUNTIME"
@@ -330,6 +337,7 @@ What `run-agent.sh` can do with each runtime:
 | File discovery | Built-in | Built-in | Requires explicit `--file` / `--read` |
 | MCP support | Yes | Yes | No |
 | Cost in output | Best-effort parse | Exact (`total_cost_usd`) | Parse `Cost:` line |
+| Sandbox isolation | OpenShell (process-level) | OpenShell (process-level) | OpenShell (process-level) |
 
 ---
 
@@ -365,3 +373,98 @@ When resolving which runtime and model to use for a task:
 2. **Project configuration** -- project entry in `~/.config/yeet/config.yaml`.
 3. **Global defaults** -- top-level `defaults` in `~/.config/yeet/config.yaml`.
 4. **Hard-coded fallback** -- OpenCode with `anthropic/claude-sonnet-4`.
+
+---
+
+## 11. Sandbox Integration
+
+From v2, `run-agent.sh` wraps agent execution in NVIDIA OpenShell's standalone binary (`openshell-sandbox`). This provides Landlock + seccomp + network namespace isolation with per-task YAML policies. The sandbox is runtime-agnostic — it wraps the entire agent process regardless of whether the inner runtime is OpenCode, Claude Code, or Aider.
+
+### Policy Generation
+
+Before execution, `run-agent.sh` calls `generate_policy` to produce a per-task YAML policy file. The function takes three inputs — project, mode, and device flag — and outputs a policy tailored to the task's requirements.
+
+```bash
+generate_policy "$PROJECT" "$MODE" "$CO_NEEDS_DEVICE" > "/tmp/policy-${NOMAD_ALLOC_ID}.yaml"
+```
+
+#### `generate_policy` Logic
+
+The function assembles four policy dimensions:
+
+1. **Mode determines filesystem access:**
+   - `implement` and `test` modes grant `read_write` access to the workspace directory.
+   - `review` and `analyze` modes grant `read_only` access to the workspace directory.
+
+2. **Runtime determines allowed network hosts:**
+   - Claude Code tasks allow `api.anthropic.com`.
+   - OpenCode tasks allow `api.anthropic.com`, `api.openai.com`, `generativelanguage.googleapis.com`, `openrouter.ai` (since it supports multiple providers).
+   - Aider tasks allow `api.anthropic.com`, `api.openai.com` (provider-dependent).
+   - All runtimes allow `ntfy.sh` (for notifications) and the Nomad API address (for cost recording).
+
+3. **Device flag adds hardware paths:**
+   - When `CO_NEEDS_DEVICE` is set, `/dev/` paths are added to the `read_write` filesystem list. This supports GPU-accelerated workloads or tasks that need device access.
+
+4. **Project determines workspace and registries:**
+   - The project name resolves to a workspace path (`/opt/yeet/workspaces/$PROJECT`).
+   - Project-specific package registries are added to the allowed network hosts (e.g., `registry.npmjs.org` for Node.js projects, `pypi.org` for Python projects).
+
+### Policy Template
+
+A generated policy YAML looks like this:
+
+```yaml
+# /tmp/policy-<alloc-id>.yaml
+sandbox:
+  filesystem:
+    read_only:
+      - /opt/yeet/bin
+      - /opt/yeet/policies
+      - /usr/lib
+      - /usr/bin
+      - /etc/resolv.conf
+    read_write:
+      - /opt/yeet/workspaces/peer6
+      - /tmp
+    denied:
+      - /etc/shadow
+      - /root
+  network:
+    allowed_hosts:
+      - api.anthropic.com:443
+      - ntfy.sh:443
+      - registry.npmjs.org:443
+    deny_all_other: true
+  process:
+    max_memory_mb: 4096
+    max_cpu_seconds: 1800
+    max_file_size_mb: 100
+```
+
+For a `review` mode task, the workspace entry would appear under `read_only` instead of `read_write`. When `CO_NEEDS_DEVICE` is set, `/dev/nvidia*` or similar paths are added to `read_write`.
+
+### Relationship to Runtime Permission Systems
+
+Claude Code has its own permission system (`--permission-mode`, `--allowedTools`, `--disallowedTools`) that controls what the agent can do at the application level. OpenShell operates at the OS level — it is the outer fence. The two systems complement each other:
+
+- **Claude Code permissions** control which tools the agent model is allowed to invoke (e.g., can it call `Bash(rm -rf *)`?). These are advisory controls enforced by the Claude Code process itself.
+- **OpenShell sandbox** controls what the process can actually do at the kernel level via Landlock LSM and seccomp filters. Even if the agent attempts an operation its runtime permissions allow, the sandbox blocks it if the policy does not permit it.
+
+OpenCode and Aider have weaker or no internal permission systems (`--yolo`, `--yes-always`), which makes the OpenShell sandbox especially important for those runtimes. It provides the hard security boundary that the runtimes themselves do not enforce.
+
+### v1 Compatibility
+
+In v1 deployments (where `openshell-sandbox` is not installed), the policy generation step is skipped and the runtime command executes directly without sandboxing. The script detects this by checking for the binary:
+
+```bash
+if command -v openshell-sandbox &>/dev/null; then
+  # v2: generate policy and wrap
+  POLICY="/tmp/policy-${NOMAD_ALLOC_ID}.yaml"
+  generate_policy "$PROJECT" "$MODE" "$CO_NEEDS_DEVICE" > "$POLICY"
+  openshell-sandbox --policy-rules /opt/yeet/policies/agent.rego --policy-data "$POLICY" \
+    -- "${CMD[@]}" < "$CO_PROMPT_FILE" | tee /tmp/output.log
+else
+  # v1: direct execution
+  "${CMD[@]}" < "$CO_PROMPT_FILE" | tee /tmp/output.log
+fi
+```
