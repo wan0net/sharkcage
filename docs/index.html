@@ -329,6 +329,10 @@
         <p>If the AI tries something sketchy, yeet pauses and asks you first. Like a responsible adult.</p>
       </div>
       <div class="feature">
+        <h3>Kernel-level sandboxing</h3>
+        <p>Each task runs inside an <a href="https://github.com/NVIDIA/OpenShell">NVIDIA OpenShell</a> sandbox. Landlock, seccomp, network namespaces. The agent can only touch what the policy says.</p>
+      </div>
+      <div class="feature">
         <h3>Fleet management</h3>
         <p>Drain a runner, take it offline, bring it back. Like managing a very small, very cheap data center.</p>
       </div>
@@ -441,6 +445,44 @@
   </section>
 
   <section class="fade-in">
+    <div class="section-title">Sandboxing</div>
+    <p>Letting an AI agent loose on a machine with full access is a bad idea. So we don't.</p>
+    <p>Every task runs inside an <a href="https://github.com/NVIDIA/OpenShell">NVIDIA OpenShell</a> sandbox --
+       the new hotness in agent isolation. The standalone <code>openshell-sandbox</code> binary wraps
+       the agent process in kernel-level isolation -- no Kubernetes, no Docker, no overhead. Just Linux
+       security primitives doing what they were designed to do.</p>
+    <div class="features" style="grid-template-columns: 1fr 1fr 1fr;">
+      <div class="feature">
+        <h3>Landlock LSM</h3>
+        <p>Kernel-enforced filesystem allowlists. The agent can read/write its project workspace and /tmp. Everything else is invisible.</p>
+      </div>
+      <div class="feature">
+        <h3>seccomp BPF</h3>
+        <p>Syscall filtering. No privilege escalation, no raw sockets, no kernel module loading. The boring kind of security.</p>
+      </div>
+      <div class="feature">
+        <h3>Network namespaces</h3>
+        <p>All traffic forced through an HTTP proxy with per-binary OPA policies. The agent can reach the LLM API and GitHub. Nothing else.</p>
+      </div>
+    </div>
+    <p>Policies are generated per-task from the dispatch metadata. A review task gets a read-only
+       workspace. A task that needs a YubiKey gets <code>/dev/yubikey-1</code> in its allowlist
+       and nothing else in <code>/dev/</code>. A task that doesn't declare a device can't touch one,
+       even on a node that has one plugged in.</p>
+    <pre><code><span class="comment"># What a sandbox policy looks like</span>
+<span class="arg">filesystem:</span>
+<span class="arg">  read_only:  [/usr, /lib, /etc, /opt/yeet/devices/]</span>
+<span class="arg">  read_write: [/opt/yeet/workspaces/peer6/, /tmp]</span>
+<span class="arg">network:</span>
+<span class="arg">  allowed_hosts:</span>
+<span class="arg">    - api.anthropic.com:443</span>
+<span class="arg">    - github.com:443</span>
+<span class="arg">    - registry.npmjs.org:443</span></code></pre>
+    <p>The agent physically cannot read your SSH keys, call your internal APIs,
+       or phone home to anywhere not on the list. Defense in depth without the DevOps tax.</p>
+  </section>
+
+  <section class="fade-in">
     <div class="section-title">Documentation</div>
     <p>Overengineered the docs so we didn't have to overengineer the code.</p>
     <div class="docs-grid">
@@ -454,7 +496,7 @@
       </a>
       <a class="doc-link" href="use-cases">
         <span class="doc-title">Use Cases</span>
-        <span class="doc-desc">16 concrete scenarios with exact CLI commands, Nomad API calls, and expected outcomes.</span>
+        <span class="doc-desc">17 concrete scenarios with exact CLI commands, Nomad API calls, and expected outcomes.</span>
       </a>
       <a class="doc-link" href="runtime-adapters">
         <span class="doc-title">Runtime Adapters</span>
