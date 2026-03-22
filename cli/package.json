@@ -1,0 +1,17 @@
+{
+  "name": "@wan0net/yeet",
+  "version": "0.1.0",
+  "description": "CLI for yeet — agent-agnostic coding orchestrator",
+  "type": "module",
+  "bin": { "yeet": "./dist/index.js" },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "tsx": "^4.0.0",
+    "@types/node": "^22.0.0"
+  }
+}

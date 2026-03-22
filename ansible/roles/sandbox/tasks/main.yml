@@ -1,0 +1,73 @@
+---
+- name: Download openshell-sandbox binary
+  get_url:
+    url: "https://github.com/NVIDIA/OpenShell/releases/download/v{{ openshell_version }}/openshell-sandbox-linux-amd64"
+    dest: /usr/local/bin/openshell-sandbox
+    mode: "0755"
+
+- name: Verify openshell-sandbox installation
+  command: openshell-sandbox --version
+  register: openshell_ver
+  changed_when: false
+  ignore_errors: true
+
+- name: Print OpenShell version
+  debug:
+    msg: "OpenShell: {{ openshell_ver.stdout | default('not installed or not runnable on this arch') }}"
+
+- name: Create policy directories
+  file:
+    path: "{{ yeet_dir }}/policies"
+    state: directory
+    owner: runner
+    group: runner
+    mode: "0755"
+
+- name: Deploy base sandbox policy
+  copy:
+    dest: "{{ yeet_dir }}/policies/base.json"
+    content: |
+      {
+        "version": "1",
+        "description": "Base sandbox policy for coding agents",
+        "filesystem": {
+          "allow_read": [
+            "/opt/yeet/workspaces",
+            "/usr/lib",
+            "/usr/share",
+            "/etc/ssl",
+            "/etc/resolv.conf"
+          ],
+          "allow_write": [
+            "/opt/yeet/workspaces",
+            "/tmp"
+          ],
+          "deny": [
+            "/etc/shadow",
+            "/etc/passwd",
+            "/root",
+            "/home/runner/.ssh"
+          ]
+        },
+        "network": {
+          "allow_outbound": true,
+          "allow_inbound": false
+        }
+      }
+    owner: runner
+    group: runner
+    mode: "0644"
+
+- name: Check Landlock LSM availability
+  shell: cat /sys/kernel/security/lsm
+  register: lsm_list
+  changed_when: false
+  ignore_errors: true
+
+- name: Warn if Landlock is not available
+  debug:
+    msg: >-
+      WARNING: Landlock LSM not detected in kernel. OpenShell will run in
+      best_effort mode with reduced filesystem isolation. Upgrade to kernel
+      5.13+ or Ubuntu 22.04+ for full sandboxing.
+  when: lsm_list.stdout is defined and lsm_list.stdout is not search("landlock")

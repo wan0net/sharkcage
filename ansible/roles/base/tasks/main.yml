@@ -1,0 +1,119 @@
+---
+- name: Update apt cache and upgrade all packages
+  apt:
+    update_cache: true
+    upgrade: dist
+    cache_valid_time: 3600
+
+- name: Install essential packages
+  apt:
+    name:
+      - git
+      - curl
+      - jq
+      - build-essential
+      - usbutils
+      - unzip
+      - unattended-upgrades
+      - apt-listchanges
+      - ufw
+      - htop
+      - tmux
+      - logrotate
+      - python3-pip
+    state: present
+
+- name: Set timezone to Australia/Sydney
+  timezone:
+    name: Australia/Sydney
+
+- name: Create devices group
+  group:
+    name: devices
+    state: present
+
+- name: Ensure runner user exists and is in devices group
+  user:
+    name: runner
+    groups: devices
+    append: true
+    shell: /bin/bash
+
+- name: Configure UFW - deny all incoming by default
+  ufw:
+    direction: incoming
+    policy: deny
+
+- name: Configure UFW - allow all outgoing
+  ufw:
+    direction: outgoing
+    policy: allow
+
+- name: Configure UFW - allow SSH from Tailscale subnet
+  ufw:
+    rule: allow
+    port: "22"
+    proto: tcp
+    from_ip: 100.64.0.0/10
+    comment: "SSH via Tailscale only"
+
+- name: Configure UFW - allow Nomad HTTP API from Tailscale
+  ufw:
+    rule: allow
+    port: "4646"
+    proto: tcp
+    from_ip: 100.64.0.0/10
+    comment: "Nomad HTTP API via Tailscale"
+
+- name: Configure UFW - allow Nomad RPC from Tailscale
+  ufw:
+    rule: allow
+    port: "4647"
+    proto: tcp
+    from_ip: 100.64.0.0/10
+    comment: "Nomad RPC via Tailscale"
+
+- name: Configure UFW - allow Nomad Serf from Tailscale
+  ufw:
+    rule: allow
+    port: "4648"
+    proto: tcp
+    from_ip: 100.64.0.0/10
+    comment: "Nomad Serf via Tailscale"
+
+- name: Enable UFW
+  ufw:
+    state: enabled
+
+- name: Configure unattended-upgrades
+  copy:
+    dest: /etc/apt/apt.conf.d/50unattended-upgrades
+    content: |
+      Unattended-Upgrade::Allowed-Origins {
+          "${distro_id}:${distro_codename}-security";
+          "${distro_id}ESMApps:${distro_codename}-apps-security";
+      };
+      Unattended-Upgrade::AutoFixInterruptedDpkg "true";
+      Unattended-Upgrade::Remove-Unused-Dependencies "true";
+      Unattended-Upgrade::Automatic-Reboot "false";
+
+- name: Enable unattended-upgrades timer
+  copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+
+- name: Configure logrotate for yeet runner
+  copy:
+    dest: /etc/logrotate.d/yeet
+    content: |
+      /var/log/yeet/*.log {
+          daily
+          missingok
+          rotate 14
+          compress
+          delaycompress
+          notifempty
+          create 0640 runner runner
+      }

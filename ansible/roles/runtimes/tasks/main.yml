@@ -1,0 +1,45 @@
+---
+- name: Install Claude Code CLI
+  npm:
+    name: "@anthropic-ai/claude-code"
+    global: true
+    state: present
+
+- name: Verify Claude Code installation
+  command: claude --version
+  register: claude_ver
+  changed_when: false
+  ignore_errors: true
+
+# OpenCode: requires manual install or go install github.com/opencodedevs/opencode@latest
+# Ensure Go is installed and GOPATH is configured for the runner user.
+# Once installed, symlink to /usr/local/bin/opencode.
+
+# Aider: requires pip3 install aider-chat
+# May need additional Python dependencies. Install manually or add a pip task.
+
+- name: Create yeet base directory
+  file:
+    path: "{{ yeet_dir }}"
+    state: directory
+    owner: runner
+    group: runner
+    mode: "0755"
+
+- name: Deploy environment file with API keys
+  copy:
+    dest: "{{ yeet_dir }}/.env"
+    content: |
+      # API keys for coding agents — managed by Ansible
+      # Set these via environment variables before running the playbook:
+      #   ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_API_KEY
+      ANTHROPIC_API_KEY={{ anthropic_api_key | default('') }}
+      OPENAI_API_KEY={{ openai_api_key | default('') }}
+      GOOGLE_API_KEY={{ google_api_key | default('') }}
+    owner: runner
+    group: runner
+    mode: "0600"
+
+- name: Print runtime versions
+  debug:
+    msg: "Claude Code: {{ claude_ver.stdout | default('not installed') }}"

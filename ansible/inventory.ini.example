@@ -1,0 +1,11 @@
+[runners]
+yeet-01 ansible_host=100.x.y.1 nomad_role=server
+yeet-02 ansible_host=100.x.y.2 nomad_role=client
+yeet-03 ansible_host=100.x.y.3 nomad_role=client
+
+[runners:vars]
+ansible_user=runner
+ansible_ssh_private_key_file=~/.ssh/yeet-fleet
+nomad_server=yeet-01
+nomad_version=1.9.4
+openshell_version=0.0.13

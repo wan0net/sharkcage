@@ -1,0 +1,85 @@
+---
+- name: Install GitHub CLI
+  shell: |
+    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+      | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+      | tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+    apt update && apt install -y gh
+  args:
+    creates: /usr/bin/gh
+
+- name: Configure git user for runner
+  become: true
+  become_user: runner
+  git_config:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    scope: global
+  loop:
+    - { name: "user.name", value: "yeet-runner" }
+    - { name: "user.email", value: "runner@link42.app" }
+
+- name: Create .ssh directory for runner
+  file:
+    path: /home/runner/.ssh
+    state: directory
+    owner: runner
+    group: runner
+    mode: "0700"
+
+- name: Generate SSH key for runner if not exists
+  become: true
+  become_user: runner
+  openssh_keypair:
+    path: /home/runner/.ssh/id_ed25519
+    type: ed25519
+    comment: "yeet-runner@{{ inventory_hostname }}"
+  register: runner_ssh_key
+
+- name: Print runner public key (add to GitHub deploy keys)
+  debug:
+    msg: "{{ runner_ssh_key.public_key }}"
+  when: runner_ssh_key.changed
+
+- name: Configure SSH to use key for GitHub
+  copy:
+    dest: /home/runner/.ssh/config
+    content: |
+      Host github.com
+        HostName github.com
+        User git
+        IdentityFile ~/.ssh/id_ed25519
+        IdentitiesOnly yes
+        StrictHostKeyChecking accept-new
+    owner: runner
+    group: runner
+    mode: "0644"
+
+- name: Add GitHub to known_hosts
+  become: true
+  become_user: runner
+  shell: |
+    ssh-keyscan github.com >> /home/runner/.ssh/known_hosts 2>/dev/null
+  args:
+    creates: /home/runner/.ssh/known_hosts
+
+- name: Create workspaces directory
+  file:
+    path: "{{ yeet_dir }}/workspaces"
+    state: directory
+    owner: runner
+    group: runner
+    mode: "0755"
+
+- name: Clone project repositories
+  become: true
+  become_user: runner
+  git:
+    repo: "{{ item }}"
+    dest: "{{ yeet_dir }}/workspaces/{{ item | basename | regex_replace('\\.git$', '') }}"
+    version: main
+    update: true
+    force: false
+  loop: "{{ yeet_projects | default([]) }}"
+  when: yeet_projects is defined and yeet_projects | length > 0
