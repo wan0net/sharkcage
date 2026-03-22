@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>yeet - Throw code tasks at cheap hardware and walk away</title>
+<meta name="description" content="Agent-agnostic AI coding orchestrator for physical runner fleets. Nomad-powered. Cheap hardware approved.">
 <style>
   :root {
     --bg: #0a0a0f;
@@ -54,6 +55,35 @@
     margin-left: auto;
     margin-right: auto;
   }
+  .hero-links {
+    margin-top: 32px;
+    display: flex;
+    gap: 16px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  .hero-links a {
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 0.9rem;
+    padding: 8px 20px;
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    transition: background 0.2s, color 0.2s;
+  }
+  .hero-links a:hover {
+    background: var(--accent);
+    color: var(--bg);
+  }
+  .hero-links a.secondary {
+    color: var(--text-dim);
+    border-color: var(--border);
+  }
+  .hero-links a.secondary:hover {
+    background: var(--bg-surface);
+    color: var(--text);
+    border-color: var(--text-dim);
+  }
 
   /* Sections */
   section { padding: 60px 0; }
@@ -71,6 +101,7 @@
   }
   p { margin-bottom: 16px; color: var(--text-dim); }
   p strong { color: var(--text); }
+  a { color: var(--accent); }
 
   /* Code blocks */
   pre {
@@ -171,6 +202,69 @@
     display: block;
   }
 
+  /* Docs grid */
+  .docs-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+  .doc-link {
+    display: block;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    text-decoration: none;
+    transition: border-color 0.2s, background 0.2s;
+  }
+  .doc-link:hover {
+    border-color: var(--accent);
+    background: var(--bg-code);
+  }
+  .doc-link .doc-title {
+    color: var(--text);
+    font-weight: 600;
+    font-size: 0.9rem;
+    display: block;
+    margin-bottom: 4px;
+  }
+  .doc-link .doc-desc {
+    color: var(--text-dim);
+    font-size: 0.78rem;
+    line-height: 1.4;
+  }
+
+  /* Runtime table */
+  .runtime-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 24px;
+    font-size: 0.85rem;
+  }
+  .runtime-table th {
+    text-align: left;
+    padding: 10px 12px;
+    border-bottom: 2px solid var(--border);
+    color: var(--accent);
+    font-weight: 600;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .runtime-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-dim);
+  }
+  .runtime-table tr:last-child td { border-bottom: none; }
+  .runtime-table code {
+    background: var(--bg-code);
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 0.8rem;
+  }
+
   /* Footer */
   footer {
     border-top: 1px solid var(--border);
@@ -200,7 +294,7 @@
   /* Responsive */
   @media (max-width: 600px) {
     .hero { padding: 80px 0 60px; }
-    .compare, .features { grid-template-columns: 1fr; }
+    .compare, .features, .docs-grid { grid-template-columns: 1fr; }
     .hw-grid { grid-template-columns: 1fr 1fr; }
     pre { font-size: 11px; padding: 14px 16px; }
     section { padding: 40px 0; }
@@ -213,7 +307,11 @@
 
   <header class="hero">
     <h1>yeet</h1>
-    <p class="tagline">Yeet your code tasks at a fleet of Dell 5070s and walk away.</p>
+    <p class="tagline">Yeet your code tasks at whatever hardware you have lying around and walk away.</p>
+    <div class="hero-links">
+      <a href="https://github.com/wan0net/yeet">GitHub</a>
+      <a href="https://github.com/wan0net/yeet/tree/master/docs" class="secondary">Documentation</a>
+    </div>
   </header>
 
   <section class="fade-in">
@@ -244,9 +342,9 @@
       <div class="compare-col reality">
         <h3>What yeet uses</h3>
         <ul>
-          <li>Nomad</li>
-          <li>Some shell scripts</li>
-          <li>Dell thin clients from eBay</li>
+          <li>Nomad (single binary, one server)</li>
+          <li>A shell script and a job template</li>
+          <li>Whatever PCs you have lying around</li>
           <li>~$5/year in electricity per node</li>
           <li>About 200 lines of CLI code</li>
         </ul>
@@ -254,6 +352,7 @@
     </div>
     <p>Orchestration: <strong>Nomad</strong>. Networking: <strong>Tailscale</strong>.
        Provisioning: <strong>Ansible</strong>. Device routing: <strong>udev + flock</strong>.
+       Custom infrastructure: <strong>none</strong>.
        Vibes: <strong>immaculate</strong>.</p>
   </section>
 
@@ -266,7 +365,7 @@
       <span class="arrow">--></span>
       <span class="node">Nomad</span>
       <span class="arrow">--></span>
-      <span class="node">Dell 5070</span>
+      <span class="node">Cheap PC</span>
       <span class="arrow">--></span>
       <span class="node">AI Agent</span>
       <span class="arrow">--></span>
@@ -276,6 +375,12 @@
       <span style="color:var(--text-dim);font-size:11px;"> (hours later, caffeinated)</span>
     </div>
     <p>That's it. That's the architecture diagram. No, there isn't a second slide.</p>
+    <p>The <code>yeet</code> CLI dispatches a
+       <a href="https://developer.hashicorp.com/nomad/docs/job-specification/parameterized">parameterized Nomad job</a>.
+       Nomad schedules it onto a machine that has the right project cloned
+       and the right USB devices plugged in. A shell script (<code>run-agent.sh</code>) handles
+       git, spawns the AI, commits results, opens a PR, and records cost.
+       Nomad handles health, retries, logs, and fleet management. You handle being elsewhere.</p>
   </section>
 
   <section class="fade-in">
@@ -287,7 +392,7 @@
       </div>
       <div class="feature">
         <h3>Device-aware routing</h3>
-        <p>Need a YubiKey plugged in? yeet knows which Dell has one. It's like Uber but for USB devices.</p>
+        <p>Need a YubiKey plugged in? yeet knows which box has one. It's like Uber but for USB devices.</p>
       </div>
       <div class="feature">
         <h3>Cost controls</h3>
@@ -303,9 +408,44 @@
       </div>
       <div class="feature">
         <h3>Nomad-powered</h3>
-        <p>We literally just wrapped Nomad's API. Standing on the shoulders of HashiCorp giants.</p>
+        <p>We literally just wrapped Nomad's API. Standing on the shoulders of HashiCorp giants. They did the hard part.</p>
       </div>
     </div>
+  </section>
+
+  <section class="fade-in">
+    <h2>Supported runtimes</h2>
+    <table class="runtime-table">
+      <thead>
+        <tr>
+          <th>Runtime</th>
+          <th>Headless</th>
+          <th>Resume</th>
+          <th>Providers</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Crush</strong> (OpenCode)</td>
+          <td><code>crush run "..."</code></td>
+          <td><code>--session</code></td>
+          <td>15+ (Anthropic, OpenAI, Google, etc.)</td>
+        </tr>
+        <tr>
+          <td><strong>Claude Code</strong></td>
+          <td><code>claude -p "..."</code></td>
+          <td><code>--resume</code></td>
+          <td>Anthropic</td>
+        </tr>
+        <tr>
+          <td><strong>Aider</strong></td>
+          <td><code>aider --message "..."</code></td>
+          <td>Limited</td>
+          <td>Multi-provider</td>
+        </tr>
+      </tbody>
+    </table>
+    <p>Adding a new runtime means adding a <code>case</code> branch to a shell script. That's the whole plugin system.</p>
   </section>
 
   <section class="fade-in">
@@ -314,55 +454,103 @@
 <span class="comment"># Yeet a task and forget about it</span>
 <span class="cmd">yeet run</span> <span class="arg">peer6 "implement the notification system"</span>
 
-<span class="comment"># Yeet two tasks at once because you're ambitious</span>
-<span class="cmd">yeet run</span> <span class="arg">peer6 "add dark mode"</span> &amp;
-<span class="cmd">yeet run</span> <span class="arg">login2 "write all the tests"</span> &amp;
+<span class="comment"># Pick your weapon</span>
+<span class="cmd">yeet run</span> <span class="arg">peer6 "refactor auth" --runtime crush --model anthropic/claude-sonnet-4</span>
+<span class="cmd">yeet run</span> <span class="arg">peer6 "refactor auth" --runtime claude --model opus</span>
+
+<span class="comment"># Needs hardware? yeet routes to the right Dell.</span>
+<span class="cmd">yeet run</span> <span class="arg">login2 "test FIDO2 flow" --needs yubikey</span>
 
 <span class="comment"># Check on your fleet of discount workstations</span>
 <span class="cmd">yeet runners</span>
 
+<span class="comment"># What's happening right now</span>
+<span class="cmd">yeet status</span>
+
 <span class="comment"># Oh no, what's it doing</span>
 <span class="cmd">yeet logs</span> <span class="arg">peer6-abc123</span>
 
+<span class="comment"># It's 90% done, just fix the edge case</span>
+<span class="cmd">yeet continue</span> <span class="arg">peer6-abc123 "also handle the null case in auth"</span>
+
 <span class="comment"># STOP STOP STOP</span>
-<span class="cmd">yeet stop</span> <span class="arg">peer6-abc123</span></pre>
+<span class="cmd">yeet stop</span> <span class="arg">peer6-abc123</span>
+
+<span class="comment"># How much did that cost me</span>
+<span class="cmd">yeet cost</span> <span class="arg">--period week</span></pre>
+    <p>Every command is a thin wrapper around a
+       <a href="https://developer.hashicorp.com/nomad/api-docs">Nomad API call</a>.
+       If <code>yeet</code> doesn't do what you need, <code>nomad</code> CLI does.
+       They're interchangeable.</p>
   </section>
 
   <section class="fade-in">
-    <h2>The Dell 5070</h2>
-    <p>The unsung hero of this whole operation. A thin client so modest it doesn't even have fans.</p>
+    <h2>The hardware</h2>
+    <p>You know that old PC in the cupboard? The thin client you decommissioned?
+       The NUC gathering dust? It runs yeet.</p>
     <div class="hw-grid">
       <div class="hw-stat">
-        <span class="val">$50</span>
-        <span class="label">on eBay</span>
+        <span class="val">Any</span>
+        <span class="label">x86 Linux box</span>
       </div>
       <div class="hw-stat">
-        <span class="val">15W</span>
-        <span class="label">your phone charger draws more</span>
+        <span class="val">~15W</span>
+        <span class="label">thin clients sip power</span>
       </div>
       <div class="hw-stat">
-        <span class="val">$5/yr</span>
-        <span class="label">electricity cost</span>
+        <span class="val">~$5/yr</span>
+        <span class="label">electricity per node</span>
       </div>
       <div class="hw-stat">
-        <span class="val">0 dB</span>
-        <span class="label">silent, fanless</span>
+        <span class="val">USB</span>
+        <span class="label">plug in your devices</span>
       </div>
       <div class="hw-stat">
         <span class="val">24/7</span>
         <span class="label">runs forever</span>
       </div>
     </div>
-    <p>It fits in a desk drawer. It runs Ubuntu. The AI runs in the cloud anyway -- these just
-       manage repos, shuttle files, and look unassuming. More computing power than the job
-       requires, which is exactly the vibe we're going for.</p>
+    <p>The AI runs in the cloud. These boxes just manage repos, shuttle files, and look
+       unassuming. A $50 thin client from eBay has more computing power than the job requires.
+       An old laptop works too. Anything that runs Linux and stays on.</p>
+  </section>
+
+  <section class="fade-in">
+    <h2>Documentation</h2>
+    <p>Overengineered the docs so we didn't have to overengineer the code.</p>
+    <div class="docs-grid">
+      <a class="doc-link" href="https://github.com/wan0net/yeet/blob/master/docs/architecture.md">
+        <span class="doc-title">Architecture</span>
+        <span class="doc-desc">Components, Nomad config, job templates, CLI-to-API mapping, security model, and what we didn't build.</span>
+      </a>
+      <a class="doc-link" href="https://github.com/wan0net/yeet/blob/master/docs/data-flows.md">
+        <span class="doc-title">Data Flows</span>
+        <span class="doc-desc">ASCII sequence diagrams for every operation. Task submission, device routing, log streaming, retries, the lot.</span>
+      </a>
+      <a class="doc-link" href="https://github.com/wan0net/yeet/blob/master/docs/use-cases.md">
+        <span class="doc-title">Use Cases</span>
+        <span class="doc-desc">16 concrete scenarios with exact CLI commands, Nomad API calls, and expected outcomes.</span>
+      </a>
+      <a class="doc-link" href="https://github.com/wan0net/yeet/blob/master/docs/runtime-adapters.md">
+        <span class="doc-title">Runtime Adapters</span>
+        <span class="doc-desc">How Crush, Claude Code, and Aider are integrated. The shell script. The env vars. Adding your own.</span>
+      </a>
+      <a class="doc-link" href="https://github.com/wan0net/yeet/blob/master/docs/device-management.md">
+        <span class="doc-title">Device Management</span>
+        <span class="doc-desc">USB security keys, HSMs, dev boards. udev rules, flock locking, wrapper scripts, health monitoring.</span>
+      </a>
+      <a class="doc-link" href="https://github.com/wan0net/yeet/blob/master/docs/deployment.md">
+        <span class="doc-title">Deployment</span>
+        <span class="doc-desc">Dell 5070 setup, Ansible playbooks, Nomad config, Tailscale mesh, systemd services. Bare metal to running fleet.</span>
+      </a>
+    </div>
   </section>
 
 </div>
 
 <footer>
   <div class="container">
-    <p><a href="https://github.com/wan0net/code-orchestration">wan0net/yeet</a></p>
+    <p><a href="https://github.com/wan0net/yeet">wan0net/yeet</a></p>
     <p>Built by someone who got tired of babysitting AI coding sessions.</p>
   </div>
 </footer>
