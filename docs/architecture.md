@@ -1,14 +1,14 @@
 ---
 layout: doc
 title: Architecture
-description: Components, Nomad config, job templates, CLI design, and security model.
+description: Implemented components, Nomad config, job templates, CLI design, and security model.
 ---
 
 # Architecture
 
 Nomad-based autonomous coding orchestrator for physical runner fleets.
 
-Version: 0.2.0
+Version: 0.3.0
 Last updated: 2026-03-22
 
 ---
@@ -34,8 +34,11 @@ The system has two custom components and several off-the-shelf tools. Nomad does
 
 ### Custom Components
 
-- **`yeet` CLI** -- a thin TypeScript wrapper around Nomad's HTTP API. Roughly 200 lines. It provides ergonomic defaults, prompt templating, and cost aggregation. It does not contain business logic that Nomad already handles.
-- **Job templates** -- parameterized HCL job specs and a runtime adapter shell script (`run-agent.sh`) that wires up git worktrees, coding agent binaries, and post-run cleanup.
+- **`yeet` CLI** -- a thin TypeScript wrapper around Nomad's HTTP API. 380 lines across 3 files. It provides ergonomic defaults, prompt templating, and cost aggregation. It does not contain business logic that Nomad already handles.
+- **`run-agent.sh`** -- runtime adapter script (538 lines) that wires up git worktrees, coding agent binaries, and post-run cleanup.
+- **Job template** -- parameterized HCL job spec (163 lines) for Nomad batch dispatch.
+- **Ansible** -- fleet provisioning (738 lines across 9 roles).
+- **Total custom code**: ~1,800 lines.
 
 ### Off-the-Shelf
 
@@ -56,7 +59,7 @@ The system has two custom components and several off-the-shelf tools. Nomad does
                                     | (HTTP to Nomad API via Tailscale)
                                     v
 +-----------------------------------------------------------------------+
-|                         yeet CLI (~200 lines TS)                      |
+|                       yeet CLI (380 lines TS, 3 files)                |
 |  Thin wrapper: translates commands to Nomad HTTP API calls.           |
 |  No server process. No database. Just a script.                       |
 +-----------------------------------------------------------------------+
@@ -429,7 +432,7 @@ PUT /v1/var/sessions/{session-id}
 | Component | Choice | Why |
 |---|---|---|
 | Orchestrator | **Nomad** | Replaces five or more custom components (API server, BullMQ, Redis, worker daemon, Bull Board). Single Go binary. Parameterized batch jobs, raw_exec driver, built-in web UI, ACL system, log streaming, encrypted variables, restart policies, node drain, health checks. Battle-tested at scale by HashiCorp and the industry. |
-| CLI | **Custom TypeScript (`yeet-cli`)** | Ergonomic wrapper around Nomad API. Adds project aliases, default runtime/model, prompt templating, cost aggregation. Approximately 200 lines. No framework, no build step beyond `tsc`. |
+| CLI | **Custom TypeScript (`yeet-cli`)** | Ergonomic wrapper around Nomad API. Adds project aliases, default runtime/model, prompt templating, cost aggregation. 380 lines across 3 files. No framework, no build step beyond `tsc`. |
 | Networking | **Tailscale** | Zero-config WireGuard mesh. Every node gets a stable DNS name (`yeet-01.tailnet`). The Nomad server is accessible from the operator's laptop over Tailscale without port forwarding or VPN configuration. Encrypted by default. |
 | Provisioning | **Ansible** | Installs Nomad, coding agent runtimes (Claude Code, Codex, Aider, Goose, Amp), udev rules, and clones project repos. Agentless (runs over SSH). Playbooks are idempotent and version-controlled. |
 | Device naming | **udev** | Linux-native. Writes rules that create stable symlinks like `/dev/yubikey-1` regardless of USB enumeration order. Survives reboots and re-plugging. |

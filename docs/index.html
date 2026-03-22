@@ -272,7 +272,7 @@
           <li>A shell script and a job template</li>
           <li>Whatever PCs you have lying around</li>
           <li>~$5/year in electricity per node</li>
-          <li>About 200 lines of CLI code</li>
+          <li>About 1,800 lines total</li>
         </ul>
       </div>
     </div>
@@ -307,6 +307,7 @@
        and the right USB devices plugged in. A shell script (<code>run-agent.sh</code>) handles
        git, spawns the AI, commits results, opens a PR, and records cost.
        Nomad handles health, retries, logs, and fleet management. You handle being elsewhere.</p>
+    <p>The entire implementation is about 1,800 lines across a shell script, a TypeScript CLI, an HCL job template, and Ansible playbooks.</p>
   </section>
 
   <section class="fade-in">
@@ -484,11 +485,11 @@
 
   <section class="fade-in">
     <div class="section-title">Documentation</div>
-    <p>Overengineered the docs so we didn't have to overengineer the code.</p>
+    <p>Overengineered the docs, then wrote ~1,800 lines of code. The docs are still longer.</p>
     <div class="docs-grid">
       <a class="doc-link" href="architecture">
         <span class="doc-title">Architecture</span>
-        <span class="doc-desc">Components, Nomad config, job templates, CLI-to-API mapping, security model, and what we didn't build.</span>
+        <span class="doc-desc">Components, Nomad config, job templates, CLI-to-API mapping, security model, OpenShell sandboxing.</span>
       </a>
       <a class="doc-link" href="data-flows">
         <span class="doc-title">Data Flows</span>
