@@ -6,13 +6,13 @@ description: Setup guide, Ansible playbooks, Nomad config, Tailscale mesh, syste
 
 # Deployment Guide
 
-This document covers end-to-end setup of Dell OptiPlex 5070 Micro thin clients as autonomous coding agent runners for code-orchestration. The architecture uses HashiCorp Nomad for job scheduling -- a single Go binary replaces Redis, BullMQ, and the custom worker daemon. Follow it top to bottom to go from bare hardware to a working fleet.
+This document covers end-to-end setup of physical machines (e.g., Dell OptiPlex 5070 Micro, Intel NUC, any x86 Linux box) as autonomous coding agent runners for yeet. The architecture uses HashiCorp Nomad for job scheduling -- a single Go binary replaces Redis, BullMQ, and the custom worker daemon. Follow it top to bottom to go from bare hardware to a working fleet.
 
 ---
 
-## 1. Hardware: Dell OptiPlex 5070 Micro
+## 1. Hardware
 
-The Dell OptiPlex 5070 Micro is a small-form-factor desktop that makes an excellent always-on runner node.
+Any low-power x86 Linux box makes an excellent always-on runner node. The Dell OptiPlex 5070 Micro is one good option -- a small-form-factor desktop that's cheap and quiet.
 
 **Specs (typical used unit, ~$80-120 AUD):**
 
@@ -25,9 +25,9 @@ The Dell OptiPlex 5070 Micro is a small-form-factor desktop that makes an excell
 
 **Why these boxes work:**
 
-Claude Code, Crush, and Aider are API-call-heavy, not compute-heavy. The LLM inference runs in the cloud. These boxes just run the CLI process, manage local files, and shuttle JSON over HTTPS. A Celeron with 4 GB RAM is more than enough. Three of them running 24/7 cost roughly $15-20 AUD per year in electricity.
+Claude Code, OpenCode, and Aider are API-call-heavy, not compute-heavy. The LLM inference runs in the cloud. The nodes just run the CLI process, manage local files, and shuttle JSON over HTTPS. A Celeron with 4 GB RAM is more than enough. Three nodes running 24/7 cost roughly $15-20 AUD per year in electricity.
 
-Nomad server + client is a single ~100MB Go binary with minimal resource requirements. It runs comfortably alongside the coding agents on these low-power boxes. No JVM, no database server, no container runtime needed.
+Nomad server + client is a single ~100MB Go binary with minimal resource requirements. It runs comfortably alongside the coding agents on these low-power nodes. No JVM, no database server, no container runtime needed.
 
 The multiple USB 3.0 ports matter for device-attached tasks (YubiKeys, ESP32 boards, serial consoles).
 
@@ -57,7 +57,7 @@ autoinstall:
     layout: us
 
   identity:
-    hostname: co-dell-01
+    hostname: yeet-01
     username: runner
     # Password hash for initial login. Generate with:
     #   mkpasswd --method=sha-512
@@ -103,11 +103,11 @@ autoinstall:
 
 Change the `hostname` and `addresses` per box:
 
-| Box | Hostname | IP |
-|-----|----------|----|
-| Dell 1 | `co-dell-01` | `192.168.1.101` |
-| Dell 2 | `co-dell-02` | `192.168.1.102` |
-| Dell 3 | `co-dell-03` | `192.168.1.103` |
+| Node | Hostname | IP |
+|------|----------|----|
+| Runner 1 | `yeet-01` | `192.168.1.101` |
+| Runner 2 | `yeet-02` | `192.168.1.102` |
+| Runner 3 | `yeet-03` | `192.168.1.103` |
 
 Static IPs are recommended for lab stability. If you prefer DHCP, use DHCP reservations on your router so the IPs stay consistent.
 
@@ -121,16 +121,16 @@ ssh runner@192.168.1.101
 
 ## 3. Ansible Provisioning
 
-One playbook provisions everything after the base OS is installed. Run it from your laptop (or any machine with Ansible and network access to the Dells).
+One playbook provisions everything after the base OS is installed. Run it from your laptop (or any machine with Ansible and network access to the nodes).
 
 ### Prerequisites (on your control machine)
 
 ```bash
 sudo apt install ansible    # or brew install ansible on macOS
-ssh-keygen -t ed25519 -f ~/.ssh/co-fleet -C "code-orchestration fleet"
+ssh-keygen -t ed25519 -f ~/.ssh/co-fleet -C "yeet runner fleet"
 ```
 
-Copy the public key to each Dell during OS install (via autoinstall `authorized-keys`) or manually:
+Copy the public key to each node during OS install (via autoinstall `authorized-keys`) or manually:
 
 ```bash
 ssh-copy-id -i ~/.ssh/co-fleet runner@192.168.1.101
@@ -142,9 +142,9 @@ Create `ansible/inventory.ini`:
 
 ```ini
 [runners]
-co-dell-01 ansible_host=192.168.1.101 nomad_role=server
-co-dell-02 ansible_host=192.168.1.102 nomad_role=client
-co-dell-03 ansible_host=192.168.1.103 nomad_role=client
+yeet-01 ansible_host=192.168.1.101 nomad_role=server
+yeet-02 ansible_host=192.168.1.102 nomad_role=client
+yeet-03 ansible_host=192.168.1.103 nomad_role=client
 
 [runners:vars]
 ansible_user=runner
@@ -159,7 +159,7 @@ Create `ansible/playbook.yml`:
 
 ```yaml
 ---
-- name: Provision code-orchestration runner fleet
+- name: Provision yeet runner fleet
   hosts: runners
   become: true
 
@@ -170,8 +170,8 @@ Create `ansible/playbook.yml`:
     google_api_key: "{{ lookup('env', 'GOOGLE_API_KEY') | default('', true) }}"
     github_deploy_key: "{{ lookup('file', '~/.ssh/co-github-deploy') }}"
     node_version: "22"
-    co_repo: "git@github.com:wan0net/code-orchestration.git"
-    co_base_dir: "/opt/code-orchestration"
+    co_repo: "git@github.com:wan0net/yeet.git"
+    co_base_dir: "/opt/yeet"
 
   roles:
     - base
@@ -295,11 +295,11 @@ Create `ansible/playbook.yml`:
   ufw:
     state: enabled
 
-- name: Configure logrotate for code-orchestration
+- name: Configure logrotate for yeet runner
   copy:
-    dest: /etc/logrotate.d/code-orchestration
+    dest: /etc/logrotate.d/yeet
     content: |
-      /var/log/code-orchestration/*.log {
+      /var/log/yeet/*.log {
           daily
           missingok
           rotate 14
@@ -512,7 +512,7 @@ Create `ansible/playbook.yml`:
 
       client {
         enabled = true
-        servers = ["co-dell-01.tailnet:4646"]
+        servers = ["yeet-01.tailnet:4646"]
         meta {
           "project_login2"      = "true"
           "device_yubikey"      = "true"
@@ -597,25 +597,25 @@ Place handlers in `ansible/roles/nomad/handlers/main.yml`:
   changed_when: false
   ignore_errors: true
 
-- name: Install Go (for Crush)
+- name: Install Go (for OpenCode)
   apt:
     name: golang-go
     state: present
 
-- name: Install Crush via go install
+- name: Install OpenCode via go install
   become: true
   become_user: runner
   shell: |
     export GOPATH=/home/runner/go
     export PATH=$PATH:/usr/local/go/bin:$GOPATH/bin
-    go install github.com/crushcoding/crush@latest
+    go install github.com/opencodedevs/opencode@latest
   args:
-    creates: /home/runner/go/bin/crush
+    creates: /home/runner/go/bin/opencode
 
-- name: Symlink Crush to /usr/local/bin
+- name: Symlink OpenCode to /usr/local/bin
   file:
-    src: /home/runner/go/bin/crush
-    dest: /usr/local/bin/crush
+    src: /home/runner/go/bin/opencode
+    dest: /usr/local/bin/opencode
     state: link
   ignore_errors: true
 
@@ -667,7 +667,7 @@ Place handlers in `ansible/roles/nomad/handlers/main.yml`:
     value: "{{ item.value }}"
     scope: global
   loop:
-    - { name: "user.name", value: "code-orchestration" }
+    - { name: "user.name", value: "yeet-runner" }
     - { name: "user.email", value: "co-runner@link42.app" }
 
 - name: Create .ssh directory for runner
@@ -749,12 +749,12 @@ Place handlers in `ansible/roles/nomad/handlers/main.yml`:
     mode: "0775"
   loop:
     - "{{ co_base_dir }}/devices"
-    - /var/lock/code-orchestration
-    - /var/log/code-orchestration
+    - /var/lock/yeet
+    - /var/log/yeet
 
 - name: Deploy udev rules for USB devices
   copy:
-    dest: /etc/udev/rules.d/90-code-orchestration.rules
+    dest: /etc/udev/rules.d/90-yeet.rules
     content: |
       # YubiKey 5 series
       SUBSYSTEM=="usb", ATTR{idVendor}=="1050", ATTR{idProduct}=="0407", \
@@ -782,7 +782,7 @@ Place handlers in `ansible/roles/nomad/handlers/main.yml`:
       #!/bin/bash
       # Wrapper: get YubiKey info with locking
       set -euo pipefail
-      LOCKFILE="/var/lock/code-orchestration/yubikey.lock"
+      LOCKFILE="/var/lock/yeet/yubikey.lock"
       DEVICE="${1:-/dev/yubikey-1}"
 
       exec 200>"$LOCKFILE"
@@ -800,7 +800,7 @@ Place handlers in `ansible/roles/nomad/handlers/main.yml`:
       #!/bin/bash
       # Wrapper: flash ESP32 firmware with locking
       set -euo pipefail
-      LOCKFILE="/var/lock/code-orchestration/esp32.lock"
+      LOCKFILE="/var/lock/yeet/esp32.lock"
       DEVICE="${1:-/dev/esp32-main}"
       FIRMWARE="${2:?Usage: esp32-flash.sh <device> <firmware.bin>}"
 
@@ -851,7 +851,7 @@ Place handlers in `ansible/roles/devices/handlers/main.yml`:
 
 ```yaml
 ---
-- name: Create code-orchestration directories
+- name: Create yeet directories
   file:
     path: "{{ item }}"
     state: directory
@@ -863,7 +863,7 @@ Place handlers in `ansible/roles/devices/handlers/main.yml`:
     - "{{ co_base_dir }}/jobs"
     - "{{ co_base_dir }}/scripts"
 
-- name: Clone code-orchestration repository
+- name: Clone yeet repository
   become: true
   become_user: runner
   git:
@@ -900,7 +900,7 @@ Place handlers in `ansible/roles/devices/handlers/main.yml`:
 
 - name: Deploy worktree cleanup cron
   cron:
-    name: "Clean old code-orchestration worktrees"
+    name: "Clean old yeet worktrees"
     user: runner
     minute: "0"
     hour: "3"
@@ -914,12 +914,12 @@ Place handlers in `ansible/roles/devices/handlers/main.yml`:
 
 ## 4. Nomad ACL Setup
 
-After the Nomad server is running on co-dell-01, bootstrap ACLs. This is a one-time manual step.
+After the Nomad server is running on yeet-01, bootstrap ACLs. This is a one-time manual step.
 
 ### Step 1: Bootstrap ACL
 
 ```bash
-ssh runner@co-dell-01
+ssh runner@yeet-01
 
 export NOMAD_ADDR=http://127.0.0.1:4646
 nomad acl bootstrap
@@ -984,14 +984,14 @@ Or set it in the `yeet` config file (see section 5).
 ### Install
 
 ```bash
-npm install -g @wan0net/code-orchestration
+npm install -g @wan0net/yeet
 ```
 
 Or clone the repo and link it:
 
 ```bash
-git clone git@github.com:wan0net/code-orchestration.git
-cd code-orchestration
+git clone git@github.com:wan0net/yeet.git
+cd yeet
 pnpm install && pnpm build
 npm link
 ```
@@ -1002,16 +1002,16 @@ Create `~/.config/yeet/config.yaml`:
 
 ```yaml
 # ~/.config/yeet/config.yaml
-nomad_addr: http://co-dell-01.tailnet:4646
+nomad_addr: http://yeet-01.tailnet:4646
 nomad_token: <acl-token>
 
 defaults:
-  runtime: crush
+  runtime: opencode
   model: anthropic/claude-sonnet-4
 
 projects:
   peer6:
-    runtime: crush
+    runtime: opencode
     model: anthropic/claude-sonnet-4
   login2:
     runtime: claude
@@ -1034,11 +1034,11 @@ yeet status         # Should show registered jobs
 
 ### Tailscale Mesh
 
-Every Dell and your laptop join the same Tailnet. This provides:
+Every node and your laptop join the same Tailnet. This provides:
 
-- **SSH from anywhere**: `ssh runner@co-dell-01` via MagicDNS (e.g., `co-dell-01.tail-net.ts.net`)
+- **SSH from anywhere**: `ssh runner@yeet-01` via MagicDNS (e.g., `yeet-01.tail-net.ts.net`)
 - **Nomad API access**: `yeet` CLI on your laptop talks to Nomad server over Tailscale
-- **Cross-network routing**: If a Dell is on a different subnet or physical location, Tailscale routes traffic
+- **Cross-network routing**: If a node is on a different subnet or physical location, Tailscale routes traffic
 - **ACLs**: Configure Tailscale ACLs to restrict which devices can reach the runners
 
 Install Tailscale on your laptop:
@@ -1048,7 +1048,7 @@ Install Tailscale on your laptop:
 brew install tailscale
 
 # Then from any network:
-ssh runner@co-dell-01    # MagicDNS resolves via Tailscale
+ssh runner@yeet-01    # MagicDNS resolves via Tailscale
 ```
 
 ### Nomad Ports
@@ -1089,7 +1089,7 @@ Nomad ships with a built-in web UI. No additional software to install.
 Open in your browser (from any machine on the Tailnet):
 
 ```
-http://co-dell-01.tailnet:4646/ui
+http://yeet-01.tailnet:4646/ui
 ```
 
 ### Authentication
@@ -1152,11 +1152,11 @@ Git worktrees accumulate over time. A weekly cron job (deployed by the jobs role
 
 ```bash
 # Manual worktree cleanup
-find /opt/code-orchestration/workspaces -maxdepth 3 -name '.git' -type f \
+find /opt/yeet/workspaces -maxdepth 3 -name '.git' -type f \
   -mtime +7 -execdir git worktree remove --force . \; 2>/dev/null
 
 # Check disk usage
-du -sh /opt/code-orchestration/workspaces/*
+du -sh /opt/yeet/workspaces/*
 df -h /
 
 # Nomad garbage collection (clean old allocations)
@@ -1192,9 +1192,9 @@ Nomad state can be snapshotted, but in practice the system is designed to be eph
 | Data | Location | Backup Method |
 |------|----------|---------------|
 | Nomad Raft state | `/opt/nomad/data` | `nomad operator snapshot save backup.snap` |
-| API keys | `/opt/code-orchestration/.env` | Stored in your password manager, deployed by Ansible |
+| API keys | `/opt/yeet/.env` | Stored in your password manager, deployed by Ansible |
 | SSH keys | `~/.ssh/co-fleet`, `~/.ssh/co-github-deploy` | Stored in your password manager |
-| Ansible inventory | `ansible/inventory.ini` | In the code-orchestration repo |
+| Ansible inventory | `ansible/inventory.ini` | In the yeet repo |
 | Nomad ACL tokens | Generated at bootstrap | Stored in your password manager |
 | Tailscale auth | Tailscale admin console | Re-generate auth key if needed |
 
@@ -1202,7 +1202,7 @@ Nomad state can be snapshotted, but in practice the system is designed to be eph
 
 ```bash
 # Save a snapshot of Nomad's Raft state
-export NOMAD_ADDR=http://co-dell-01.tailnet:4646
+export NOMAD_ADDR=http://yeet-01.tailnet:4646
 export NOMAD_TOKEN=<management-token>
 nomad operator snapshot save backup-$(date +%Y%m%d).snap
 
@@ -1212,7 +1212,7 @@ nomad operator snapshot restore backup-20260322.snap
 
 ### Recovery Procedure
 
-If a Dell dies or you need to rebuild from scratch:
+If a node dies or you need to rebuild from scratch:
 
 1. Install Ubuntu Server 24.04 on the new hardware (use autoinstall USB, ~10 minutes)
 2. Update Ansible inventory with the new hostname and IP
@@ -1223,10 +1223,10 @@ If a Dell dies or you need to rebuild from scratch:
 export TAILSCALE_AUTHKEY="tskey-auth-..."
 export ANTHROPIC_API_KEY="sk-ant-..."
 
-ansible-playbook -i ansible/inventory.ini ansible/playbook.yml --limit co-dell-04
+ansible-playbook -i ansible/inventory.ini ansible/playbook.yml --limit yeet-04
 ```
 
-5. If replacing the server node (co-dell-01), restore the Raft snapshot or re-bootstrap ACLs and re-register jobs
+5. If replacing the server node (yeet-01), restore the Raft snapshot or re-bootstrap ACLs and re-register jobs
 6. If replacing a client node, it auto-joins the cluster via Tailscale -- no extra steps
 7. Verify:
 
@@ -1318,7 +1318,7 @@ sudo usbguard list-devices
 
 ### API Key Security
 
-- Stored in `/opt/code-orchestration/.env` with mode `0600`, owned by `runner:runner`
+- Stored in `/opt/yeet/.env` with mode `0600`, owned by `runner:runner`
 - Never committed to git
 - Deployed by Ansible from environment variables on your control machine
 - Rotate keys by updating the env vars and re-running Ansible
@@ -1333,7 +1333,7 @@ Configured by the `base` Ansible role. Security patches from Ubuntu are applied 
 
 **1. Install the OS.**
 
-Flash Ubuntu Server 24.04 to USB with autoinstall config. Update `autoinstall.yaml` with the new hostname (`co-dell-04`) and IP (`192.168.1.104`). Boot the Dell from USB. Installation completes unattended in about 10 minutes.
+Flash Ubuntu Server 24.04 to USB with autoinstall config. Update `autoinstall.yaml` with the new hostname (`yeet-04`) and IP (`192.168.1.104`). Boot the machine from USB. Installation completes unattended in about 10 minutes.
 
 **2. Add to Ansible inventory.**
 
@@ -1341,23 +1341,23 @@ Edit `ansible/inventory.ini`:
 
 ```ini
 [runners]
-co-dell-01 ansible_host=192.168.1.101 nomad_role=server
-co-dell-02 ansible_host=192.168.1.102 nomad_role=client
-co-dell-03 ansible_host=192.168.1.103 nomad_role=client
-co-dell-04 ansible_host=192.168.1.104 nomad_role=client
+yeet-01 ansible_host=192.168.1.101 nomad_role=server
+yeet-02 ansible_host=192.168.1.102 nomad_role=client
+yeet-03 ansible_host=192.168.1.103 nomad_role=client
+yeet-04 ansible_host=192.168.1.104 nomad_role=client
 ```
 
 **3. Run the playbook (targeted).**
 
 ```bash
-ansible-playbook -i ansible/inventory.ini ansible/playbook.yml --limit co-dell-04
+ansible-playbook -i ansible/inventory.ini ansible/playbook.yml --limit yeet-04
 ```
 
 This installs everything: Tailscale, Node.js, Nomad (client mode), runtimes, git config, device tools, and job templates.
 
-**4. Dell auto-joins the Nomad cluster.**
+**4. Node auto-joins the Nomad cluster.**
 
-The client-mode Nomad config points at `co-dell-01.tailnet:4646`. Once Tailscale is up and Nomad starts, the new node registers with the server automatically. No manual cluster join step.
+The client-mode Nomad config points at `yeet-01.tailnet:4646`. Once Tailscale is up and Nomad starts, the new node registers with the server automatically. No manual cluster join step.
 
 **5. Set node metadata for projects and devices.**
 
@@ -1382,7 +1382,7 @@ Re-run the playbook or restart Nomad for metadata changes to take effect.
 nomad node status          # New node appears with "ready" status
 yeet runners                 # Shows the new runner in the fleet
 
-# From the new Dell
+# From the new node
 nomad node status -self     # Confirms client is connected to server
 systemctl status nomad      # Service is active
 ```
@@ -1400,13 +1400,13 @@ The new node immediately starts accepting job dispatches that match its metadata
 ansible-playbook -i ansible/inventory.ini ansible/playbook.yml
 
 # Provision one box
-ansible-playbook -i ansible/inventory.ini ansible/playbook.yml --limit co-dell-02
+ansible-playbook -i ansible/inventory.ini ansible/playbook.yml --limit yeet-02
 
 # Update runtimes only
 ansible-playbook -i ansible/inventory.ini ansible/playbook.yml --tags runtimes
 
 # SSH to a runner
-ssh runner@co-dell-01
+ssh runner@yeet-01
 
 # Check all runners
 yeet runners
@@ -1425,7 +1425,7 @@ nomad job status
 |---------|-------|
 | Runner not picking up tasks | `journalctl -u nomad -n 50` on the node |
 | Node not joining cluster | `nomad agent-info` and check server address, Tailscale connectivity |
-| Nomad API unreachable | `curl http://co-dell-01.tailnet:4646/v1/status/leader` |
+| Nomad API unreachable | `curl http://yeet-01.tailnet:4646/v1/status/leader` |
 | ACL token rejected | Verify token with `nomad acl token self` |
 | Tailscale offline | `tailscale status` on the box |
 | USB device not found | `lsusb` and `ls /dev/yubikey*` |
@@ -1436,16 +1436,16 @@ nomad job status
 
 | Path | Purpose |
 |------|---------|
-| `/opt/code-orchestration/` | Application root |
-| `/opt/code-orchestration/jobs/` | Nomad job templates |
-| `/opt/code-orchestration/scripts/` | Agent runner scripts |
-| `/opt/code-orchestration/.env` | API keys and secrets |
-| `/opt/code-orchestration/workspaces/` | Cloned project repos and worktrees |
-| `/opt/code-orchestration/devices/` | Device wrapper scripts |
+| `/opt/yeet/` | Application root |
+| `/opt/yeet/jobs/` | Nomad job templates |
+| `/opt/yeet/scripts/` | Agent runner scripts |
+| `/opt/yeet/.env` | API keys and secrets |
+| `/opt/yeet/workspaces/` | Cloned project repos and worktrees |
+| `/opt/yeet/devices/` | Device wrapper scripts |
 | `/opt/nomad/data/` | Nomad state data |
 | `/etc/nomad.d/nomad.hcl` | Nomad configuration |
 | `/etc/systemd/system/nomad.service` | Nomad systemd unit |
-| `/var/lock/code-orchestration/` | Device lock files |
-| `/var/log/code-orchestration/` | Application logs |
-| `/etc/udev/rules.d/90-code-orchestration.rules` | USB device rules |
+| `/var/lock/yeet/` | Device lock files |
+| `/var/log/yeet/` | Application logs |
+| `/etc/udev/rules.d/90-yeet.rules` | USB device rules |
 | `/etc/usbguard/rules.conf` | USB device whitelist |

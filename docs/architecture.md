@@ -1,7 +1,7 @@
 ---
 layout: doc
 title: Architecture
-description: Components, Nomad config, job templates, CLI design, security model, and what we didn't build.
+description: Components, Nomad config, job templates, CLI design, and security model.
 ---
 
 # Architecture
@@ -24,7 +24,6 @@ Last updated: 2026-03-22
 7. [Technology Choices](#7-technology-choices)
 8. [Security Model](#8-security-model)
 9. [Scaling Path](#9-scaling-path)
-10. [What We Don't Build](#10-what-we-dont-build)
 
 ---
 
@@ -67,7 +66,7 @@ The system has two custom components and several off-the-shelf tools. Nomad does
 +-----------------------------------------------------------------------+
 |                                                                       |
 |                    Nomad Server + Client                              |
-|                    (co-dell-01.tailnet)                                |
+|                    (yeet-01.tailnet)                                |
 |                                                                       |
 |  +------------------+  +------------------+  +-------------------+    |
 |  |  Job Scheduler   |  |   Nomad Web UI   |  | Nomad Variables   |    |
@@ -83,7 +82,7 @@ The system has two custom components and several off-the-shelf tools. Nomad does
          | (via Tailscale)                           | (via Tailscale)
          v                                           v
 +------------------------+                +------------------------+
-|   co-dell-02           |                |   co-dell-03           |
+|   yeet-02           |                |   yeet-03           |
 |   Nomad Client         |                |   Nomad Client         |
 |                        |                |                        |
 |   raw_exec driver      |                |   raw_exec driver      |
@@ -105,15 +104,15 @@ The system has two custom components and several off-the-shelf tools. Nomad does
    +-----------+
 ```
 
-The entire backend is Nomad. There is no custom API server, no message queue, no database server. The CLI talks directly to the Nomad HTTP API. Nomad schedules work onto the Dell fleet based on node metadata constraints, streams logs, manages retries, and provides a web UI for visibility.
+The entire backend is Nomad. There is no custom API server, no message queue, no database server. The CLI talks directly to the Nomad HTTP API. Nomad schedules work onto the runner fleet based on node metadata constraints, streams logs, manages retries, and provides a web UI for visibility.
 
 ---
 
 ## 2. Nomad Configuration
 
-Each Dell runs a single Nomad agent. One node (co-dell-01) acts as both server and client. The others are client-only, joining the server over the Tailscale mesh.
+Each node runs a single Nomad agent. One node (yeet-01) acts as both server and client. The others are client-only, joining the server over the Tailscale mesh.
 
-### Server (co-dell-01)
+### Server (yeet-01)
 
 ```hcl
 data_dir = "/opt/nomad/data"
@@ -138,9 +137,9 @@ plugin "raw_exec" {
 }
 ```
 
-This node bootstraps a single-node Raft cluster and also participates as a client, running jobs alongside the other Dells. The `bootstrap_expect = 1` configuration is appropriate for this scale; upgrading to a 3-node Raft cluster is straightforward if HA becomes necessary (see [Scaling Path](#9-scaling-path)).
+This node bootstraps a single-node Raft cluster and also participates as a client, running jobs alongside the other nodes. The `bootstrap_expect = 1` configuration is appropriate for this scale; upgrading to a 3-node Raft cluster is straightforward if HA becomes necessary (see [Scaling Path](#9-scaling-path)).
 
-### Client-only (co-dell-02, co-dell-03)
+### Client-only (yeet-02, yeet-03)
 
 ```hcl
 data_dir = "/opt/nomad/data"
@@ -151,7 +150,7 @@ server {
 
 client {
   enabled = true
-  servers = ["co-dell-01.tailnet:4646"]
+  servers = ["yeet-01.tailnet:4646"]
   meta {
     "project_login2"       = "true"
     "device_yubikey"       = "true"
@@ -168,7 +167,7 @@ plugin "raw_exec" {
 
 ### Node Metadata
 
-Node metadata is the routing mechanism. Each Dell advertises two categories of information:
+Node metadata is the routing mechanism. Each node advertises two categories of information:
 
 - **Project availability** (`project_<name> = "true"`) -- which project repositories are cloned and ready on this node. When a job is dispatched for `peer6`, Nomad's constraint system ensures it lands on a node where `project_peer6 = "true"`.
 - **Device availability** (`device_<type> = "true"`, `device_<type>_path = "/dev/..."`) -- which USB/serial devices are attached. Jobs that require a specific device (e.g., YubiKey for FIDO2 testing) are routed to nodes that have one.
@@ -204,7 +203,7 @@ job "run-coding-agent" {
       driver = "raw_exec"
 
       config {
-        command = "/opt/code-orchestration/scripts/run-agent.sh"
+        command = "/opt/yeet/scripts/run-agent.sh"
         args    = []  # all config via env vars from meta
       }
 
@@ -243,7 +242,7 @@ job "run-coding-agent" {
 2. The `yeet` CLI sends `POST /v1/job/run-coding-agent/dispatch` with meta `{project: "peer6", runtime: "claude-code", model: "sonnet"}` and the prompt as the payload.
 3. Nomad creates a child batch job (e.g., `run-coding-agent/dispatch-1711100000-abcdef`).
 4. The constraint `${meta.project_peer6} = "true"` routes the job to a node that has peer6 cloned.
-5. Nomad's `raw_exec` driver runs `/opt/code-orchestration/scripts/run-agent.sh` with the meta values injected as environment variables and the prompt written to `${NOMAD_TASK_DIR}/prompt.txt`.
+5. Nomad's `raw_exec` driver runs `/opt/yeet/scripts/run-agent.sh` with the meta values injected as environment variables and the prompt written to `${NOMAD_TASK_DIR}/prompt.txt`.
 6. The task runs, stdout/stderr are captured by Nomad's log system, and the exit code determines success/failure.
 7. On failure, Nomad's restart policy retries up to 2 times with a 30-second delay.
 
@@ -329,7 +328,7 @@ git worktree remove "../worktrees/${BRANCH}" --force
 
 The `yeet` CLI is a thin TypeScript wrapper around Nomad's HTTP API. It exists to provide ergonomic defaults (project name aliases, default runtime/model, prompt templating) and to aggregate data that Nomad stores but doesn't present in the exact format we want (e.g., cost rollups). It does not duplicate any functionality that Nomad provides natively.
 
-The CLI communicates with the Nomad server at `co-dell-01.tailnet:4646` over the Tailscale mesh. No additional server process is required.
+The CLI communicates with the Nomad server at `yeet-01.tailnet:4646` over the Tailscale mesh. No additional server process is required.
 
 ### Command Mapping
 
@@ -355,7 +354,7 @@ The CLI applies sensible defaults to reduce typing:
 - **Runtime**: defaults to `claude-code` if not specified.
 - **Model**: defaults to `sonnet` if not specified.
 - **Mode**: defaults to `unspecified-low` if not specified.
-- **Nomad address**: reads from `NOMAD_ADDR` env var or defaults to `http://co-dell-01.tailnet:4646`.
+- **Nomad address**: reads from `NOMAD_ADDR` env var or defaults to `http://yeet-01.tailnet:4646`.
 - **Nomad token**: reads from `NOMAD_TOKEN` env var.
 
 A typical invocation is just:
@@ -430,7 +429,7 @@ PUT /v1/var/sessions/{session-id}
 |---|---|---|
 | Orchestrator | **Nomad** | Replaces five or more custom components (API server, BullMQ, Redis, worker daemon, Bull Board). Single Go binary. Parameterized batch jobs, raw_exec driver, built-in web UI, ACL system, log streaming, encrypted variables, restart policies, node drain, health checks. Battle-tested at scale by HashiCorp and the industry. |
 | CLI | **Custom TypeScript (`yeet-cli`)** | Ergonomic wrapper around Nomad API. Adds project aliases, default runtime/model, prompt templating, cost aggregation. Approximately 200 lines. No framework, no build step beyond `tsc`. |
-| Networking | **Tailscale** | Zero-config WireGuard mesh. Every node gets a stable DNS name (`co-dell-01.tailnet`). The Nomad server is accessible from the operator's laptop over Tailscale without port forwarding or VPN configuration. Encrypted by default. |
+| Networking | **Tailscale** | Zero-config WireGuard mesh. Every node gets a stable DNS name (`yeet-01.tailnet`). The Nomad server is accessible from the operator's laptop over Tailscale without port forwarding or VPN configuration. Encrypted by default. |
 | Provisioning | **Ansible** | Installs Nomad, coding agent runtimes (Claude Code, Codex, Aider, Goose, Amp), udev rules, and clones project repos. Agentless (runs over SSH). Playbooks are idempotent and version-controlled. |
 | Device naming | **udev** | Linux-native. Writes rules that create stable symlinks like `/dev/yubikey-1` regardless of USB enumeration order. Survives reboots and re-plugging. |
 | Device locking | **flock(1)** | POSIX standard file locking. Zero dependencies. The adapter script calls `flock /var/lock/device-yubikey-1 ...` to get exclusive access. If the device is in use, the second caller blocks until it is released. |
@@ -452,8 +451,8 @@ PUT /v1/var/sessions/{session-id}
 
 ### Execution Isolation
 
-- `raw_exec` runs jobs as the `runner` Linux user, which is unprivileged. It has read/write access to project workspaces under `/home/runner/workspaces/` and read/execute access to scripts under `/opt/code-orchestration/`. It does not have root access.
-- Device access is mediated by wrapper scripts and udev rules. The `runner` user is added to the appropriate groups (e.g., `plugdev`) for USB device access. USBGuard whitelists are configured on each Dell to prevent unauthorized device connections.
+- `raw_exec` runs jobs as the `runner` Linux user, which is unprivileged. It has read/write access to project workspaces under `/home/runner/workspaces/` and read/execute access to scripts under `/opt/yeet/`. It does not have root access.
+- Device access is mediated by wrapper scripts and udev rules. The `runner` user is added to the appropriate groups (e.g., `plugdev`) for USB device access. USBGuard whitelists are configured on each node to prevent unauthorized device connections.
 
 ### Data at Rest
 
@@ -468,32 +467,11 @@ PUT /v1/var/sessions/{session-id}
 
 ## 9. Scaling Path
 
-- **v1 (current target)**: Single Nomad server on co-dell-01, which also runs as a client. Two additional client-only Dells (co-dell-02, co-dell-03). Three nodes total. This handles the expected workload of dozens of concurrent agent dispatches.
+- **v1 (current target)**: Single Nomad server on yeet-01, which also runs as a client. Two additional client-only nodes (yeet-02, yeet-03). Three nodes total. This handles the expected workload of dozens of concurrent agent dispatches.
 
-- **v2 (add capacity)**: Add more Dell 5070s as Nomad clients. Provisioning is: install Nomad via Ansible, join the server, set node metadata. A new node can go from unboxing to accepting jobs in under 30 minutes.
+- **v2 (add capacity)**: Add more nodes as Nomad clients. Provisioning is: install Nomad via Ansible, join the server, set node metadata. A new node can go from unboxing to accepting jobs in under 30 minutes.
 
-- **v3 (high availability)**: If the single server becomes a reliability concern, add two more server nodes (any two of the existing Dells can be promoted) to form a 3-node Raft cluster. Nomad handles leader election and state replication automatically.
+- **v3 (high availability)**: If the single server becomes a reliability concern, add two more server nodes (any two of the existing nodes can be promoted) to form a 3-node Raft cluster. Nomad handles leader election and state replication automatically.
 
 - **v4 (observability)**: For richer dashboards beyond what the Nomad UI provides, build a lightweight web frontend that consumes the Nomad event stream API. Alternatively, the built-in Nomad UI may be sufficient indefinitely.
 
----
-
-## 10. What We Don't Build
-
-The entire value proposition of this architecture is the volume of custom code we avoid writing. Nomad provides battle-tested implementations of everything below. Each item in this list represents hundreds to thousands of lines of custom code that would need to be written, tested, debugged, and maintained.
-
-| Previously planned custom component | Replaced by |
-|---|---|
-| Custom API server (Hono, REST endpoints, route handlers) | Nomad HTTP API |
-| BullMQ task queue (producer, consumer, job definitions) | Nomad parameterized batch jobs + scheduler |
-| Redis (queue backend, pub/sub, state) | Not needed. Nomad is self-contained. |
-| Worker daemon (systemd service, queue consumer, heartbeat) | Nomad client agent + raw_exec driver |
-| Cloudflare Workers (control plane hosting) | Not needed. Nomad server runs on the Dell. |
-| D1/SQLite (cost tracking, audit log, session state) | Nomad Variables (encrypted KV) |
-| Bull Board (queue monitoring UI) | Nomad built-in web UI |
-| Custom heartbeat/health check protocol | Nomad node health monitoring |
-| Custom node drain logic | `nomad node drain` (built-in) |
-| Custom retry/backoff logic | Nomad restart policies |
-| Custom log streaming (WebSocket server, pub/sub) | Nomad log API (`/v1/client/fs/logs` with `follow=true`) |
-
-The system reduces to: one HCL job template, one shell script, and a 200-line CLI wrapper. Everything else is Nomad.

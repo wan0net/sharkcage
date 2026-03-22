@@ -1,14 +1,14 @@
 ---
 layout: doc
 title: Runtime Adapters
-description: How Crush, Claude Code, and Aider are integrated via run-agent.sh.
+description: How OpenCode, Claude Code, and Aider are integrated via run-agent.sh.
 ---
 
 # Runtime Adapters
 
 Runtime adaptation happens in `run-agent.sh`, the single entry point that Nomad executes via its `raw_exec` driver. There is no TypeScript adapter interface. Instead, a shell script reads environment variables set by Nomad's parameterized job dispatch, selects and configures the appropriate coding agent CLI, executes it, and handles all post-run operations.
 
-The system currently supports three runtimes: Crush, Claude Code, and Aider. Adding a new runtime means adding a `case` branch to `run-agent.sh`.
+The system currently supports three runtimes: OpenCode, Claude Code, and Aider. Adding a new runtime means adding a `case` branch to `run-agent.sh`.
 
 ---
 
@@ -32,7 +32,7 @@ Nomad sets these from the parameterized job's meta fields and built-in allocatio
 | Variable | Source | Description |
 |----------|--------|-------------|
 | `CO_PROJECT` | `NOMAD_META_project` | Project name (peer6, login2, rule1, etc.) |
-| `CO_RUNTIME` | `NOMAD_META_runtime` | Runtime to use (crush, claude, aider) |
+| `CO_RUNTIME` | `NOMAD_META_runtime` | Runtime to use (opencode, claude, aider) |
 | `CO_MODEL` | `NOMAD_META_model` | Model identifier |
 | `CO_MODE` | `NOMAD_META_mode` | Task mode (implement, test, review, analyze) |
 | `CO_BUDGET` | `NOMAD_META_budget` | Cost cap in USD |
@@ -63,7 +63,7 @@ SESSION_ID="${CO_SESSION_ID:-}"
 PROMPT=$(cat "$CO_PROMPT_FILE")
 
 # 2. Workspace setup
-WORKSPACE="/opt/code-orchestration/workspaces/$PROJECT"
+WORKSPACE="/opt/yeet/workspaces/$PROJECT"
 cd "$WORKSPACE"
 git fetch origin && git reset --hard origin/main
 BRANCH="yeet/${PROJECT}-$(echo $NOMAD_JOB_ID | cut -c1-8)"
@@ -72,7 +72,7 @@ cd "/tmp/$BRANCH"
 
 # 3. Build runtime command
 case "$RUNTIME" in
-  crush)  CMD=(crush run --quiet --model "$MODEL" ...) ;;
+  opencode) CMD=(opencode run --quiet --model "$MODEL" ...) ;;
   claude) CMD=(claude -p --output-format stream-json ...) ;;
   aider)  CMD=(aider --message --yes-always ...) ;;
   *)      echo "Unknown runtime: $RUNTIME" >&2; exit 1 ;;
@@ -110,44 +110,44 @@ git worktree remove "/tmp/$BRANCH"
 
 ---
 
-## 4. Crush Runtime Details
+## 4. OpenCode Runtime Details
 
-Crush is the continuation of the OpenCode project, maintained by the Charm team. It provides multi-provider support (15+ providers) and a clean headless execution mode via `crush run`.
+OpenCode provides multi-provider support (15+ providers) and a clean headless execution mode via `opencode run`.
 
 ### Command Construction by Mode
 
 **implement mode:**
 ```bash
-crush run --quiet --model "$CO_MODEL" "$PROMPT"
+opencode run --quiet --model "$CO_MODEL" "$PROMPT"
 ```
 
 **review mode (read-only):**
 ```bash
-crush run --quiet --model "$CO_MODEL" \
+opencode run --quiet --model "$CO_MODEL" \
   "Review the following without making any changes. Do not edit any files. $PROMPT"
 ```
 
-Crush does not have a native read-only mode like Claude Code's `--permission-mode plan`. The prompt must instruct it not to make changes.
+OpenCode does not have a native read-only mode like Claude Code's `--permission-mode plan`. The prompt must instruct it not to make changes.
 
 **test mode:**
 ```bash
-crush run --quiet --model "$CO_MODEL" "$PROMPT"
+opencode run --quiet --model "$CO_MODEL" "$PROMPT"
 ```
 
 **analyze mode:**
 ```bash
-crush run --quiet --model "$CO_MODEL" \
+opencode run --quiet --model "$CO_MODEL" \
   "Analyze the following without making any changes. Do not edit any files. $PROMPT"
 ```
 
 **With session resume:**
 ```bash
-crush run --quiet --model "$CO_MODEL" --session "$CO_SESSION_ID" "$PROMPT"
+opencode run --quiet --model "$CO_MODEL" --session "$CO_SESSION_ID" "$PROMPT"
 ```
 
 ### Model Format
 
-Crush uses `provider/model-name`:
+OpenCode uses `provider/model-name`:
 
 ```
 anthropic/claude-sonnet-4
@@ -270,7 +270,7 @@ For review and analyze modes, `run-agent.sh` prepends "Do not make any changes."
 
 `run-agent.sh` extracts cost from each runtime's output differently:
 
-**Crush:** Parse session output for cost summary line. Alternatively, query the SDK's session API after the process exits.
+**OpenCode:** Parse session output for cost summary line. Alternatively, query the SDK's session API after the process exits.
 
 **Claude Code:** Parse `stream-json` output for the final `result` message containing `total_cost_usd`:
 ```bash
@@ -315,9 +315,9 @@ There is no adapter class to implement, no registry to update, and no TypeScript
 
 What `run-agent.sh` can do with each runtime:
 
-| Capability | Crush | Claude Code | Aider |
+| Capability | OpenCode | Claude Code | Aider |
 |---|---|---|---|
-| Headless execution | `crush run` | `claude -p` | `--message` |
+| Headless execution | `opencode run` | `claude -p` | `--message` |
 | Structured JSON output | Via SDK | `--output-format stream-json` | No |
 | Session resume | `--session` / `--continue` | `--resume` | No |
 | Multi-provider | 15+ providers | Anthropic only | Multi-provider |
@@ -335,23 +335,23 @@ What `run-agent.sh` can do with each runtime:
 
 ## 10. Configuration
 
-Runtime availability is per-Dell, configured via Ansible (which binaries are installed, which API keys are present). Project-level defaults and runtime preferences are in a config file read by the `yeet` CLI before dispatch:
+Runtime availability is per-node, configured via Ansible (which binaries are installed, which API keys are present). Project-level defaults and runtime preferences are in a config file read by the `yeet` CLI before dispatch:
 
 ```yaml
 # ~/.config/yeet/config.yaml
 defaults:
-  runtime: crush
+  runtime: opencode
   model: anthropic/claude-sonnet-4
 
 projects:
   peer6:
-    runtime: crush
+    runtime: opencode
     model: anthropic/claude-sonnet-4
   login2:
     runtime: claude
     model: opus
   rule1:
-    runtime: crush
+    runtime: opencode
     model: google/gemini-2.5-pro
 ```
 
@@ -364,4 +364,4 @@ When resolving which runtime and model to use for a task:
 1. **CLI flags** -- explicit `--runtime` and `--model` on the `yeet run` command.
 2. **Project configuration** -- project entry in `~/.config/yeet/config.yaml`.
 3. **Global defaults** -- top-level `defaults` in `~/.config/yeet/config.yaml`.
-4. **Hard-coded fallback** -- Crush with `anthropic/claude-sonnet-4`.
+4. **Hard-coded fallback** -- OpenCode with `anthropic/claude-sonnet-4`.

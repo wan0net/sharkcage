@@ -6,7 +6,7 @@ description: USB security keys, HSMs, dev boards. udev rules, flock locking, wra
 
 # Device Management
 
-How physical USB devices (security keys, dev boards, HSMs) are managed across a fleet of Dell 5070 thin clients running code-orchestration on Nomad.
+How physical USB devices (security keys, dev boards, HSMs) are managed across a fleet of runner nodes running yeet on Nomad.
 
 ---
 
@@ -16,11 +16,11 @@ The system manages physical devices attached to runner machines. Tasks can requi
 
 The flow is:
 
-1. Devices are plugged into Dell 5070 runners and given stable names via udev rules.
+1. Devices are plugged into runner nodes and given stable names via udev rules.
 2. The Nomad client on each runner advertises attached devices via its `meta` block (e.g., `device_yubikey = true`).
 3. When a task requires a device, the `yeet` CLI adds a Nomad constraint targeting that device's metadata key, and Nomad schedules the job on a node that satisfies the constraint.
 4. The `run-agent.sh` entrypoint acquires an exclusive flock on the device before starting the task.
-5. The coding agent (Crush/Claude/Aider) accesses the device only through wrapper scripts.
+5. The coding agent (Claude Code, OpenCode, Aider) accesses the device only through wrapper scripts.
 6. After the task completes, the lock is released and the device becomes available again.
 
 There is no custom device registry API. Nomad IS the device registry. Device presence is encoded in node metadata, and the standard Nomad API (`GET /v1/nodes`) is the query interface.
@@ -48,7 +48,7 @@ Every device gets a stable, predictable symlink in `/dev/` so that scripts can r
 All rules live in a single file:
 
 ```
-/etc/udev/rules.d/90-code-orchestration.rules
+/etc/udev/rules.d/90-yeet.rules
 ```
 
 The `90-` prefix ensures these rules run after the default system rules but can still be overridden by rules in the 99 range if needed.
@@ -111,12 +111,12 @@ SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", \
 When you have two or more ESP32 boards with CP2102 chips, they share the same vendor and product IDs and may not have unique serial numbers. Use `ENV{ID_PATH}` to distinguish them by the physical USB port they are plugged into:
 
 ```udev
-# ESP32 on USB port 1 (front left on Dell 5070)
+# ESP32 on USB port 1 (front left)
 SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", \
   ENV{ID_PATH}=="pci-0000:00:14.0-usb-0:1:1.0", \
   SYMLINK+="esp32-front", MODE="0660", GROUP="devices"
 
-# ESP32 on USB port 3 (rear right on Dell 5070)
+# ESP32 on USB port 3 (rear right)
 SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", \
   ENV{ID_PATH}=="pci-0000:00:14.0-usb-0:3:1.0", \
   SYMLINK+="esp32-rear", MODE="0660", GROUP="devices"
@@ -200,11 +200,11 @@ Output:
 
 ```
 NODE        DEVICE           PATH               STATUS
-dell-01     yubikey          /dev/yubikey-1      available
-dell-01     yubihsm          /dev/yubihsm-1      available
-dell-02     esp32            /dev/esp32-main     available
-dell-03     esp32_front      /dev/esp32-front    available
-dell-03     esp32_rear       /dev/esp32-rear     available
+yeet-01     yubikey          /dev/yubikey-1      available
+yeet-01     yubihsm          /dev/yubihsm-1      available
+yeet-02     esp32            /dev/esp32-main     available
+yeet-03     esp32_front      /dev/esp32-front    available
+yeet-03     esp32_rear       /dev/esp32-rear     available
 ```
 
 Under the hood, `yeet devices` calls the Nomad API:
@@ -252,7 +252,7 @@ job "sign-release" {
     task "sign" {
       driver = "exec"
       config {
-        command = "/opt/code-orchestration/run-agent.sh"
+        command = "/opt/yeet/run-agent.sh"
         args    = ["--needs", "yubikey", "--", "sign the release artifacts"]
       }
     }
@@ -335,20 +335,20 @@ Exclusive access to devices is enforced using `flock(1)` advisory locks. This pr
 ### Lock File Convention
 
 ```
-/var/lock/code-orchestration/device-{name}.lock
+/var/lock/yeet/device-{name}.lock
 ```
 
 Examples:
-- `/var/lock/code-orchestration/device-yubikey-1.lock`
-- `/var/lock/code-orchestration/device-esp32-main.lock`
-- `/var/lock/code-orchestration/device-yubihsm-1.lock`
+- `/var/lock/yeet/device-yubikey-1.lock`
+- `/var/lock/yeet/device-esp32-main.lock`
+- `/var/lock/yeet/device-yubihsm-1.lock`
 
 The lock directory is created on runner startup:
 
 ```bash
-mkdir -p /var/lock/code-orchestration
-chown root:devices /var/lock/code-orchestration
-chmod 0770 /var/lock/code-orchestration
+mkdir -p /var/lock/yeet
+chown root:devices /var/lock/yeet
+chmod 0770 /var/lock/yeet
 ```
 
 ### Lock Operations
@@ -356,7 +356,7 @@ chmod 0770 /var/lock/code-orchestration
 **Acquire (non-blocking, fail if busy):**
 
 ```bash
-flock -n /var/lock/code-orchestration/device-yubikey-1.lock -c "your-command-here"
+flock -n /var/lock/yeet/device-yubikey-1.lock -c "your-command-here"
 ```
 
 The `-n` flag makes it non-blocking -- if the lock is already held, it fails immediately instead of waiting.
@@ -364,7 +364,7 @@ The `-n` flag makes it non-blocking -- if the lock is already held, it fails imm
 **Check if a device is free:**
 
 ```bash
-flock -n /var/lock/code-orchestration/device-yubikey-1.lock -c "echo free" || echo "busy"
+flock -n /var/lock/yeet/device-yubikey-1.lock -c "echo free" || echo "busy"
 ```
 
 **Release:** Automatic when the process holding the lock exits. No explicit release step is needed.
@@ -374,9 +374,9 @@ flock -n /var/lock/code-orchestration/device-yubikey-1.lock -c "echo free" || ec
 1. **Nomad schedules** a job with `constraint { attribute = "${meta.device_yubikey}" value = "true" }` onto a node that has the device.
 2. **`run-agent.sh` starts** on the target node.
 3. **`run-agent.sh` checks** the device symlink exists in `/dev/`.
-4. **`run-agent.sh` acquires flock** on `/var/lock/code-orchestration/device-yubikey-1.lock`.
+4. **`run-agent.sh` acquires flock** on `/var/lock/yeet/device-yubikey-1.lock`.
 5. **If the lock is already held** (another task on the same node is using the device), `run-agent.sh` can either wait with a timeout or fail immediately. Default: fail immediately, Nomad reschedules.
-6. **Runtime spawns** (Crush/Claude/Aider). The coding agent accesses the device through the wrapper script. The wrapper verifies the lock is held before proceeding.
+6. **Runtime spawns** (Claude Code, OpenCode, Aider). The coding agent accesses the device through the wrapper script. The wrapper verifies the lock is held before proceeding.
 7. **Task completes** (success or failure).
 8. **`run-agent.sh` exits**, which **releases the flock** automatically.
 
@@ -401,12 +401,12 @@ If a device disappears (symlink vanishes from `/dev/`) while a task holds its lo
 
 ## Device Wrapper Scripts
 
-The coding agent (Crush/Claude/Aider) accesses devices through wrapper scripts, never directly. This provides a control point for locking verification, timeouts, output logging, and output sanitization.
+The coding agent (Claude Code, OpenCode, Aider) accesses devices through wrapper scripts, never directly. This provides a control point for locking verification, timeouts, output logging, and output sanitization.
 
 ### Location
 
 ```
-/opt/code-orchestration/devices/
+/opt/yeet/devices/
 ```
 
 All wrapper scripts live in this directory and are added to the runtime's `PATH`.
@@ -415,7 +415,7 @@ All wrapper scripts live in this directory and are added to the runtime's `PATH`
 
 1. **Checks the device lock** is held by the calling task (fails fast if not).
 2. **Sets a timeout** (default 30 seconds, configurable per-device or per-invocation).
-3. **Logs the command and output** to the audit log at `/var/log/code-orchestration/device-audit.log`.
+3. **Logs the command and output** to the audit log at `/var/log/yeet/device-audit.log`.
 4. **Sanitizes output** -- no raw binary dumped to stdout, large outputs truncated to 64KB.
 
 ### yubikey.sh
@@ -434,9 +434,9 @@ Wraps `ykman` for YubiKey operations.
 set -euo pipefail
 
 DEVICE="/dev/yubikey-1"
-LOCK="/var/lock/code-orchestration/device-yubikey-1.lock"
+LOCK="/var/lock/yeet/device-yubikey-1.lock"
 TIMEOUT="${DEVICE_TIMEOUT:-30}"
-LOG="/var/log/code-orchestration/device-audit.log"
+LOG="/var/log/yeet/device-audit.log"
 
 # Verify lock is held by checking that a non-blocking lock attempt FAILS.
 # If flock -n succeeds, it means no one holds the lock -- that is an error.
@@ -478,9 +478,9 @@ COMMAND="${2:?Usage: serial.sh <device-name> <command> [args...]}"
 shift 2
 
 DEVICE="/dev/$DEVICE_NAME"
-LOCK="/var/lock/code-orchestration/device-${DEVICE_NAME}.lock"
+LOCK="/var/lock/yeet/device-${DEVICE_NAME}.lock"
 TIMEOUT="${DEVICE_TIMEOUT:-30}"
-LOG="/var/log/code-orchestration/device-audit.log"
+LOG="/var/log/yeet/device-audit.log"
 BAUD="${DEVICE_BAUD:-115200}"
 
 # Verify lock is held
@@ -540,9 +540,9 @@ Wraps PKCS#11 operations via `pkcs11-tool` for YubiHSM 2 and Nitrokey HSM device
 
 set -euo pipefail
 
-LOCK="/var/lock/code-orchestration/device-yubihsm-1.lock"
+LOCK="/var/lock/yeet/device-yubihsm-1.lock"
 TIMEOUT="${DEVICE_TIMEOUT:-30}"
-LOG="/var/log/code-orchestration/device-audit.log"
+LOG="/var/log/yeet/device-audit.log"
 PKCS11_MODULE="/usr/lib/pkcs11/yubihsm_pkcs11.so"
 
 # Verify lock is held
@@ -603,7 +603,7 @@ A systemd timer or cron job runs every 60 seconds on each node, checks which dev
 
 ```bash
 #!/bin/bash
-# /opt/code-orchestration/device-health.sh
+# /opt/yeet/device-health.sh
 # Runs periodically to sync device presence with Nomad node metadata.
 
 set -euo pipefail
@@ -666,11 +666,11 @@ WantedBy=timers.target
 ```ini
 # /etc/systemd/system/device-health.service
 [Unit]
-Description=Device health check for code-orchestration
+Description=Device health check for yeet
 
 [Service]
 Type=oneshot
-ExecStart=/opt/code-orchestration/device-health.sh
+ExecStart=/opt/yeet/device-health.sh
 User=root
 ```
 
@@ -694,7 +694,7 @@ Use a udev rule to trigger a metadata update immediately when a device is plugge
 # /etc/udev/rules.d/91-nomad-device-meta.rules
 # Trigger metadata update on YubiKey plug/unplug
 SUBSYSTEM=="usb", ATTRS{idVendor}=="1050", ATTRS{idProduct}=="0407", \
-  RUN+="/opt/code-orchestration/device-health.sh"
+  RUN+="/opt/yeet/device-health.sh"
 ```
 
 This gives near-instant metadata updates but requires careful scripting to avoid race conditions (the device symlink may not exist yet when the udev rule fires on plug-in). Best combined with Option 1 as a fallback.
@@ -713,7 +713,7 @@ For most deployments, Option 1 is the right balance. Option 2 is fine when you a
 
 ## Remote Device Access
 
-For when a device is physically attached to one Dell but needed from another. In most cases, the simpler and more reliable approach is to route the task to the node that has the device via Nomad constraints. Remote device access is a fallback for edge cases.
+For when a device is physically attached to one node but needed from another. In most cases, the simpler and more reliable approach is to route the task to the node that has the device via Nomad constraints. Remote device access is a fallback for edge cases.
 
 ### USB/IP
 
@@ -738,8 +738,8 @@ usbip bind -b 1-2
 # Load kernel module
 modprobe vhci-hcd
 
-# Import the device from dell-03
-usbip attach -r dell-03 -b 1-2
+# Import the device from yeet-03
+usbip attach -r yeet-03 -b 1-2
 
 # The device now appears locally in /dev/ and lsusb
 ```
@@ -770,10 +770,10 @@ connection: &esp32-main
 
 ```bash
 # Connect to the remote serial port
-telnet dell-03 2000
+telnet yeet-03 2000
 
 # Or use socat to create a local PTY
-socat pty,link=/dev/esp32-remote,raw tcp:dell-03:2000
+socat pty,link=/dev/esp32-remote,raw tcp:yeet-03:2000
 ```
 
 **Characteristics:**
@@ -798,7 +798,7 @@ p11-kit server --provider /usr/lib/pkcs11/yubihsm_pkcs11.so \
 
 ```bash
 # Forward the Unix socket over SSH
-ssh -L /run/p11-kit/remote-hsm.sock:/run/p11-kit/hsm.sock dell-03
+ssh -L /run/p11-kit/remote-hsm.sock:/run/p11-kit/hsm.sock yeet-03
 
 # Use the remote PKCS#11 module as if it were local
 pkcs11-tool --module /usr/lib/p11-kit-client.so --list-slots
@@ -815,7 +815,7 @@ pkcs11-tool --module /usr/lib/p11-kit-client.so --list-slots
 In most cases, Nomad constraints are simpler and more reliable. The task is routed to the node with the device, and there is no network hop or remote device protocol to worry about.
 
 Use remote access only when:
-- A task needs devices that are on different nodes (e.g., sign with HSM on dell-01, then flash firmware on dell-03). In this case, consider splitting into two jobs instead.
+- A task needs devices that are on different nodes (e.g., sign with HSM on yeet-01, then flash firmware on yeet-03). In this case, consider splitting into two jobs instead.
 - A device is expensive/rare and you cannot duplicate it across nodes.
 - You need to consolidate devices on fewer machines for physical security reasons.
 
@@ -827,7 +827,7 @@ If you find yourself reaching for USB/IP or ser2net frequently, consider whether
 
 ### Access Control
 
-- **Wrapper scripts are the only way** the coding agent touches devices. The runtime sandbox does not have direct access to `/dev/` -- only the wrapper scripts in `/opt/code-orchestration/devices/` are on the PATH.
+- **Wrapper scripts are the only way** the coding agent touches devices. The runtime sandbox does not have direct access to `/dev/` -- only the wrapper scripts in `/opt/yeet/devices/` are on the PATH.
 - **Device permission group (`devices`)** -- only the runner daemon's user is a member of this group. The coding agent's sandboxed process inherits group membership from the runner, which sets it up before spawning the runtime.
 - **USBGuard whitelist** on each runner. Only known vendor:product pairs are allowed to enumerate. Unknown USB devices are blocked at the kernel level.
 
@@ -846,7 +846,7 @@ reject
 
 ### Audit Logging
 
-Every device interaction is logged to `/var/log/code-orchestration/device-audit.log` with:
+Every device interaction is logged to `/var/log/yeet/device-audit.log` with:
 
 - ISO 8601 timestamp
 - Task ID
@@ -874,7 +874,7 @@ Step-by-step process for adding a new physical device to the system.
 
 ### 1. Plug It In
 
-Connect the device to a USB port on the target Dell 5070 runner. Prefer a consistent port (e.g., always rear-left for YubiKeys) so that the udev port-path rule remains stable.
+Connect the device to a USB port on the target runner node. Prefer a consistent port (e.g., always rear-left for YubiKeys) so that the udev port-path rule remains stable.
 
 ### 2. Identify Attributes
 
@@ -893,7 +893,7 @@ udevadm info --name=/dev/bus/usb/001/005 --attribute-walk
 
 ### 3. Write udev Rule
 
-Add a rule to `/etc/udev/rules.d/90-code-orchestration.rules`:
+Add a rule to `/etc/udev/rules.d/90-yeet.rules`:
 
 ```udev
 # Description of the device
@@ -951,12 +951,12 @@ systemctl restart nomad
 
 ### 7. Write Wrapper Script
 
-Create `/opt/code-orchestration/devices/your-device.sh`:
+Create `/opt/yeet/devices/your-device.sh`:
 
 - Copy the structure from an existing wrapper (e.g., `yubikey.sh` for USB devices, `serial.sh` for serial devices).
 - Set the correct `DEVICE` path and `LOCK` path.
 - Define the allowed subcommands.
-- Make it executable: `chmod 755 /opt/code-orchestration/devices/your-device.sh`.
+- Make it executable: `chmod 755 /opt/yeet/devices/your-device.sh`.
 
 ### 8. Update the Device Health Script
 

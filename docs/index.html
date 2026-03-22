@@ -243,7 +243,7 @@
   <section class="fade-in">
     <div class="section-title">The pitch</div>
     <p>You have tasks. You have small computers. You <strong>yeet</strong> the tasks at the computers.</p>
-    <p>The computers run AI coding agents -- Claude Code, Crush, Aider -- autonomously.
+    <p>The computers run AI coding agents -- Claude Code, OpenCode, Aider -- autonomously.
        You go get coffee. Or sleep. Or touch grass. Whatever people do when they're not
        babysitting AI.</p>
     <p>When you come back, there are <strong>draft PRs</strong> waiting for you. Reviewed, tested, ready to merge.
@@ -314,7 +314,7 @@
     <div class="features">
       <div class="feature">
         <h3>Agent-agnostic</h3>
-        <p>We don't play favorites. Claude, Crush, Aider -- whoever gets the job done. Bring your own agent if you want. We're not your mom.</p>
+        <p>We don't play favorites. Claude Code, OpenCode, Aider -- whoever gets the job done. Bring your own agent if you want. We're not your mom.</p>
       </div>
       <div class="feature">
         <h3>Device-aware routing</h3>
@@ -352,8 +352,8 @@
       </thead>
       <tbody>
         <tr>
-          <td><strong>Crush</strong> (OpenCode)</td>
-          <td><code>crush run "..."</code></td>
+          <td><strong>OpenCode</strong></td>
+          <td><code>opencode run "..."</code></td>
           <td><code>--session</code></td>
           <td>15+ (Anthropic, OpenAI, Google, etc.)</td>
         </tr>
@@ -380,7 +380,7 @@
 <span class="cmd">yeet run</span> <span class="arg">peer6 "implement the notification system"</span>
 
 <span class="comment"># Pick your weapon</span>
-<span class="cmd">yeet run</span> <span class="arg">peer6 "refactor auth" --runtime crush --model anthropic/claude-sonnet-4</span>
+<span class="cmd">yeet run</span> <span class="arg">peer6 "refactor auth" --runtime opencode --model anthropic/claude-sonnet-4</span>
 <span class="cmd">yeet run</span> <span class="arg">peer6 "refactor auth" --runtime claude --model opus</span>
 
 <span class="comment"># Needs hardware? yeet routes to the right box.</span>
@@ -458,7 +458,7 @@
       </a>
       <a class="doc-link" href="runtime-adapters">
         <span class="doc-title">Runtime Adapters</span>
-        <span class="doc-desc">How Crush, Claude Code, and Aider are integrated. The shell script. The env vars. Adding your own.</span>
+        <span class="doc-desc">How OpenCode, Claude Code, and Aider are integrated. The shell script. The env vars. Adding your own.</span>
       </a>
       <a class="doc-link" href="device-management">
         <span class="doc-title">Device Management</span>

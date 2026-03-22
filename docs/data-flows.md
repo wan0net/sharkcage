@@ -7,7 +7,7 @@ description: ASCII sequence diagrams for every operation in the system.
 # Data Flows
 
 Sequence diagrams and data flow descriptions for every major operation in the
-code-orchestration system. All orchestration flows through HashiCorp Nomad --
+yeet system. All orchestration flows through HashiCorp Nomad --
 no custom API server, no Redis, no BullMQ. Nomad handles scheduling,
 placement, execution, health, and state.
 
@@ -16,11 +16,11 @@ placement, execution, health, and state.
 | Abbreviation | Component | Description |
 |-------------|-----------|-------------|
 | yeet CLI | `yeet` binary | Runs on user's laptop |
-| Nomad Server | Nomad server agent | Runs on co-dell-01, single-node server cluster |
-| Nomad Client | Nomad client agent | Runs on each Dell (including dell-01) |
+| Nomad Server | Nomad server agent | Runs on yeet-01, single-node server cluster |
+| Nomad Client | Nomad client agent | Runs on each node (including yeet-01) |
 | raw_exec | Nomad task driver | Spawns processes directly (no container isolation) |
 | run-agent.sh | Runtime adapter | Shell script launched by raw_exec, manages git + runtime lifecycle |
-| Runtime | Coding agent | Crush, Claude Code, or Aider -- spawned by run-agent.sh |
+| Runtime | Coding agent | OpenCode, Claude Code, or Aider -- spawned by run-agent.sh |
 | Git | GitHub | Remote repository hosting |
 | Ntfy | Ntfy server | Push notification service |
 | Nomad Variables | Built-in KV store | Stores cost data, session IDs, task metadata |
@@ -34,7 +34,7 @@ Nomad evaluates constraints, places the allocation on a matching node, and
 raw_exec launches run-agent.sh, which manages the full git + runtime lifecycle.
 
 ```
-yeet run peer6 "implement feature X" --runtime crush --category quick
+yeet run peer6 "implement feature X" --runtime opencode --category quick
 ```
 
 ### Dispatch Payload
@@ -47,7 +47,7 @@ POST /v1/job/run-coding-agent/dispatch
 {
   "Meta": {
     "project":    "peer6",
-    "runtime":    "crush",
+    "runtime":    "opencode",
     "category":   "quick",
     "branch_base": "main",
     "pr_draft":   "true"
@@ -61,7 +61,7 @@ Nomad creates an evaluation, which triggers the scheduler.
 ### Sequence Diagram
 
 ```
-  yeet CLI         Nomad Server       Nomad Client        run-agent.sh       Runtime (Crush)
+  yeet CLI         Nomad Server       Nomad Client        run-agent.sh       Runtime (OpenCode)
    |                    |                  |                    |                    |
    |-- POST /v1/job/    |                  |                    |                    |
    |   run-coding-agent |                  |                    |                    |
@@ -90,7 +90,7 @@ Nomad creates an evaluation, which triggers the scheduler.
    |                    |                  |                    |                    |
    |                    |-- place alloc -->|                    |                    |
    |                    |   alloc-def456   |                    |                    |
-   |                    |   on co-dell-01  |                    |                    |
+   |                    |   on yeet-01  |                    |                    |
    |                    |                  |                    |                    |
    |                    |                  |-- raw_exec ------->|                    |
    |                    |                  |   run-agent.sh     |                    |
@@ -108,7 +108,7 @@ Nomad creates an evaluation, which triggers the scheduler.
    |                    |                  |                    |   -b yeet/peer6-abc12
    |                    |                  |                    |                    |
    |                    |                  |                    |-- spawn ----------->|
-   |                    |                  |                    |   crush --prompt    |
+   |                    |                  |                    |   opencode --prompt    |
    |                    |                  |                    |   "<decoded payload>"|
    |                    |                  |                    |   --model haiku     |
    |                    |                  |                    |   (cwd=/tmp/yeet-abc|
@@ -164,7 +164,7 @@ Nomad creates an evaluation, which triggers the scheduler.
 3. Acquire flock if device-specific (see Flow 2)
 4. `git fetch && git pull` on the base branch
 5. `git worktree add` with a branch named `yeet/<project>-<short-id>`
-6. Spawn the runtime (Crush/Claude Code/Aider) with the prompt, working in the worktree
+6. Spawn the runtime (OpenCode/Claude Code/Aider) with the prompt, working in the worktree
 7. Wait for runtime exit
 8. On success (exit 0): commit, push, create PR, store cost + session in Nomad Variables, notify via Ntfy
 9. On failure (exit non-zero): store error info, notify via Ntfy, exit non-zero (triggers Nomad restart policy)
@@ -192,7 +192,7 @@ POST /v1/job/run-coding-agent/dispatch
 {
   "Meta": {
     "project":       "peer6",
-    "runtime":       "crush",
+    "runtime":       "opencode",
     "device_yubikey": "true"
   },
   "Payload": "<base64>"
@@ -215,7 +215,7 @@ This constraint is only evaluated when the dispatched job's meta includes
 ### Sequence Diagram
 
 ```
-  yeet CLI         Nomad Server       co-dell-01          co-dell-02
+  yeet CLI         Nomad Server       yeet-01          yeet-02
                                       (no yubikey)        (has yubikey)
    |                    |                  |                    |
    |-- POST /v1/job/    |                  |                    |
@@ -231,7 +231,7 @@ This constraint is only evaluated when the dispatched job's meta includes
    |                    |   yubikey = true |                    |
    |                    |                  |                    |
    |                    |-- check          |                    |
-   |                    |   co-dell-01 --->|                    |
+   |                    |   yeet-01 --->|                    |
    |                    |   meta:          |                    |
    |                    |    device_       |                    |
    |                    |    yubikey       |                    |
@@ -239,14 +239,14 @@ This constraint is only evaluated when the dispatched job's meta includes
    |                    |   SKIP           |                    |
    |                    |                  |                    |
    |                    |-- check          |                    |
-   |                    |   co-dell-02 ------------------>     |
+   |                    |   yeet-02 ------------------>     |
    |                    |   meta:                              |
    |                    |    device_yubikey                    |
    |                    |    = "true"                          |
    |                    |   MATCH                              |
    |                    |                                      |
    |                    |-- place alloc ---------------------->|
-   |                    |   on co-dell-02                      |
+   |                    |   on yeet-02                      |
    |                    |                                      |
    |                    |                  |              raw_exec
    |                    |                  |              run-agent.sh
@@ -261,7 +261,7 @@ This constraint is only evaluated when the dispatched job's meta includes
    |                    |                  |                    |
 ```
 
-### Node Client Config (co-dell-02)
+### Node Client Config (yeet-02)
 
 ```hcl
 client {
@@ -290,7 +290,7 @@ flock -n 9 || { echo "Device busy"; exit 1; }
 
 ## 3. Node Registration (Boot)
 
-When a Dell thin client boots, systemd starts the Nomad client agent. The client
+When a runner boots, systemd starts the Nomad client agent. The client
 connects to the Nomad server and registers itself with its attributes and
 metadata. The server adds the node to the scheduling pool.
 
@@ -298,7 +298,7 @@ metadata. The server adds the node to the scheduling pool.
 
 ```
   systemd            Nomad Client        Nomad Server
-  (co-dell-02)       (co-dell-02)        (co-dell-01)
+  (yeet-02)       (yeet-02)        (yeet-01)
    |                    |                    |
    |-- start            |                    |
    |   nomad.service -->|                    |
@@ -308,11 +308,11 @@ metadata. The server adds the node to the scheduling pool.
    |                    |   client.hcl       |
    |                    |                    |
    |                    |-- RPC connect ---->|
-   |                    |   co-dell-01:4647  |
+   |                    |   yeet-01:4647  |
    |                    |                    |
    |                    |-- Node.Register -->|
    |                    |   {                |
-   |                    |     Name: "co-dell-02",
+   |                    |     Name: "yeet-02",
    |                    |     Datacenter: "home",
    |                    |     Drivers: {     |
    |                    |       raw_exec: {  |
@@ -349,7 +349,7 @@ datacenter = "home"
 client {
   enabled = true
 
-  servers = ["co-dell-01:4647"]
+  servers = ["yeet-01:4647"]
 
   meta {
     "device_yubikey" = "true"
@@ -374,7 +374,7 @@ the server marks the node as down and handles any running allocations.
 
 ```
   Nomad Client        Nomad Server
-  (co-dell-02)        (co-dell-01)
+  (yeet-02)        (yeet-01)
    |                    |
    |-- heartbeat ------>|   (every ~30s, via RPC)
    |<-- ack ------------|
@@ -391,11 +391,11 @@ the server marks the node as down and handles any running allocations.
    |                    |    heartbeats, ~90s)
    |                    |
    |                    |-- mark node
-   |                    |   co-dell-02
+   |                    |   yeet-02
    |                    |   status: "down"
    |                    |
    |                    |-- for each running
-   |                    |   alloc on co-dell-02:
+   |                    |   alloc on yeet-02:
    |                    |   mark alloc "lost"
    |                    |
    |                    |-- check job's
@@ -413,14 +413,14 @@ the server marks the node as down and handles any running allocations.
    |                    |
    |                    |-- place replacement
    |                    |   alloc on healthy
-   |                    |   node (co-dell-01
-   |                    |   or co-dell-03)
+   |                    |   node (yeet-01
+   |                    |   or yeet-03)
    |                    |
    |   ...later...      |
    |                    |
    |-- heartbeat ------>|   (node recovers)
    |                    |-- mark node
-   |                    |   co-dell-02
+   |                    |   yeet-02
    |                    |   status: "ready"
    |                    |
    |                    |   (node back in
@@ -534,7 +534,7 @@ yeet continue abc12 "fix the edge case in error handling"
    |    session_id:     |                  |                    |                |
    |    "s_prev123",    |                  |                    |                |
    |    runtime:        |                  |                    |                |
-   |    "crush",        |                  |                    |                |
+   |    "opencode",        |                  |                    |                |
    |    project:        |                  |                    |                |
    |    "peer6",        |                  |                    |                |
    |    branch:         |                  |                    |                |
@@ -547,7 +547,7 @@ yeet continue abc12 "fix the edge case in error handling"
    |   /dispatch ------>|                  |                    |                |
    |   Meta:            |                  |                    |                |
    |    project: peer6  |                  |                    |                |
-   |    runtime: crush  |                  |                    |                |
+   |    runtime: opencode  |                  |                    |                |
    |    session_id:     |                  |                    |                |
    |     s_prev123      |                  |                    |                |
    |    branch:         |                  |                    |                |
@@ -569,7 +569,7 @@ yeet continue abc12 "fix the edge case in error handling"
    |                    |                  |                    |   yeet/peer6-abc12|
    |                    |                  |                    |                |
    |                    |                  |                    |-- spawn ------->|
-   |                    |                  |                    |   crush         |
+   |                    |                  |                    |   opencode         |
    |                    |                  |                    |   --resume      |
    |                    |                  |                    |   s_prev123     |
    |                    |                  |                    |   --prompt      |
@@ -598,7 +598,7 @@ yeet continue abc12 "fix the edge case in error handling"
 ### Key Behaviors
 
 - The CLI reuses the same git branch from the previous run
-- The runtime receives `--resume <session_id>` (Crush/Claude Code) or equivalent flag
+- The runtime receives `--resume <session_id>` (OpenCode/Claude Code) or equivalent flag
 - The runtime loads its previous conversation context and continues from where it left off
 - A new session ID is stored for subsequent continuations
 - Commits are pushed to the same branch, updating the existing PR
@@ -784,19 +784,19 @@ stops scheduling new work to the node and optionally waits for current
 allocations to finish.
 
 ```
-yeet drain co-dell-02
+yeet drain yeet-02
 ```
 
 ### Sequence Diagram
 
 ```
-  yeet CLI         Nomad Server       co-dell-02          co-dell-01
+  yeet CLI         Nomad Server       yeet-02          yeet-01
    |                    |                  |                    |
    |-- look up node ID  |                  |                    |
    |   GET /v1/nodes    |                  |                    |
    |   ?filter=         |                  |                    |
    |   Name==           |                  |                    |
-   |   co-dell-02 ----->|                  |                    |
+   |   yeet-02 ----->|                  |                    |
    |                    |                  |                    |
    |<-- [{ID:           |                  |                    |
    |  "node-xyz"}] -----|                  |                    |
@@ -842,11 +842,11 @@ yeet drain co-dell-02
 ### Re-activating a Node
 
 ```
-yeet activate co-dell-02
+yeet activate yeet-02
 ```
 
 ```
-  yeet CLI         Nomad Server       co-dell-02
+  yeet CLI         Nomad Server       yeet-02
    |                    |                  |
    |-- POST /v1/node/   |                  |
    |   node-xyz/        |                  |
@@ -901,7 +901,7 @@ in Nomad Variables. The CLI reads and aggregates these for reporting.
    |       project:     |
    |       "peer6",     |
    |       runtime:     |
-   |       "crush",     |
+   |       "opencode",     |
    |       timestamp:   |
    |       "2026-03-22T |
    |       10:15:00Z"   |
@@ -1011,7 +1011,7 @@ committing, pushing, and PR creation.
    |    feature X"      |                    |                  |
    |   --body           |                    |                  |
    |   "Job: abc12      |                    |                  |
-   |    Runtime: crush   |                    |                  |
+   |    Runtime: opencode   |                    |                  |
    |    Model: haiku     |                    |                  |
    |    Cost: $0.42" -->|                    |<-- API create PR |
    |                    |                    |                  |
@@ -1155,7 +1155,7 @@ notification script.
 
 ```
   Consumer           Nomad Server
-  (yeet watch /      (co-dell-01)
+  (yeet watch /      (yeet-01)
    dashboard /
    script)
    |                    |
@@ -1209,7 +1209,7 @@ A simple script that watches for completed or failed allocations and sends
 Ntfy notifications:
 
 ```bash
-curl -s -N "http://co-dell-01:4646/v1/event/stream?topic=Allocation" | \
+curl -s -N "http://yeet-01:4646/v1/event/stream?topic=Allocation" | \
   while read -r line; do
     state=$(echo "$line" | jq -r '.Payload.Allocation.TaskStates.execute.State // empty')
     job=$(echo "$line" | jq -r '.Payload.Allocation.JobID // empty')
@@ -1257,7 +1257,7 @@ job "nightly-tests" {
 
       meta {
         project = "peer6"
-        runtime = "crush"
+        runtime = "opencode"
         prompt  = "Run the full test suite. Report results."
       }
     }
@@ -1269,7 +1269,7 @@ job "nightly-tests" {
 
 ```
   Nomad Scheduler     Nomad Server       Nomad Client        run-agent.sh
-  (internal)          (co-dell-01)       (co-dell-01)
+  (internal)          (yeet-01)       (yeet-01)
    |                    |                  |                    |
    |-- cron trigger     |                  |                    |
    |   0 7 * * *        |                  |                    |
@@ -1361,7 +1361,7 @@ Job-level metadata (set at dispatch time):
 | Key | Example | Purpose |
 |-----|---------|---------|
 | `project` | `"peer6"` | Target project/repo |
-| `runtime` | `"crush"` | Which coding agent to use |
+| `runtime` | `"opencode"` | Which coding agent to use |
 | `category` | `"quick"` | Task sizing category |
 | `session_id` | `"s_prev123"` | Resume from previous session |
 | `branch` | `"yeet/peer6-abc12"` | Use existing branch (for continue) |
