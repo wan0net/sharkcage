@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ page.title }} - yeet</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    :root,
+    [data-theme="dark"] {
+      --bg: #111110;
+      --bg-subtle: #1a1a19;
+      --bg-card: #1c1c1b;
+      --bg-hover: #242423;
+      --border: #282826;
+      --border-strong: #343432;
+      --text: #ededed;
+      --text-mid: #a09f9b;
+      --text-dim: #5c5b57;
+      --accent: #3b82f6;
+      --accent-bg: #1e2e4a;
+      --accent-border: #1d4ed8;
+      --green: #22c55e;
+      --green-bg: #14291e;
+      --shadow-sm: 0 1px 3px rgba(0,0,0,0.3);
+    }
+
+    [data-theme="light"] {
+      --bg: #ffffff;
+      --bg-subtle: #f8f8f7;
+      --bg-card: #ffffff;
+      --bg-hover: #f3f3f2;
+      --border: #e8e8e6;
+      --border-strong: #d4d4d0;
+      --text: #1a1a1a;
+      --text-mid: #57534e;
+      --text-dim: #a8a29e;
+      --accent: #2563eb;
+      --accent-bg: #eff6ff;
+      --accent-border: #bfdbfe;
+      --green: #16a34a;
+      --green-bg: #f0fdf4;
+      --shadow-sm: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+    }
+
+    body {
+      font-family: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    .page {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Header ────────────────────────────────────── */
+
+    .header {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      height: 50px;
+      display: flex;
+      align-items: center;
+      padding: 0 24px;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .logo {
+      font-weight: 700;
+      font-size: 15px;
+      letter-spacing: -0.03em;
+      color: var(--accent);
+      text-decoration: none;
+      flex-shrink: 0;
+    }
+
+    .logo:hover {
+      opacity: 0.85;
+    }
+
+    .nav {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      margin-left: 24px;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+    }
+
+    .nav::-webkit-scrollbar {
+      display: none;
+    }
+
+    .nav a {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-mid);
+      text-decoration: none;
+      padding: 5px 9px;
+      border-radius: 6px;
+      white-space: nowrap;
+      transition: background 0.15s, color 0.15s;
+    }
+
+    .nav a:hover {
+      background: var(--bg-hover);
+      color: var(--text);
+    }
+
+    .nav a.active {
+      background: var(--accent-bg);
+      color: var(--accent);
+    }
+
+    .hamburger {
+      display: none;
+      background: none;
+      border: none;
+      color: var(--text-mid);
+      font-size: 20px;
+      cursor: pointer;
+      padding: 4px 8px;
+      margin-left: 12px;
+      line-height: 1;
+    }
+
+    .theme-toggle {
+      margin-left: auto;
+      flex-shrink: 0;
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text-mid);
+      font-size: 16px;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
+    }
+
+    .theme-toggle:hover {
+      background: var(--bg-hover);
+      border-color: var(--border-strong);
+      color: var(--text);
+    }
+
+    /* ── Main ──────────────────────────────────────── */
+
+    .main {
+      flex: 1;
+      width: 100%;
+      max-width: 820px;
+      margin: 0 auto;
+      padding: 48px 24px;
+    }
+
+    .article-header {
+      margin-bottom: 40px;
+    }
+
+    .article-title {
+      font-size: 32px;
+      font-weight: 700;
+      letter-spacing: -0.04em;
+      line-height: 1.2;
+      color: var(--text);
+    }
+
+    .article-desc {
+      margin-top: 12px;
+      font-size: 16px;
+      line-height: 1.6;
+      color: var(--text-mid);
+    }
+
+    /* ── Content / Prose ──────────────────────────── */
+
+    .content h2 {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      color: var(--text);
+      margin-top: 48px;
+      margin-bottom: 16px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .content h3 {
+      font-size: 17px;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      color: var(--text);
+      margin-top: 36px;
+      margin-bottom: 12px;
+    }
+
+    .content h4 {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text);
+      margin-top: 28px;
+      margin-bottom: 8px;
+    }
+
+    .content p {
+      font-size: 15px;
+      line-height: 1.75;
+      color: var(--text-mid);
+      margin-bottom: 16px;
+    }
+
+    .content strong {
+      color: var(--text);
+      font-weight: 600;
+    }
+
+    .content a {
+      color: var(--accent);
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+
+    .content a:hover {
+      opacity: 0.85;
+    }
+
+    .content ul,
+    .content ol {
+      padding-left: 24px;
+      margin-bottom: 16px;
+    }
+
+    .content li {
+      font-size: 15px;
+      line-height: 1.75;
+      color: var(--text-mid);
+      margin-bottom: 4px;
+    }
+
+    .content li strong {
+      color: var(--text);
+    }
+
+    .content blockquote {
+      border-left: 3px solid var(--border-strong);
+      padding: 12px 16px;
+      margin: 16px 0;
+      font-style: italic;
+      color: var(--text-mid);
+      background: var(--bg-subtle);
+      border-radius: 0 6px 6px 0;
+    }
+
+    .content blockquote p {
+      margin-bottom: 0;
+    }
+
+    .content hr {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 32px 0;
+    }
+
+    .content pre {
+      background: var(--bg-subtle);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      overflow-x: auto;
+      margin-bottom: 16px;
+      font-family: 'Geist Mono', 'SF Mono', 'Fira Code', monospace;
+      font-size: 13px;
+      line-height: 1.6;
+      color: var(--text);
+    }
+
+    .content code {
+      font-family: 'Geist Mono', 'SF Mono', 'Fira Code', monospace;
+      font-size: 12.5px;
+      background: var(--bg-subtle);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 1px 5px;
+      color: var(--text);
+    }
+
+    .content pre code {
+      background: none;
+      border: none;
+      border-radius: 0;
+      padding: 0;
+      font-size: 13px;
+    }
+
+    .content .table-wrapper {
+      overflow-x: auto;
+      margin-bottom: 16px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+
+    .content table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    .content th {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-dim);
+      padding: 10px 14px;
+      text-align: left;
+      border-bottom: 2px solid var(--border-strong);
+      background: var(--bg-subtle);
+    }
+
+    .content td {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      color: var(--text-mid);
+    }
+
+    .content tr:last-child td {
+      border-bottom: none;
+    }
+
+    .content tr:hover {
+      background: var(--bg-hover);
+    }
+
+    .content img {
+      max-width: 100%;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      margin: 16px 0;
+    }
+
+    /* ── Footer ────────────────────────────────────── */
+
+    .footer {
+      border-top: 1px solid var(--border);
+      padding: 20px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+      color: var(--text-dim);
+    }
+
+    .footer-right {
+      display: flex;
+      gap: 16px;
+    }
+
+    .footer-right a {
+      color: var(--text-dim);
+      text-decoration: none;
+      transition: color 0.15s;
+    }
+
+    .footer-right a:hover {
+      color: var(--text-mid);
+    }
+
+    /* ── Responsive ────────────────────────────────── */
+
+    @media (max-width: 768px) {
+      .nav {
+        display: none;
+        position: absolute;
+        top: 50px;
+        left: 0;
+        right: 0;
+        flex-direction: column;
+        background: var(--bg);
+        border-bottom: 1px solid var(--border);
+        padding: 8px 12px;
+        gap: 2px;
+        box-shadow: var(--shadow-sm);
+      }
+
+      .nav.open {
+        display: flex;
+      }
+
+      .nav a {
+        padding: 8px 12px;
+        border-radius: 6px;
+      }
+
+      .hamburger {
+        display: block;
+      }
+
+      .main {
+        padding: 32px 16px;
+      }
+
+      .article-title {
+        font-size: 26px;
+      }
+
+      .content h2 {
+        font-size: 20px;
+        margin-top: 36px;
+      }
+
+      .content h3 {
+        font-size: 16px;
+        margin-top: 28px;
+      }
+
+      .content pre {
+        border-radius: 6px;
+        padding: 12px;
+        font-size: 12px;
+      }
+
+      .content table {
+        font-size: 12px;
+      }
+
+      .content th,
+      .content td {
+        padding: 8px 10px;
+      }
+
+      .footer {
+        flex-direction: column;
+        gap: 8px;
+        text-align: center;
+      }
+    }
+  </style>
+  <script>
+    (function() {
+      var t = localStorage.getItem('theme') || 'dark';
+      document.documentElement.setAttribute('data-theme', t);
+    })();
+    function toggleTheme() {
+      var current = document.documentElement.getAttribute('data-theme');
+      var next = current === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      localStorage.setItem('theme', next);
+      updateToggleLabel();
+    }
+    function updateToggleLabel() {
+      var btn = document.querySelector('.theme-toggle');
+      var theme = document.documentElement.getAttribute('data-theme');
+      btn.textContent = theme === 'dark' ? '\u2600' : '\u263E';
+    }
+    function toggleNav() {
+      document.querySelector('.nav').classList.toggle('open');
+    }
+    document.addEventListener('DOMContentLoaded', function() {
+      updateToggleLabel();
+
+      // Wrap bare tables in a .table-wrapper for horizontal scroll
+      var tables = document.querySelectorAll('.content table');
+      tables.forEach(function(table) {
+        if (!table.parentElement.classList.contains('table-wrapper')) {
+          var wrapper = document.createElement('div');
+          wrapper.className = 'table-wrapper';
+          table.parentNode.insertBefore(wrapper, table);
+          wrapper.appendChild(table);
+        }
+      });
+    });
+  </script>
+</head>
+<body>
+  <div class="page">
+    <header class="header">
+      <a class="logo" href="{{ site.baseurl }}/">yeet</a>
+      <button class="hamburger" onclick="toggleNav()" aria-label="Toggle navigation">&#9776;</button>
+      <nav class="nav">
+        <a href="{{ site.baseurl }}/architecture"{% if page.title == "Architecture" %} class="active"{% endif %}>Architecture</a>
+        <a href="{{ site.baseurl }}/use-cases"{% if page.title == "Use Cases" %} class="active"{% endif %}>Use Cases</a>
+        <a href="{{ site.baseurl }}/data-flows"{% if page.title == "Data Flows" %} class="active"{% endif %}>Data Flows</a>
+        <a href="{{ site.baseurl }}/runtime-adapters"{% if page.title == "Runtime Adapters" %} class="active"{% endif %}>Adapters</a>
+        <a href="{{ site.baseurl }}/device-management"{% if page.title == "Device Management" %} class="active"{% endif %}>Devices</a>
+        <a href="{{ site.baseurl }}/deployment"{% if page.title == "Deployment" %} class="active"{% endif %}>Deployment</a>
+      </nav>
+      <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme"></button>
+    </header>
+    <main class="main">
+      <article class="article">
+        <div class="article-header">
+          <h1 class="article-title">{{ page.title }}</h1>
+          {% if page.description %}<p class="article-desc">{{ page.description }}</p>{% endif %}
+        </div>
+        <div class="content">
+          {{ content }}
+        </div>
+      </article>
+    </main>
+    <footer class="footer">
+      <div class="footer-left">yeet - wan0net</div>
+      <div class="footer-right">
+        <a href="https://github.com/wan0net/yeet">GitHub</a>
+        <a href="{{ site.baseurl }}/">Home</a>
+      </div>
+    </footer>
+  </div>
+</body>
+</html>

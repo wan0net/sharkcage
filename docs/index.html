@@ -1,23 +1,46 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>yeet - Throw code tasks at cheap hardware and walk away</title>
 <meta name="description" content="Agent-agnostic AI coding orchestrator for physical runner fleets. Nomad-powered. Cheap hardware approved.">
+<script>(function(){var t=localStorage.getItem('theme')||'dark';document.documentElement.setAttribute('data-theme',t)})();</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@300;400;500&display=swap" rel="stylesheet">
 <style>
-  :root {
-    --bg: #0a0a0f;
-    --bg-surface: #12121a;
-    --bg-code: #1a1a26;
-    --text: #e0e0e8;
-    --text-dim: #8888a0;
-    --accent: #39ff14;
-    --accent-dim: rgba(57, 255, 20, 0.15);
-    --accent-glow: rgba(57, 255, 20, 0.3);
-    --border: #2a2a3a;
-    --font: 'SF Mono', 'Cascadia Code', 'Fira Code', 'JetBrains Mono', ui-monospace, monospace;
-    --max-w: 720px;
+  [data-theme="dark"] {
+    --bg: #111110;
+    --bg-subtle: #1a1a19;
+    --bg-card: #1c1c1b;
+    --bg-hover: #242423;
+    --border: #282826;
+    --border-strong: #343432;
+    --text: #ededed;
+    --text-mid: #a09f9b;
+    --text-dim: #5c5b57;
+    --accent: #3b82f6;
+    --accent-bg: #1e2e4a;
+    --green: #22c55e;
+    --green-bg: #14291e;
+    --shadow-md: 0 4px 12px rgba(0,0,0,0.3);
+  }
+  [data-theme="light"] {
+    --bg: #ffffff;
+    --bg-subtle: #f8f8f7;
+    --bg-card: #ffffff;
+    --bg-hover: #f3f3f2;
+    --border: #e8e8e6;
+    --border-strong: #d4d4d0;
+    --text: #1a1a1a;
+    --text-mid: #57534e;
+    --text-dim: #a8a29e;
+    --accent: #2563eb;
+    --accent-bg: #eff6ff;
+    --green: #16a34a;
+    --green-bg: #f0fdf4;
+    --shadow-md: 0 4px 12px rgba(0,0,0,0.06), 0 2px 4px rgba(0,0,0,0.04);
   }
 
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -25,283 +48,186 @@
   body {
     background: var(--bg);
     color: var(--text);
-    font-family: var(--font);
+    font-family: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
     font-size: 15px;
     line-height: 1.7;
     -webkit-font-smoothing: antialiased;
-  }
-
-  .container { max-width: var(--max-w); margin: 0 auto; padding: 0 24px; }
-
-  /* Hero */
-  .hero {
-    padding: 120px 0 80px;
-    text-align: center;
-    animation: fadeUp 0.6s ease-out;
-  }
-  .hero h1 {
-    font-size: clamp(4rem, 12vw, 8rem);
-    font-weight: 900;
-    letter-spacing: -0.04em;
-    color: var(--accent);
-    text-shadow: 0 0 60px var(--accent-glow);
-    line-height: 1;
-  }
-  .hero .tagline {
-    margin-top: 24px;
-    font-size: clamp(1rem, 2.5vw, 1.2rem);
-    color: var(--text-dim);
-    max-width: 520px;
-    margin-left: auto;
-    margin-right: auto;
-  }
-  .hero-links {
-    margin-top: 32px;
-    display: flex;
-    gap: 16px;
-    justify-content: center;
-    flex-wrap: wrap;
-  }
-  .hero-links a {
-    color: var(--accent);
-    text-decoration: none;
-    font-size: 0.9rem;
-    padding: 8px 20px;
-    border: 1px solid var(--accent);
-    border-radius: 6px;
     transition: background 0.2s, color 0.2s;
   }
-  .hero-links a:hover {
-    background: var(--accent);
-    color: var(--bg);
-  }
-  .hero-links a.secondary {
-    color: var(--text-dim);
-    border-color: var(--border);
-  }
-  .hero-links a.secondary:hover {
-    background: var(--bg-surface);
-    color: var(--text);
-    border-color: var(--text-dim);
+
+  code, pre {
+    font-family: 'Geist Mono', ui-monospace, 'SF Mono', Menlo, monospace;
   }
 
+  .container { max-width: 740px; margin: 0 auto; padding: 0 24px; }
+
+  /* Nav */
+  .nav {
+    position: sticky; top: 0; z-index: 100;
+    height: 50px; display: flex; align-items: center; justify-content: space-between;
+    background: var(--bg); border-bottom: 1px solid var(--border);
+    padding: 0 24px;
+  }
+  .nav-logo { color: var(--accent); font-weight: 700; font-size: 1.1rem; text-decoration: none; letter-spacing: -0.02em; }
+  .theme-toggle {
+    background: none; border: 1px solid var(--border); color: var(--text-mid);
+    width: 32px; height: 32px; border-radius: 8px; cursor: pointer; font-size: 16px;
+    display: flex; align-items: center; justify-content: center;
+    transition: border-color 0.2s, color 0.2s;
+  }
+  .theme-toggle:hover { border-color: var(--border-strong); color: var(--text); }
+
+  /* Hero */
+  .hero { padding: 100px 0 72px; text-align: center; }
+  .hero h1 {
+    font-size: clamp(4rem, 12vw, 7rem); font-weight: 700;
+    letter-spacing: -0.04em; color: var(--accent); line-height: 1;
+  }
+  .hero .tagline {
+    margin-top: 20px; font-size: clamp(1rem, 2.5vw, 1.15rem);
+    color: var(--text-mid); max-width: 480px; margin-left: auto; margin-right: auto;
+  }
+  .hero-links { margin-top: 28px; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .hero-links a {
+    font-size: 0.875rem; padding: 8px 20px; border-radius: 8px;
+    text-decoration: none; font-weight: 500; transition: all 0.2s;
+  }
+  .hero-links .primary {
+    background: var(--accent); color: #fff; border: 1px solid var(--accent);
+  }
+  .hero-links .primary:hover { opacity: 0.9; }
+  .hero-links .secondary {
+    color: var(--text-mid); border: 1px solid var(--border); background: var(--bg-card);
+  }
+  .hero-links .secondary:hover { border-color: var(--border-strong); color: var(--text); }
+
   /* Sections */
-  section { padding: 60px 0; }
+  section { padding: 56px 0; }
   section + section { border-top: 1px solid var(--border); }
-  h2 {
-    font-size: 1.4rem;
-    font-weight: 700;
-    margin-bottom: 24px;
-    color: var(--accent);
+  .section-title {
+    font-size: 11px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--text-dim); margin-bottom: 20px;
   }
-  h3 {
-    font-size: 1rem;
-    font-weight: 600;
-    margin-bottom: 8px;
-  }
-  p { margin-bottom: 16px; color: var(--text-dim); }
+  h3 { font-size: 0.95rem; font-weight: 600; margin-bottom: 6px; color: var(--text); }
+  p { margin-bottom: 14px; color: var(--text-mid); }
   p strong { color: var(--text); }
-  a { color: var(--accent); }
+  a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
 
   /* Code blocks */
   pre {
-    background: var(--bg-code);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 20px 24px;
-    overflow-x: auto;
-    margin-bottom: 24px;
-    font-size: 13px;
-    line-height: 1.8;
+    background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 8px;
+    padding: 18px 22px; overflow-x: auto; margin-bottom: 20px;
+    font-size: 13px; line-height: 1.8;
   }
-  pre .comment { color: #555570; }
+  pre .comment { color: var(--text-dim); }
   pre .cmd { color: var(--accent); }
   pre .arg { color: var(--text); }
+  code {
+    background: var(--bg-subtle); border: 1px solid var(--border);
+    padding: 2px 6px; border-radius: 4px; font-size: 0.85em;
+  }
+  pre code { background: none; border: none; padding: 0; }
 
   /* Flow diagram */
   .flow {
-    background: var(--bg-code);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 24px;
-    text-align: center;
-    font-size: 13px;
-    overflow-x: auto;
-    white-space: nowrap;
-    margin-bottom: 24px;
-    color: var(--text-dim);
+    background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 8px;
+    padding: 22px; text-align: center; font-size: 13px;
+    overflow-x: auto; white-space: nowrap; margin-bottom: 20px; color: var(--text-mid);
+    font-family: 'Geist Mono', ui-monospace, 'SF Mono', Menlo, monospace;
   }
-  .flow .node {
-    color: var(--accent);
-    font-weight: 600;
-  }
+  .flow .node { color: var(--accent); font-weight: 600; }
   .flow .arrow { color: var(--text-dim); padding: 0 4px; }
 
-  /* Comparison columns */
-  .compare {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 16px;
-    margin-bottom: 24px;
-  }
+  /* Comparison grid */
+  .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 20px; }
   .compare-col {
-    background: var(--bg-code);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 20px;
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 20px;
   }
   .compare-col.reality { border-color: var(--accent); }
-  .compare-col h3 { color: var(--text-dim); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  .compare-col h3 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--text-dim); font-weight: 600;
+  }
   .compare-col.reality h3 { color: var(--accent); }
   .compare-col ul { list-style: none; padding: 0; margin-top: 12px; }
-  .compare-col li { padding: 4px 0; color: var(--text-dim); font-size: 0.9rem; }
+  .compare-col li { padding: 3px 0; color: var(--text-mid); font-size: 0.9rem; }
   .compare-col.reality li { color: var(--text); }
 
   /* Feature grid */
-  .features {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 16px;
-    margin-bottom: 24px;
-  }
+  .features { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 20px; }
   .feature {
-    background: var(--bg-surface);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 20px;
-    transition: border-color 0.2s;
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 20px; transition: box-shadow 0.2s, border-color 0.2s;
   }
-  .feature:hover { border-color: var(--accent); }
-  .feature h3 { color: var(--text); font-size: 0.95rem; }
-  .feature p { color: var(--text-dim); font-size: 0.85rem; margin-bottom: 0; }
-
+  .feature:hover { border-color: var(--border-strong); box-shadow: var(--shadow-md); }
+  .feature h3 { font-size: 0.9rem; }
+  .feature p { color: var(--text-mid); font-size: 0.85rem; margin-bottom: 0; }
   /* Hardware stats */
   .hw-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-    gap: 12px;
-    margin-bottom: 24px;
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 12px; margin-bottom: 20px;
   }
   .hw-stat {
-    background: var(--bg-code);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 16px;
-    text-align: center;
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px; text-align: center;
   }
-  .hw-stat .val {
-    font-size: 1.4rem;
-    font-weight: 700;
-    color: var(--accent);
-    display: block;
-  }
-  .hw-stat .label {
-    font-size: 0.75rem;
-    color: var(--text-dim);
-    margin-top: 4px;
-    display: block;
-  }
-
+  .hw-stat .val { font-size: 1.3rem; font-weight: 700; color: var(--accent); display: block; }
+  .hw-stat .label { font-size: 0.75rem; color: var(--text-dim); margin-top: 4px; display: block; }
   /* Docs grid */
-  .docs-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
-    margin-bottom: 24px;
-  }
+  .docs-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; }
   .doc-link {
-    display: block;
-    background: var(--bg-surface);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 16px 20px;
-    text-decoration: none;
-    transition: border-color 0.2s, background 0.2s;
+    display: block; background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px 20px; text-decoration: none;
+    transition: box-shadow 0.2s, border-color 0.2s;
   }
-  .doc-link:hover {
-    border-color: var(--accent);
-    background: var(--bg-code);
-  }
-  .doc-link .doc-title {
-    color: var(--text);
-    font-weight: 600;
-    font-size: 0.9rem;
-    display: block;
-    margin-bottom: 4px;
-  }
-  .doc-link .doc-desc {
-    color: var(--text-dim);
-    font-size: 0.78rem;
-    line-height: 1.4;
-  }
-
+  .doc-link:hover { border-color: var(--border-strong); box-shadow: var(--shadow-md); }
+  .doc-link .doc-title { color: var(--text); font-weight: 600; font-size: 0.9rem; display: block; margin-bottom: 4px; }
+  .doc-link .doc-desc { color: var(--text-dim); font-size: 0.78rem; line-height: 1.4; }
   /* Runtime table */
-  .runtime-table {
-    width: 100%;
-    border-collapse: collapse;
-    margin-bottom: 24px;
-    font-size: 0.85rem;
-  }
+  .runtime-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 13px; }
   .runtime-table th {
-    text-align: left;
-    padding: 10px 12px;
-    border-bottom: 2px solid var(--border);
-    color: var(--accent);
-    font-weight: 600;
-    font-size: 0.8rem;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    text-align: left; padding: 10px 12px; border-bottom: 2px solid var(--border);
+    color: var(--text-dim); font-weight: 600; font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.06em;
   }
-  .runtime-table td {
-    padding: 10px 12px;
-    border-bottom: 1px solid var(--border);
-    color: var(--text-dim);
-  }
+  .runtime-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); color: var(--text-mid); }
+  .runtime-table tr:hover td { background: var(--bg-hover); }
   .runtime-table tr:last-child td { border-bottom: none; }
-  .runtime-table code {
-    background: var(--bg-code);
-    padding: 2px 6px;
-    border-radius: 3px;
-    font-size: 0.8rem;
-  }
 
   /* Footer */
   footer {
-    border-top: 1px solid var(--border);
-    padding: 40px 0;
-    text-align: center;
-    color: var(--text-dim);
-    font-size: 0.85rem;
+    border-top: 1px solid var(--border); padding: 36px 0; text-align: center;
+    color: var(--text-dim); font-size: 0.85rem;
   }
-  footer a {
-    color: var(--accent);
-    text-decoration: none;
-    border-bottom: 1px solid var(--accent-dim);
-    transition: border-color 0.2s;
-  }
-  footer a:hover { border-color: var(--accent); }
-  footer p { margin-bottom: 8px; }
+  footer a { color: var(--accent); }
+  footer p { margin-bottom: 6px; }
 
   /* Animations */
-  @keyframes fadeUp {
-    from { opacity: 0; transform: translateY(20px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
   .fade-in { animation: fadeUp 0.5s ease-out both; }
-  .fade-in:nth-child(2) { animation-delay: 0.1s; }
-  .fade-in:nth-child(3) { animation-delay: 0.2s; }
+  .fade-in:nth-child(2) { animation-delay: 0.08s; }
+  .fade-in:nth-child(3) { animation-delay: 0.16s; }
 
   /* Responsive */
-  @media (max-width: 600px) {
-    .hero { padding: 80px 0 60px; }
+  @media (max-width: 768px) {
     .compare, .features, .docs-grid { grid-template-columns: 1fr; }
+    .hero { padding: 80px 0 56px; }
+    section { padding: 40px 0; }
+  }
+  @media (max-width: 480px) {
     .hw-grid { grid-template-columns: 1fr 1fr; }
     pre { font-size: 11px; padding: 14px 16px; }
-    section { padding: 40px 0; }
+    .hero h1 { font-size: 3.5rem; }
   }
 </style>
 </head>
 <body>
+
+<nav class="nav">
+  <a href="./" class="nav-logo">yeet</a>
+  <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme"></button>
+</nav>
 
 <div class="container">
 
@@ -309,13 +235,13 @@
     <h1>yeet</h1>
     <p class="tagline">Yeet your code tasks at whatever hardware you have lying around and walk away.</p>
     <div class="hero-links">
-      <a href="https://github.com/wan0net/yeet">GitHub</a>
-      <a href="https://github.com/wan0net/yeet/tree/master/docs" class="secondary">Documentation</a>
+      <a href="https://github.com/wan0net/yeet" class="primary">GitHub</a>
+      <a href="architecture" class="secondary">Documentation</a>
     </div>
   </header>
 
   <section class="fade-in">
-    <h2>The pitch</h2>
+    <div class="section-title">The pitch</div>
     <p>You have tasks. You have small computers. You <strong>yeet</strong> the tasks at the computers.</p>
     <p>The computers run AI coding agents -- Claude Code, Crush, Aider -- autonomously.
        You go get coffee. Or sleep. Or touch grass. Whatever people do when they're not
@@ -327,7 +253,7 @@
   </section>
 
   <section class="fade-in">
-    <h2>The stack</h2>
+    <div class="section-title">The stack</div>
     <div class="compare">
       <div class="compare-col">
         <h3>What you'd expect</h3>
@@ -357,7 +283,7 @@
   </section>
 
   <section class="fade-in">
-    <h2>How it works</h2>
+    <div class="section-title">How it works</div>
     <div class="flow">
       <span class="node">You</span>
       <span class="arrow">--></span>
@@ -384,7 +310,7 @@
   </section>
 
   <section class="fade-in">
-    <h2>Features</h2>
+    <div class="section-title">Features</div>
     <div class="features">
       <div class="feature">
         <h3>Agent-agnostic</h3>
@@ -414,7 +340,7 @@
   </section>
 
   <section class="fade-in">
-    <h2>Supported runtimes</h2>
+    <div class="section-title">Supported runtimes</div>
     <table class="runtime-table">
       <thead>
         <tr>
@@ -449,16 +375,15 @@
   </section>
 
   <section class="fade-in">
-    <h2>CLI</h2>
-    <pre>
-<span class="comment"># Yeet a task and forget about it</span>
+    <div class="section-title">CLI</div>
+    <pre><code><span class="comment"># Yeet a task and forget about it</span>
 <span class="cmd">yeet run</span> <span class="arg">peer6 "implement the notification system"</span>
 
 <span class="comment"># Pick your weapon</span>
 <span class="cmd">yeet run</span> <span class="arg">peer6 "refactor auth" --runtime crush --model anthropic/claude-sonnet-4</span>
 <span class="cmd">yeet run</span> <span class="arg">peer6 "refactor auth" --runtime claude --model opus</span>
 
-<span class="comment"># Needs hardware? yeet routes to the right Dell.</span>
+<span class="comment"># Needs hardware? yeet routes to the right box.</span>
 <span class="cmd">yeet run</span> <span class="arg">login2 "test FIDO2 flow" --needs yubikey</span>
 
 <span class="comment"># Check on your fleet of discount workstations</span>
@@ -477,7 +402,7 @@
 <span class="cmd">yeet stop</span> <span class="arg">peer6-abc123</span>
 
 <span class="comment"># How much did that cost me</span>
-<span class="cmd">yeet cost</span> <span class="arg">--period week</span></pre>
+<span class="cmd">yeet cost</span> <span class="arg">--period week</span></code></pre>
     <p>Every command is a thin wrapper around a
        <a href="https://developer.hashicorp.com/nomad/api-docs">Nomad API call</a>.
        If <code>yeet</code> doesn't do what you need, <code>nomad</code> CLI does.
@@ -485,7 +410,7 @@
   </section>
 
   <section class="fade-in">
-    <h2>The hardware</h2>
+    <div class="section-title">The hardware</div>
     <p>You know that old PC in the cupboard? The thin client you decommissioned?
        The NUC gathering dust? It runs yeet.</p>
     <div class="hw-grid">
@@ -516,32 +441,32 @@
   </section>
 
   <section class="fade-in">
-    <h2>Documentation</h2>
+    <div class="section-title">Documentation</div>
     <p>Overengineered the docs so we didn't have to overengineer the code.</p>
     <div class="docs-grid">
-      <a class="doc-link" href="https://github.com/wan0net/yeet/blob/master/docs/architecture.md">
+      <a class="doc-link" href="architecture">
         <span class="doc-title">Architecture</span>
         <span class="doc-desc">Components, Nomad config, job templates, CLI-to-API mapping, security model, and what we didn't build.</span>
       </a>
-      <a class="doc-link" href="https://github.com/wan0net/yeet/blob/master/docs/data-flows.md">
+      <a class="doc-link" href="data-flows">
         <span class="doc-title">Data Flows</span>
         <span class="doc-desc">ASCII sequence diagrams for every operation. Task submission, device routing, log streaming, retries, the lot.</span>
       </a>
-      <a class="doc-link" href="https://github.com/wan0net/yeet/blob/master/docs/use-cases.md">
+      <a class="doc-link" href="use-cases">
         <span class="doc-title">Use Cases</span>
         <span class="doc-desc">16 concrete scenarios with exact CLI commands, Nomad API calls, and expected outcomes.</span>
       </a>
-      <a class="doc-link" href="https://github.com/wan0net/yeet/blob/master/docs/runtime-adapters.md">
+      <a class="doc-link" href="runtime-adapters">
         <span class="doc-title">Runtime Adapters</span>
         <span class="doc-desc">How Crush, Claude Code, and Aider are integrated. The shell script. The env vars. Adding your own.</span>
       </a>
-      <a class="doc-link" href="https://github.com/wan0net/yeet/blob/master/docs/device-management.md">
+      <a class="doc-link" href="device-management">
         <span class="doc-title">Device Management</span>
         <span class="doc-desc">USB security keys, HSMs, dev boards. udev rules, flock locking, wrapper scripts, health monitoring.</span>
       </a>
-      <a class="doc-link" href="https://github.com/wan0net/yeet/blob/master/docs/deployment.md">
+      <a class="doc-link" href="deployment">
         <span class="doc-title">Deployment</span>
-        <span class="doc-desc">Dell 5070 setup, Ansible playbooks, Nomad config, Tailscale mesh, systemd services. Bare metal to running fleet.</span>
+        <span class="doc-desc">Setup guide, Ansible playbooks, Nomad config, Tailscale mesh, systemd services. Bare metal to running fleet.</span>
       </a>
     </div>
   </section>
@@ -554,6 +479,22 @@
     <p>Built by someone who got tired of babysitting AI coding sessions.</p>
   </div>
 </footer>
+
+<script>
+(function(){
+  var btn = document.querySelector('.theme-toggle');
+  var current = document.documentElement.getAttribute('data-theme');
+  btn.textContent = current === 'dark' ? '\u2600' : '\u263E';
+})();
+function toggleTheme() {
+  var current = document.documentElement.getAttribute('data-theme');
+  var next = current === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  localStorage.setItem('theme', next);
+  var btn = document.querySelector('.theme-toggle');
+  btn.textContent = next === 'dark' ? '\u2600' : '\u263E';
+}
+</script>
 
 </body>
 </html>

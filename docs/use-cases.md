@@ -1,3 +1,9 @@
+---
+layout: doc
+title: Use Cases
+description: 16 concrete scenarios with exact CLI commands, Nomad API calls, and expected outcomes.
+---
+
 # Use Cases
 
 Concrete scenarios showing how code-orchestration works from the user's perspective. Each use case includes the exact CLI command, what Nomad does under the hood, and what the user gets back.

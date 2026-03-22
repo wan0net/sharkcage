@@ -1,4 +1,10 @@
-# code-orchestration Architecture
+---
+layout: doc
+title: Architecture
+description: Components, Nomad config, job templates, CLI design, security model, and what we didn't build.
+---
+
+# Architecture
 
 Nomad-based autonomous coding orchestrator for physical runner fleets.
 

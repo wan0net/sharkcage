@@ -1,3 +1,9 @@
+---
+layout: doc
+title: Runtime Adapters
+description: How Crush, Claude Code, and Aider are integrated via run-agent.sh.
+---
+
 # Runtime Adapters
 
 Runtime adaptation happens in `run-agent.sh`, the single entry point that Nomad executes via its `raw_exec` driver. There is no TypeScript adapter interface. Instead, a shell script reads environment variables set by Nomad's parameterized job dispatch, selects and configures the appropriate coding agent CLI, executes it, and handles all post-run operations.

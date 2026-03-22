@@ -1,4 +1,10 @@
-# Deployment Guide: Dell 5070 Runner Fleet
+---
+layout: doc
+title: Deployment
+description: Setup guide, Ansible playbooks, Nomad config, Tailscale mesh, systemd services.
+---
+
+# Deployment Guide
 
 This document covers end-to-end setup of Dell OptiPlex 5070 Micro thin clients as autonomous coding agent runners for code-orchestration. The architecture uses HashiCorp Nomad for job scheduling -- a single Go binary replaces Redis, BullMQ, and the custom worker daemon. Follow it top to bottom to go from bare hardware to a working fleet.
 

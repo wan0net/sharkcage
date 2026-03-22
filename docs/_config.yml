@@ -1,0 +1,10 @@
+title: yeet
+description: Yeet your code tasks at whatever hardware you have lying around and walk away.
+url: https://wan0.net
+baseurl: /yeet
+markdown: kramdown
+kramdown:
+  input: GFM
+  syntax_highlighter: rouge
+exclude:
+  - _config.yml

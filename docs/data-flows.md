@@ -1,3 +1,9 @@
+---
+layout: doc
+title: Data Flows
+description: ASCII sequence diagrams for every operation in the system.
+---
+
 # Data Flows
 
 Sequence diagrams and data flow descriptions for every major operation in the

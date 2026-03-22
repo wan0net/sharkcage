@@ -1,3 +1,9 @@
+---
+layout: doc
+title: Device Management
+description: USB security keys, HSMs, dev boards. udev rules, flock locking, wrapper scripts.
+---
+
 # Device Management
 
 How physical USB devices (security keys, dev boards, HSMs) are managed across a fleet of Dell 5070 thin clients running code-orchestration on Nomad.
