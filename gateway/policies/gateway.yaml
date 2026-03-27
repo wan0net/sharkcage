@@ -1,0 +1,33 @@
+# OpenShell sandbox policy for the yeet conversational gateway
+# The gateway runs inside this sandbox; signal-cli runs outside on the host.
+
+filesystem:
+  read_only:
+    - /usr
+    - /lib
+    - /lib64
+    - /etc/ssl
+    - /etc/resolv.conf
+    - /opt/yeet/gateway/
+  read_write:
+    - /opt/yeet/gateway/data/
+    - /tmp
+  denied:
+    - /etc/shadow
+    - /root
+    - /home
+    - /opt/yeet/workspaces
+
+network:
+  allowed_hosts:
+    - 127.0.0.1:7583             # signal-cli daemon (outside sandbox)
+    - yeet-01.tailnet:4646       # Nomad API
+    - openrouter.ai:443          # LLM inference
+    - api.github.com:443         # PR status
+    - ntfy.sh:443                # Notifications
+  deny_all_other: true
+
+process:
+  max_memory_mb: 1024
+  max_processes: 64
+  max_open_files: 1024
