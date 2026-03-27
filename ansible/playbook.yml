@@ -4,8 +4,6 @@
   become: true
   vars:
     yeet_dir: /opt/yeet
-    nomad_version: "{{ nomad_version | default('1.9.4') }}"
-    openshell_version: "{{ openshell_version | default('0.0.13') }}"
   roles:
     - base
     - role: tailscale
