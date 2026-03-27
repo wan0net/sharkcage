@@ -2,13 +2,13 @@
 - name: Install signal-cli dependencies
   apt:
     name:
-      - openjdk-21-jre-headless
+      - openjdk-25-jre-headless
       - wget
     state: present
 
 - name: Download signal-cli
   get_url:
-    url: "https://github.com/AsamK/signal-cli/releases/download/v{{ signal_cli_version | default('0.13.12') }}/signal-cli-{{ signal_cli_version | default('0.13.12') }}-Linux.tar.gz"
+    url: "https://github.com/AsamK/signal-cli/releases/download/v{{ signal_cli_version | default('0.14.1') }}/signal-cli-{{ signal_cli_version | default('0.14.1') }}.tar.gz"
     dest: /tmp/signal-cli.tar.gz
 
 - name: Extract signal-cli
@@ -19,7 +19,7 @@
 
 - name: Symlink signal-cli binary
   file:
-    src: "/opt/signal-cli-{{ signal_cli_version | default('0.13.12') }}/bin/signal-cli"
+    src: "/opt/signal-cli-{{ signal_cli_version | default('0.14.1') }}/bin/signal-cli"
     dest: /usr/local/bin/signal-cli
     state: link
 
@@ -36,8 +36,8 @@
   file:
     path: /var/lib/signal-cli
     state: directory
-    owner: runner
-    group: runner
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
     mode: "0700"
 
 - name: Deploy signal-cli systemd service

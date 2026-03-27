@@ -24,30 +24,17 @@ job "yeet-nemoclaw" {
       driver = "raw_exec"
 
       config {
-        command = "/usr/local/bin/nemoclaw"
+        command = "/usr/bin/nemoclaw"
         args    = ["run"]
       }
 
       env {
-        HOME = "/home/runner"
+        HOME = "/home/icd"
       }
 
       resources {
         cpu    = 300
         memory = 512
-      }
-
-      service {
-        name = "yeet-nemoclaw"
-        port = "web"
-
-        check {
-          type     = "http"
-          path     = "/"
-          port     = "web"
-          interval = "30s"
-          timeout  = "5s"
-        }
       }
 
       restart {

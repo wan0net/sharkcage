@@ -40,7 +40,7 @@ locals {
       ip          = "10.42.10.100"
       node        = "pve-prd-01"
       cores       = 4
-      memory      = 4096
+      memory      = 8192
       disk_size   = 32
       description = "yeet master - Nomad server + NemoClaw gateway"
     }

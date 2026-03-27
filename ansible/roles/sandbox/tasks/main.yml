@@ -1,12 +1,18 @@
 ---
-- name: Download openshell-sandbox binary
+- name: Download openshell tarball
   get_url:
-    url: "https://github.com/NVIDIA/OpenShell/releases/download/v{{ openshell_version }}/openshell-sandbox-linux-amd64"
-    dest: /usr/local/bin/openshell-sandbox
+    url: "https://github.com/NVIDIA/OpenShell/releases/download/v{{ openshell_version | default('0.0.16') }}/openshell-x86_64-unknown-linux-musl.tar.gz"
+    dest: /tmp/openshell.tar.gz
+
+- name: Extract openshell binary
+  unarchive:
+    src: /tmp/openshell.tar.gz
+    dest: /usr/local/bin/
+    remote_src: true
     mode: "0755"
 
-- name: Verify openshell-sandbox installation
-  command: openshell-sandbox --version
+- name: Verify openshell installation
+  command: openshell --version
   register: openshell_ver
   changed_when: false
   ignore_errors: true
@@ -19,8 +25,8 @@
   file:
     path: "{{ yeet_dir }}/policies"
     state: directory
-    owner: runner
-    group: runner
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
     mode: "0755"
 
 - name: Deploy base sandbox policy
@@ -54,8 +60,8 @@
           "allow_inbound": false
         }
       }
-    owner: runner
-    group: runner
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
     mode: "0644"
 
 - name: Check Landlock LSM availability
