@@ -9,6 +9,10 @@ job "yeet-nemoclaw" {
   group "gateway" {
     count = 1
 
+    network {
+      port "web" { static = 8080 }
+    }
+
     reschedule {
       attempts  = 5
       interval  = "1h"
@@ -35,11 +39,12 @@ job "yeet-nemoclaw" {
 
       service {
         name = "yeet-nemoclaw"
+        port = "web"
 
         check {
-          type     = "script"
-          command  = "/usr/bin/pgrep"
-          args     = ["-f", "nemoclaw"]
+          type     = "http"
+          path     = "/"
+          port     = "web"
           interval = "30s"
           timeout  = "5s"
         }

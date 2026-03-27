@@ -2,13 +2,17 @@
   "model": "{{ nemoclaw_openrouter_model | default('openrouter/google/gemini-2.5-flash') }}",
 
   "channels": {
-    "signal": {
+    "web": {
       "enabled": true,
+      "port": 8080
+    },
+    "signal": {
+      "enabled": {{ 'true' if nemoclaw_signal_account != 'DISABLED' else 'false' }},
       "account": "{{ nemoclaw_signal_account }}",
       "dmPolicy": "allowlist",
       "allowFrom": {{ nemoclaw_signal_allowed | to_json }}
     }
   },
 
-  "systemPrompt": "You are the yeet fleet operator. You manage a Nomad-based coding agent fleet via Signal. Dispatch tasks, monitor jobs, read logs, and manage nodes. Be concise — this is mobile chat, not a report. When dispatching, confirm the job ID. When a task completes, summarize what changed."
+  "systemPrompt": "You are a personal assistant. You help with daily life, answer questions, manage tasks, and also operate a Nomad-based coding agent fleet via yeet. You can dispatch coding tasks, check job status, read logs, manage fleet nodes, and report costs. Be concise and conversational — this is chat. For fleet operations, confirm job IDs and notify on completion. For everything else, just be helpful."
 }
