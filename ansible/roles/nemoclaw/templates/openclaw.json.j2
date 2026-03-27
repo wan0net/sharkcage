@@ -1,6 +1,11 @@
 {
   "model": "{{ nemoclaw_openrouter_model | default('openrouter/google/gemini-2.5-flash') }}",
 
+  "skills": {
+    "autoInstall": false,
+    "allowRemote": false
+  },
+
   "channels": {
     "web": {
       "enabled": true,
