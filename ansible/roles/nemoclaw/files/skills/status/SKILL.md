@@ -1,0 +1,30 @@
+---
+name: status
+description: Show fleet status — active jobs and node health
+---
+
+# Fleet Status
+
+Show active jobs and node health.
+
+## When to use
+
+User asks what's running, fleet status, node health, or wants an overview.
+
+## Jobs
+
+GET http://yeet-01.tailnet:4646/v1/jobs?type=batch
+
+Filter to jobs where ParentID is "run-coding-agent" or ID starts with "run-coding-agent/".
+
+For each job report: ID (last 20 chars), project (Meta.project), runtime (Meta.runtime), status, submit time.
+
+## Nodes
+
+GET http://yeet-01.tailnet:4646/v1/nodes
+
+For each node: name, status, projects (Meta keys starting with "project_" where value is "true"), devices (Meta keys starting with "device_" excluding "_path" suffixes).
+
+## Presentation
+
+Summarize in plain language. Don't dump raw JSON.

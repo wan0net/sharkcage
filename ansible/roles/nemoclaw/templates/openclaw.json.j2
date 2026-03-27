@@ -1,0 +1,14 @@
+{
+  "model": "{{ nemoclaw_openrouter_model | default('openrouter/anthropic/claude-3-5-haiku-20241022') }}",
+
+  "channels": {
+    "signal": {
+      "enabled": true,
+      "account": "{{ nemoclaw_signal_account }}",
+      "dmPolicy": "allowlist",
+      "allowFrom": {{ nemoclaw_signal_allowed | to_json }}
+    }
+  },
+
+  "systemPrompt": "You are the yeet fleet operator. You manage a Nomad-based coding agent fleet via Signal. Dispatch tasks, monitor jobs, read logs, and manage nodes. Be concise — this is mobile chat, not a report. When dispatching, confirm the job ID. When a task completes, summarize what changed."
+}

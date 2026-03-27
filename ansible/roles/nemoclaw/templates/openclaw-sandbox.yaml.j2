@@ -1,0 +1,53 @@
+# NemoClaw sandbox network policy for yeet gateway
+# Default-deny with explicit whitelist — deployed by Ansible
+
+network:
+  default: deny
+  allowed_endpoints:
+    - host: "127.0.0.1"
+      port: 7583
+      protocol: tcp
+      description: "signal-cli JSON-RPC daemon"
+
+    - host: "yeet-01.tailnet"
+      port: 4646
+      protocol: tcp
+      description: "Nomad HTTP API"
+
+    - host: "openrouter.ai"
+      port: 443
+      protocol: tcp
+      description: "OpenRouter LLM inference"
+
+    - host: "api.github.com"
+      port: 443
+      protocol: tcp
+      description: "GitHub API"
+
+    - host: "ntfy.sh"
+      port: 443
+      protocol: tcp
+      description: "Push notifications"
+
+    - host: "0.0.0.0"
+      port: 53
+      protocol: udp
+      description: "DNS resolution"
+
+filesystem:
+  read_only:
+    - /usr
+    - /lib
+    - /lib64
+    - /bin
+    - /sbin
+    - /etc/ssl
+    - /etc/resolv.conf
+  read_write:
+    - /home/runner/.openclaw
+    - /home/runner/.nemoclaw
+    - /tmp
+
+process:
+  max_processes: 64
+  max_open_files: 2048

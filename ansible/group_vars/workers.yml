@@ -1,0 +1,5 @@
+---
+nomad_role: client
+
+# Per-host project lists go in host_vars/<hostname>.yml
+yeet_projects: []

@@ -1,0 +1,32 @@
+---
+name: continue
+description: Resume a previous coding session with new instructions
+---
+
+# Continue Session
+
+## When to use
+
+User wants to continue, resume, or follow up on a previous task.
+
+## Step 1: Get original job metadata
+
+GET http://yeet-01.tailnet:4646/v1/job/{job_id}
+
+Extract project and original Meta.
+
+## Step 2: Check for session ID
+
+GET http://yeet-01.tailnet:4646/v1/var/sessions/{job_id}
+
+Use Items.session_id if available, otherwise use the job_id as session_id.
+
+## Step 3: Dispatch continuation
+
+POST http://yeet-01.tailnet:4646/v1/job/run-coding-agent/dispatch
+
+Use the same Meta as the original job, add/update session_id, and use the new prompt as Payload (base64 encoded).
+
+## Response
+
+Report the new job ID and the session being continued.

@@ -1,0 +1,111 @@
+---
+- name: Install NemoClaw
+  shell: curl -fsSL https://www.nvidia.com/nemoclaw.sh | bash
+  args:
+    creates: /usr/local/bin/nemoclaw
+  environment:
+    HOME: /home/runner
+
+- name: Verify NemoClaw installation
+  command: nemoclaw --version
+  register: nemoclaw_ver
+  changed_when: false
+
+- name: Print NemoClaw version
+  debug:
+    msg: "NemoClaw: {{ nemoclaw_ver.stdout }}"
+
+- name: Create OpenClaw config directory
+  file:
+    path: /home/runner/.openclaw
+    state: directory
+    owner: runner
+    group: runner
+    mode: "0700"
+
+- name: Create OpenClaw skills directory
+  file:
+    path: /home/runner/.openclaw/skills
+    state: directory
+    owner: runner
+    group: runner
+    mode: "0755"
+
+- name: Create NemoClaw config directory
+  file:
+    path: /home/runner/.nemoclaw
+    state: directory
+    owner: runner
+    group: runner
+    mode: "0700"
+
+- name: Deploy OpenClaw configuration
+  template:
+    src: openclaw.json.j2
+    dest: /home/runner/.openclaw/openclaw.json
+    owner: runner
+    group: runner
+    mode: "0600"
+
+- name: Deploy NemoClaw credentials
+  template:
+    src: nemoclaw-credentials.json.j2
+    dest: /home/runner/.nemoclaw/credentials.json
+    owner: runner
+    group: runner
+    mode: "0600"
+
+- name: Create skill directories
+  file:
+    path: "/home/runner/.openclaw/skills/{{ item }}"
+    state: directory
+    owner: runner
+    group: runner
+    mode: "0755"
+  loop:
+    - dispatch
+    - status
+    - logs
+    - stop
+    - continue
+    - manage
+    - cost
+
+- name: Deploy SKILL.md files
+  copy:
+    src: "skills/{{ item }}/SKILL.md"
+    dest: "/home/runner/.openclaw/skills/{{ item }}/SKILL.md"
+    owner: runner
+    group: runner
+    mode: "0644"
+  loop:
+    - dispatch
+    - status
+    - logs
+    - stop
+    - continue
+    - manage
+    - cost
+
+- name: Deploy NemoClaw sandbox network policy
+  template:
+    src: openclaw-sandbox.yaml.j2
+    dest: "{{ yeet_dir }}/policies/openclaw-sandbox.yaml"
+    owner: runner
+    group: runner
+    mode: "0644"
+
+- name: Deploy NemoClaw Nomad service job
+  copy:
+    src: yeet-nemoclaw.nomad.hcl
+    dest: "{{ yeet_dir }}/jobs/yeet-nemoclaw.nomad.hcl"
+    owner: runner
+    group: runner
+    mode: "0644"
+
+- name: Register NemoClaw service job
+  become_user: runner
+  shell: nomad job run {{ yeet_dir }}/jobs/yeet-nemoclaw.nomad.hcl
+  environment:
+    NOMAD_ADDR: "http://127.0.0.1:4646"
+  changed_when: true

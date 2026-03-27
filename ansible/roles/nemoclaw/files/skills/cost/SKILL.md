@@ -1,0 +1,22 @@
+---
+name: cost
+description: Show cost breakdown by project
+---
+
+# Cost Report
+
+## When to use
+
+User asks about cost, spending, budget, or how much has been spent.
+
+## API
+
+GET http://yeet-01.tailnet:4646/v1/vars?prefix=cost/
+
+## Processing
+
+For each variable: extract Items.project and Items.cost_usd. Aggregate by project — count tasks and sum costs.
+
+## Presentation
+
+Report per-project: project name, task count, total cost in USD (4 decimal places). If no data, say "No cost data recorded yet."

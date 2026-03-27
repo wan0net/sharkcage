@@ -1,0 +1,41 @@
+---
+name: manage
+description: Drain or activate fleet nodes
+---
+
+# Manage Nodes
+
+## When to use
+
+User wants to drain, take offline, activate, or bring a node back online.
+
+## List nodes (to resolve name → ID)
+
+GET http://yeet-01.tailnet:4646/v1/nodes
+
+Match user's node name against the Name field, extract the full ID.
+
+## Drain
+
+POST http://yeet-01.tailnet:4646/v1/node/{node_id}/drain
+
+```json
+{
+  "DrainSpec": { "Deadline": 3600000000000 },
+  "MarkEligible": false
+}
+```
+
+Deadline is 1 hour in nanoseconds. Running jobs will complete before drain takes effect.
+
+## Activate
+
+POST http://yeet-01.tailnet:4646/v1/node/{node_id}/eligibility
+
+```json
+{ "Eligibility": "eligible" }
+```
+
+## Confirmation
+
+Always confirm destructive actions (drain) before executing.

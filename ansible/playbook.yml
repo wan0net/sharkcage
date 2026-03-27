@@ -1,6 +1,6 @@
 ---
-- name: Provision yeet runner fleet
-  hosts: runners
+- name: Provision fleet (shared)
+  hosts: fleet
   become: true
   vars:
     yeet_dir: /opt/yeet
@@ -11,8 +11,24 @@
     - tailscale
     - node
     - nomad
+    - sandbox
+
+- name: Provision master
+  hosts: masters
+  become: true
+  vars:
+    yeet_dir: /opt/yeet
+  roles:
+    - signal
+    - nemoclaw
+    - jobs
+
+- name: Provision workers
+  hosts: workers
+  become: true
+  vars:
+    yeet_dir: /opt/yeet
+  roles:
     - runtimes
     - git
     - devices
-    - sandbox
-    - jobs

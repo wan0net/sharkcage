@@ -1,0 +1,6 @@
+---
+- name: restart signal-cli
+  systemd:
+    name: signal-cli
+    state: restarted
+    daemon_reload: true
