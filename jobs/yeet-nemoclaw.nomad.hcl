@@ -14,10 +14,10 @@ job "yeet-nemoclaw" {
     }
 
     reschedule {
-      attempts  = 5
-      interval  = "1h"
-      delay     = "15s"
-      unlimited = false
+      delay          = "15s"
+      delay_function = "exponential"
+      max_delay      = "5m"
+      unlimited      = true
     }
 
     task "nemoclaw" {
@@ -37,10 +37,23 @@ job "yeet-nemoclaw" {
         memory = 512
       }
 
+      service {
+        name = "yeet-nemoclaw"
+        port = "web"
+
+        check {
+          type     = "http"
+          path     = "/"
+          port     = "web"
+          interval = "30s"
+          timeout  = "5s"
+        }
+      }
+
       restart {
-        attempts = 5
-        interval = "5m"
-        delay    = "10s"
+        attempts = 10
+        interval = "30m"
+        delay    = "15s"
         mode     = "delay"
       }
 

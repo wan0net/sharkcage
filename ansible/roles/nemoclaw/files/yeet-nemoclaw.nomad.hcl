@@ -14,22 +14,22 @@ job "yeet-nemoclaw" {
     }
 
     reschedule {
-      attempts  = 5
-      interval  = "1h"
-      delay     = "15s"
-      unlimited = false
+      delay          = "15s"
+      delay_function = "exponential"
+      max_delay      = "5m"
+      unlimited      = true
     }
 
     task "nemoclaw" {
       driver = "raw_exec"
 
       config {
-        command = "/usr/local/bin/nemoclaw"
+        command = "/usr/bin/nemoclaw"
         args    = ["run"]
       }
 
       env {
-        HOME = "/home/runner"
+        HOME = "/home/icd"
       }
 
       resources {
@@ -51,9 +51,9 @@ job "yeet-nemoclaw" {
       }
 
       restart {
-        attempts = 5
-        interval = "5m"
-        delay    = "10s"
+        attempts = 10
+        interval = "30m"
+        delay    = "15s"
         mode     = "delay"
       }
 
