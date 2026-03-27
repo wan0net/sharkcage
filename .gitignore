@@ -5,3 +5,4 @@ dist/
 *.d.ts
 !jobs/scripts/*.sh
 .env
+.playwright-mcp/
