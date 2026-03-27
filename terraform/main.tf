@@ -47,7 +47,7 @@ locals {
     "yeet-02" = {
       vm_id       = 201
       ip          = "10.42.10.101"
-      node        = "pve-prd-02"
+      node        = "pve-prd-01"
       cores       = 2
       memory      = 2048
       disk_size   = 20
@@ -56,7 +56,7 @@ locals {
     "yeet-03" = {
       vm_id       = 202
       ip          = "10.42.10.102"
-      node        = "pve-prd-03"
+      node        = "pve-prd-01"
       cores       = 2
       memory      = 2048
       disk_size   = 20
