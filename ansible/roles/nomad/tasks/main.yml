@@ -76,6 +76,15 @@
           enabled = true
         }
       }
+
+      plugin "docker" {
+        config {
+          allow_privileged = true
+          volumes {
+            enabled = true
+          }
+        }
+      }
     owner: root
     group: root
     mode: "0640"

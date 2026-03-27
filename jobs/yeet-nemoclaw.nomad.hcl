@@ -10,7 +10,10 @@ job "yeet-nemoclaw" {
     count = 1
 
     network {
-      port "web" { static = 8080 }
+      port "web" {
+        static = 8080
+        to     = 30051
+      }
     }
 
     reschedule {
@@ -21,33 +24,50 @@ job "yeet-nemoclaw" {
     }
 
     task "nemoclaw" {
-      driver = "raw_exec"
+      driver = "docker"
 
       config {
-        command = "/usr/bin/nemoclaw"
-        args    = ["run"]
+        image      = "ghcr.io/nvidia/openshell/cluster:0.0.13"
+        privileged = true
+
+        ports = ["web"]
+
+        mount {
+          type     = "volume"
+          source   = "openshell-cluster-nemoclaw"
+          target   = "/var/lib/rancher/k3s"
+          readonly = false
+        }
+
+        extra_hosts = [
+          "host.docker.internal:host-gateway",
+          "host.openshell.internal:host-gateway",
+        ]
+
+        security_opt = [
+          "label=disable",
+        ]
+
+        args = [
+          "server",
+          "--disable=traefik",
+          "--tls-san=127.0.0.1",
+          "--tls-san=localhost",
+          "--tls-san=host.docker.internal",
+        ]
       }
 
       env {
-        HOME = "/home/icd"
+        REGISTRY_MODE     = "external"
+        REGISTRY_HOST     = "ghcr.io"
+        REGISTRY_INSECURE = "false"
+        IMAGE_REPO_BASE   = "ghcr.io/nvidia/openshell"
+        IMAGE_TAG         = "0.0.13"
       }
 
       resources {
-        cpu    = 300
-        memory = 512
-      }
-
-      service {
-        name = "yeet-nemoclaw"
-        port = "web"
-
-        check {
-          type     = "http"
-          path     = "/"
-          port     = "web"
-          interval = "30s"
-          timeout  = "5s"
-        }
+        cpu    = 500
+        memory = 1024
       }
 
       restart {
@@ -57,7 +77,7 @@ job "yeet-nemoclaw" {
         mode     = "delay"
       }
 
-      kill_timeout = "10s"
+      kill_timeout = "30s"
     }
   }
 }
