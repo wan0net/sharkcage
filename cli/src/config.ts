@@ -15,7 +15,7 @@ export interface Config {
 }
 
 const DEFAULT_CONFIG: Config = {
-  nomad_addr: "http://yeet-01.tailnet:4646",
+  nomad_addr: "http://10.42.10.1:4646",
   defaults: { runtime: "opencode", model: "anthropic/claude-sonnet-4" },
   projects: {},
 };

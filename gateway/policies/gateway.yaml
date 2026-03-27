@@ -21,7 +21,7 @@ filesystem:
 network:
   allowed_hosts:
     - 127.0.0.1:7583             # signal-cli daemon (outside sandbox)
-    - yeet-01.tailnet:4646       # Nomad API
+    - 10.42.10.1:4646             # Nomad API
     - openrouter.ai:443          # LLM inference
     - api.github.com:443         # PR status
     - ntfy.sh:443                # Notifications

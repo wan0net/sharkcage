@@ -52,9 +52,9 @@
       bind_addr = "0.0.0.0"
 
       advertise {
-        http = "{{ ts_ip }}:4646"
-        rpc  = "{{ ts_ip }}:4647"
-        serf = "{{ ts_ip }}:4648"
+        http = "{{ ansible_host }}:4646"
+        rpc  = "{{ ansible_host }}:4647"
+        serf = "{{ ansible_host }}:4648"
       }
 
       server {
@@ -97,7 +97,7 @@
 
       client {
         enabled = true
-        servers = ["{{ nomad_server }}:4647"]
+        servers = ["{{ nomad_server_ip }}:4647"]
         # Node metadata — configure via host_vars per node, e.g.:
         #   node_meta:
         #     project_peer6: "true"

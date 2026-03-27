@@ -11,13 +11,13 @@ User asks for logs, output, or what happened with a job.
 
 ## Step 1: Get allocations
 
-GET http://yeet-01.tailnet:4646/v1/job/{job_id}/allocations
+GET http://{{ nomad_server_ip }}:4646/v1/job/{job_id}/allocations
 
 Use the first allocation's ID.
 
 ## Step 2: Read logs
 
-GET http://yeet-01.tailnet:4646/v1/client/fs/logs/{alloc_id}?task=execute&type=stdout&plain=true&origin=end&offset=16384
+GET http://{{ nomad_server_ip }}:4646/v1/client/fs/logs/{alloc_id}?task=execute&type=stdout&plain=true&origin=end&offset=16384
 
 ## Presentation
 

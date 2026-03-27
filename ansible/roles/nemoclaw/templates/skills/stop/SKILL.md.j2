@@ -11,7 +11,7 @@ User wants to stop, cancel, kill, or abort a running task.
 
 ## API
 
-DELETE http://yeet-01.tailnet:4646/v1/job/{job_id}?purge=false
+DELETE http://{{ nomad_server_ip }}:4646/v1/job/{job_id}?purge=false
 
 The purge=false keeps the job in history so logs remain accessible.
 

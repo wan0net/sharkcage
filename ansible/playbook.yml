@@ -8,7 +8,8 @@
     openshell_version: "{{ openshell_version | default('0.0.13') }}"
   roles:
     - base
-    - tailscale
+    - role: tailscale
+      when: tailscale_authkey is defined
     - node
     - nomad
     - sandbox

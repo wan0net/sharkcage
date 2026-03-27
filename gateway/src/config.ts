@@ -22,7 +22,7 @@ export interface GatewayConfig {
 }
 
 const DEFAULT_CONFIG: GatewayConfig = {
-  nomad_addr: "http://yeet-01.tailnet:4646",
+  nomad_addr: "http://10.42.10.1:4646",
   defaults: { runtime: "opencode", model: "anthropic/claude-sonnet-4" },
   projects: {},
   signal_cli_url: "http://127.0.0.1:7583",

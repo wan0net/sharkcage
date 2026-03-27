@@ -34,7 +34,7 @@ job "yeet-gateway" {
       env {
         SIGNAL_CLI_URL     = "http://127.0.0.1:7583"
         SIGNAL_ACCOUNT     = "${NOMAD_META_signal_account}"
-        NOMAD_ADDR         = "http://yeet-01.tailnet:4646"
+        NOMAD_ADDR         = "http://10.42.10.1:4646"
         OPENROUTER_API_KEY = "${NOMAD_META_openrouter_key}"
         OPENROUTER_MODEL   = "${NOMAD_META_openrouter_model}"
         WEBHOOK_PORT       = "${NOMAD_PORT_webhook}"

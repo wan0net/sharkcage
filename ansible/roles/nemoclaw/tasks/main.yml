@@ -72,8 +72,8 @@
     - cost
 
 - name: Deploy SKILL.md files
-  copy:
-    src: "skills/{{ item }}/SKILL.md"
+  template:
+    src: "skills/{{ item }}/SKILL.md.j2"
     dest: "/home/runner/.openclaw/skills/{{ item }}/SKILL.md"
     owner: runner
     group: runner

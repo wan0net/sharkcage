@@ -13,7 +13,7 @@ User asks what's running, fleet status, node health, or wants an overview.
 
 ## Jobs
 
-GET http://yeet-01.tailnet:4646/v1/jobs?type=batch
+GET http://{{ nomad_server_ip }}:4646/v1/jobs?type=batch
 
 Filter to jobs where ParentID is "run-coding-agent" or ID starts with "run-coding-agent/".
 
@@ -21,7 +21,7 @@ For each job report: ID (last 20 chars), project (Meta.project), runtime (Meta.r
 
 ## Nodes
 
-GET http://yeet-01.tailnet:4646/v1/nodes
+GET http://{{ nomad_server_ip }}:4646/v1/nodes
 
 For each node: name, status, projects (Meta keys starting with "project_" where value is "true"), devices (Meta keys starting with "device_" excluding "_path" suffixes).
 

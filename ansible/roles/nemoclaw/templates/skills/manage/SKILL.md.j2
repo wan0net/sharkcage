@@ -11,13 +11,13 @@ User wants to drain, take offline, activate, or bring a node back online.
 
 ## List nodes (to resolve name → ID)
 
-GET http://yeet-01.tailnet:4646/v1/nodes
+GET http://{{ nomad_server_ip }}:4646/v1/nodes
 
 Match user's node name against the Name field, extract the full ID.
 
 ## Drain
 
-POST http://yeet-01.tailnet:4646/v1/node/{node_id}/drain
+POST http://{{ nomad_server_ip }}:4646/v1/node/{node_id}/drain
 
 ```json
 {
@@ -30,7 +30,7 @@ Deadline is 1 hour in nanoseconds. Running jobs will complete before drain takes
 
 ## Activate
 
-POST http://yeet-01.tailnet:4646/v1/node/{node_id}/eligibility
+POST http://{{ nomad_server_ip }}:4646/v1/node/{node_id}/eligibility
 
 ```json
 { "Eligibility": "eligible" }
