@@ -232,6 +232,7 @@
 <div class="container">
 
   <header class="hero">
+    <img src="yeet-logo.svg" alt="yeet logo" width="120" height="120" style="margin-bottom: 16px;">
     <h1>yeet</h1>
     <p class="tagline">Yeet your code tasks at whatever hardware you have lying around and walk away.</p>
     <div class="hero-links">
@@ -288,6 +289,7 @@
       <span class="node">You</span>
       <span class="arrow">--></span>
       <span class="node">yeet run</span>
+      <span style="color:var(--text-dim);font-size:11px;"> or Signal</span>
       <span class="arrow">--></span>
       <span class="node">Nomad</span>
       <span class="arrow">--></span>
@@ -439,6 +441,10 @@
         <span class="val">24/7</span>
         <span class="label">runs forever</span>
       </div>
+      <div class="hw-stat">
+        <span class="val">Signal</span>
+        <span class="label">text to deploy</span>
+      </div>
     </div>
     <p>The AI runs in the cloud. These boxes just manage repos, shuttle files, and look
        unassuming. A $50 thin client from eBay has more computing power than the job requires.
@@ -484,6 +490,63 @@
   </section>
 
   <section class="fade-in">
+    <div class="section-title">Talk to your fleet</div>
+    <p>Why type CLI commands when you can just <strong>text your fleet from Signal</strong>?</p>
+    <p>The master node runs <a href="https://github.com/NVIDIA/NemoClaw">NemoClaw</a> --
+       NVIDIA's sandboxed OpenClaw runtime. It connects to Signal via
+       <a href="https://github.com/AsamK/signal-cli">signal-cli</a>, understands natural
+       language, and translates your messages into Nomad API calls. Like a very obedient
+       ops intern who never sleeps and doesn't need a desk.</p>
+    <div class="flow">
+      <span class="node">You (Signal)</span>
+      <span class="arrow">--></span>
+      <span class="node">NemoClaw</span>
+      <span class="arrow">--></span>
+      <span class="node">Nomad API</span>
+      <span class="arrow">--></span>
+      <span class="node">Workers</span>
+      <span class="arrow">--></span>
+      <span class="node">Draft PR</span>
+      <span class="arrow">--></span>
+      <span class="node">You (Signal)</span>
+      <span style="color:var(--text-dim);font-size:11px;"> (notified on your phone)</span>
+    </div>
+    <div class="features">
+      <div class="feature">
+        <h3>Signal-native</h3>
+        <p>Message from your phone. "run peer6 implement pagination" just works. No app to install. No dashboard to bookmark.</p>
+      </div>
+      <div class="feature">
+        <h3>7 fleet skills</h3>
+        <p>Dispatch, status, logs, stop, continue, drain, cost. Custom SKILL.md files teach the agent how to manage Nomad.</p>
+      </div>
+      <div class="feature">
+        <h3>Sandboxed brain</h3>
+        <p>The gateway runs inside OpenShell. It can reach Signal, Nomad, and OpenRouter. Nothing else. Default-deny networking.</p>
+      </div>
+      <div class="feature">
+        <h3>Proactive notifications</h3>
+        <p>Job done? You get a text. Job failed? You get a text. Node down? Text. Like pagerduty but free and less annoying.</p>
+      </div>
+    </div>
+    <pre><code><span class="comment"># From your phone, via Signal:</span>
+<span class="arg">"what's running?"</span>
+<span class="comment"># → 2 jobs active: peer6 (implement), login2 (review)</span>
+<span class="comment">#   3 nodes: yeet-01 ready, yeet-02 busy, yeet-03 ready</span>
+
+<span class="arg">"run peer6 add rate limiting to the API"</span>
+<span class="comment"># → Dispatched: run-coding-agent/dispatch-abc123</span>
+<span class="comment">#   I'll notify you when it's done.</span>
+
+<span class="comment"># ... 20 minutes later ...</span>
+<span class="comment"># → ✓ Job completed: peer6 (opencode)</span>
+<span class="comment">#   Draft PR opened. 4 files changed.</span></code></pre>
+    <p>The gateway runs as a <strong>Nomad service job</strong> -- always on, auto-restarts,
+       health-checked, visible in <code>yeet status</code>. Managed by the same infrastructure
+       it manages. It's turtles all the way down.</p>
+  </section>
+
+  <section class="fade-in">
     <div class="section-title">Documentation</div>
     <p>Overengineered the docs, then wrote ~1,800 lines of code. The docs are still longer.</p>
     <div class="docs-grid">
@@ -511,6 +574,10 @@
         <span class="doc-title">Deployment</span>
         <span class="doc-desc">Setup guide, Ansible playbooks, Nomad config, Tailscale mesh, systemd services. Bare metal to running fleet.</span>
       </a>
+      <a class="doc-link" href="gateway">
+        <span class="doc-title">Gateway</span>
+        <span class="doc-desc">NemoClaw + Signal. Talk to your fleet from your phone. Skills, sandbox policy, master/worker Ansible.</span>
+      </a>
     </div>
   </section>
 
@@ -519,7 +586,7 @@
 <footer>
   <div class="container">
     <p><a href="https://github.com/wan0net/yeet">wan0net/yeet</a></p>
-    <p>Built by someone who got tired of babysitting AI coding sessions.</p>
+    <p>Built by someone who got tired of babysitting AI coding sessions.<br>Now you can babysit from Signal instead.</p>
   </div>
 </footer>
 
