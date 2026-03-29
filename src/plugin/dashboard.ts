@@ -28,7 +28,7 @@ export function registerDashboardRoutes(api: {
 }): void {
   api.registerHttpRoute({
     path: "/sharkcage",
-    auth: "gateway",
+    auth: "plugin",
     handler: async (_req, res) => {
       const html = await buildPage("status");
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
@@ -37,7 +37,7 @@ export function registerDashboardRoutes(api: {
   });
   api.registerHttpRoute({
     path: "/sharkcage/skills",
-    auth: "gateway",
+    auth: "plugin",
     handler: async (_req, res) => {
       const html = await buildPage("skills");
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
@@ -46,7 +46,7 @@ export function registerDashboardRoutes(api: {
   });
   api.registerHttpRoute({
     path: "/sharkcage/audit",
-    auth: "gateway",
+    auth: "plugin",
     handler: async (_req, res) => {
       const html = await buildPage("audit");
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
@@ -55,7 +55,7 @@ export function registerDashboardRoutes(api: {
   });
   api.registerHttpRoute({
     path: "/sharkcage/config",
-    auth: "gateway",
+    auth: "plugin",
     handler: async (_req, res) => {
       const html = await buildPage("config");
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
