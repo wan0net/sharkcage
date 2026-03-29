@@ -262,27 +262,11 @@ function startOpenClaw(sandboxConfigPath: string): ChildProcess {
   const env = { ...process.env, NODE_OPTIONS: nodeOptions } as NodeJS.ProcessEnv;
 
   if (hasSrt) {
-    log("sc", "Outer ASRT sandbox enabled");
-    // srt strips NODE_OPTIONS. Write a launcher script that sets it inside
-    // the sandbox, so OpenClaw + its forked gateway worker both get the flags.
-    const launcherPath = `${dataDir}/openclaw-launcher.sh`;
-    const launcherContent = [
-      "#!/bin/sh",
-      'export NODE_OPTIONS="--use-env-proxy --dns-result-order=ipv4first"',
-      `exec openclaw ${args.map((a) => `"${a}"`).join(" ")}`,
-    ].join("\n");
-    writeFileSync(launcherPath, launcherContent, { mode: 0o755 });
-
-    const proc = spawn("srt", [
-      "--settings", sandboxConfigPath,
-      launcherPath,
-    ], {
-      stdio: ["pipe", "pipe", "pipe"],
-      env,
-      detached: false,
-    });
-    prefixOutput(proc, "openclaw");
-    return proc;
+    // TODO: Outer srt sandbox disabled — srt's proxy doesn't handle DNS for
+    // Node's WebSocket client (getaddrinfo bypasses HTTP_PROXY). The per-session
+    // ASRT backend and per-skill supervisor sandboxing still provide enforcement.
+    // Re-enable once srt supports transparent DNS proxying.
+    log("sc", "srt available (per-session + per-skill sandboxing active)");
   }
   const proc = spawn("openclaw", args, {
     stdio: ["pipe", "pipe", "pipe"],

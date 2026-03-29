@@ -194,7 +194,7 @@ export function register(api: OpenClawPluginApi): void {
   }, { priority: 200 });
 
   // --- Hook 4: before_message_write (priority 100) — scrub sharkcage internals ---
-  api.on("before_message_write", async (event: BeforeMessageWriteEvent, _ctx: HookContext) => {
+  api.on("before_message_write", (event: BeforeMessageWriteEvent, _ctx: HookContext) => {
     const content = typeof event.message?.content === "string" ? event.message.content : "";
     if (
       content.includes("[sharkcage]") ||
@@ -343,7 +343,7 @@ interface OpenClawPluginApi {
   ): void;
   on(
     event: "before_message_write",
-    handler: (event: BeforeMessageWriteEvent, ctx: HookContext) => Promise<{ block: true } | { message?: BeforeMessageWriteEvent["message"] } | undefined>,
+    handler: (event: BeforeMessageWriteEvent, ctx: HookContext) => { block: true } | { message?: BeforeMessageWriteEvent["message"] } | undefined | void,
     opts?: { priority?: number }
   ): void;
 
