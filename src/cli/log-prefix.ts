@@ -30,10 +30,15 @@ const OC_TIMESTAMP_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[.\d]*[+-]\d{2}:\d{
 const VIOLATION_PATTERNS = [
   /Operation not permitted/i,
   /EPERM/,
-  /AuthorizationCreate\(\) failed/,
   /sandbox.*denied/i,
   /sandbox.*violation/i,
   /not allowed by sandbox/i,
+];
+
+/** Lines to suppress entirely from console (logged to audit only) */
+const SUPPRESS_PATTERNS = [
+  /CIAO WARN/i,
+  /AuthorizationCreate\(\) failed/,
 ];
 
 const home = process.env.HOME ?? "";
@@ -61,9 +66,23 @@ function formatLine(tag: string, line: string): string {
   return `${timestamp()} ${color}[${tag}]${RESET} ${cleaned}`;
 }
 
-/** Returns true if this line should be suppressed from console (duplicate violation) */
+/** Returns true if this line should be suppressed from console */
 function checkViolation(tag: string, line: string): boolean {
   const cleaned = cleanLine(line);
+
+  // Always suppress these from console (log to audit only on first occurrence)
+  for (const pattern of SUPPRESS_PATTERNS) {
+    if (pattern.test(cleaned)) {
+      const msg = cleaned.trim();
+      if (lastViolation.get(`suppress:${msg}`) === msg) return true;
+      lastViolation.set(`suppress:${msg}`, msg);
+      // Log to audit file once
+      const entry = { type: "sandbox-violation", timestamp: new Date().toISOString(), source: tag, message: msg };
+      try { if (existsSync(auditPath)) appendFileSync(auditPath, JSON.stringify(entry) + "\n"); } catch {}
+      return true; // suppress from console
+    }
+  }
+
   for (const pattern of VIOLATION_PATTERNS) {
     if (pattern.test(cleaned)) {
       const msg = cleaned.trim();

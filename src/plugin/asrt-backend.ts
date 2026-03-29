@@ -301,8 +301,10 @@ export async function registerAsrtBackend(api: any): Promise<void> {
   let registerSandboxBackend: ((id: string, registration: unknown) => void) | null = null;
   try {
     const { createRequire } = await import("node:module");
-    // process.argv[1] is OpenClaw's entry script — resolve from its location
-    const ocRequire = createRequire(process.argv[1] ?? import.meta.url);
+    const { realpathSync } = await import("node:fs");
+    // process.argv[1] may be a symlink — resolve to the real path first
+    const entryPoint = realpathSync(process.argv[1] ?? "");
+    const ocRequire = createRequire(entryPoint);
     const sandboxPath = ocRequire.resolve("openclaw/plugin-sdk/sandbox");
     const sandboxModule = await import(`file://${sandboxPath}`);
     registerSandboxBackend = sandboxModule.registerSandboxBackend ?? null;
