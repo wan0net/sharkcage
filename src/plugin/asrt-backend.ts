@@ -295,14 +295,20 @@ export async function registerAsrtBackend(api: any): Promise<void> {
     return;
   }
 
-  // registerSandboxBackend is a module-level export, not on the plugin API
+  // registerSandboxBackend is a module-level export from openclaw's sandbox module.
+  // Dynamic import() resolves relative to the calling file, not the host process,
+  // so we need to resolve the path from openclaw's install location.
   let registerSandboxBackend: ((id: string, registration: unknown) => void) | null = null;
   try {
-    const modulePath = "openclaw/plugin-sdk/sandbox";
-    const sandboxModule = await import(/* @vite-ignore */ modulePath);
+    const { createRequire } = await import("node:module");
+    const require = createRequire(import.meta.url);
+    // Resolve from wherever openclaw is installed (global or local)
+    const openclawDir = require.resolve("openclaw/package.json").replace("/package.json", "");
+    const sandboxModule = await import(`file://${openclawDir}/dist/plugin-sdk/sandbox.js`);
     registerSandboxBackend = sandboxModule.registerSandboxBackend ?? null;
-  } catch {
-    // OpenClaw sandbox module not available in this context
+  } catch (err) {
+    // OpenClaw sandbox module not available
+    console.log(`[sharkcage] sandbox module import failed: ${err instanceof Error ? err.message : err}`);
   }
 
   if (!registerSandboxBackend) {
