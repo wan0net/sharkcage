@@ -233,12 +233,10 @@ function enableSkillInOpenClaw(skillName: string): void {
   try {
     const config = JSON.parse(readFileSync(ocConfigPath, "utf-8"));
 
-    // Add to skills.allowBundled
+    // Enable the skill in entries
     if (!config.skills) config.skills = {};
-    if (!Array.isArray(config.skills.allowBundled)) config.skills.allowBundled = [];
-    if (!config.skills.allowBundled.includes(skillName)) {
-      config.skills.allowBundled.push(skillName);
-    }
+    if (!config.skills.entries) config.skills.entries = {};
+    config.skills.entries[skillName] = { ...(config.skills.entries[skillName] ?? {}), enabled: true };
 
     // If the skill needs exec (coding-agent, github, tmux, etc.), add exec to tools.allow
     const execSkills = [

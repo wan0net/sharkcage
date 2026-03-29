@@ -294,16 +294,31 @@ function ensureOpenClawPluginRegistered(): void {
       log("sc", "Plugin already registered");
     }
 
-    // Lock down: disable all bundled skills and deny dangerous tools.
-    // Users approve skills through sharkcage's approval flow.
+    // Lock down: disable all bundled skills via entries.*.enabled=false.
+    // allowBundled is unreliable (empty=allow-all). Per-entry disable is definitive.
     if (!config.skills) config.skills = {};
-    // allowBundled=[] means "allow all" in OpenClaw. Use a sentinel that matches nothing.
-    const isLocked = Array.isArray(config.skills.allowBundled) &&
-      config.skills.allowBundled.length === 1 && config.skills.allowBundled[0] === "__sharkcage_none__";
-    if (!isLocked) {
-      config.skills.allowBundled = ["__sharkcage_none__"]; // matches no real skill
+    if (!config.skills.entries) config.skills.entries = {};
+    const bundledSkills = [
+      "1password", "apple-notes", "apple-reminders", "bear-notes", "blogwatcher",
+      "blucli", "bluebubbles", "camsnap", "clawhub", "coding-agent", "discord",
+      "eightctl", "gemini", "gh-issues", "gifgrep", "github", "gog", "goplaces",
+      "healthcheck", "himalaya", "imsg", "mcporter", "model-usage", "nano-pdf",
+      "node-connect", "notion", "obsidian", "openai-whisper", "openai-whisper-api",
+      "openhue", "oracle", "ordercli", "peekaboo", "sag", "session-logs",
+      "sherpa-onnx-tts", "skill-creator", "slack", "songsee", "sonoscli",
+      "spotify-player", "summarize", "things-mac", "tmux", "trello",
+      "video-frames", "voice-call", "wacli", "weather", "xurl",
+    ];
+    let skillsLocked = true;
+    for (const name of bundledSkills) {
+      if (!config.skills.entries[name] || config.skills.entries[name].enabled !== false) {
+        config.skills.entries[name] = { ...(config.skills.entries[name] ?? {}), enabled: false };
+        skillsLocked = false;
+      }
+    }
+    if (!skillsLocked) {
       changed = true;
-      log("sc", "Bundled skills disabled — approve via sharkcage");
+      log("sc", `${bundledSkills.length} bundled skills disabled — approve via sharkcage`);
     }
 
     if (!config.tools) config.tools = {};
