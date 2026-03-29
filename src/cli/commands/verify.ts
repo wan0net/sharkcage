@@ -24,7 +24,10 @@ interface Finding {
   line?: number;
 }
 
-import { readFileSync } from "node:fs";
+import { createHash, verify as cryptoVerify } from "node:crypto";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 export default async function verify() {
   const path = process.argv[3];
@@ -44,7 +47,7 @@ export default async function verify() {
   }
 
   validateManifestFields(manifest, findings);
-  checkSignature(manifest, findings);
+  checkSignature(manifest, findings, pluginPath as string);
 
   // Capability-based scan using the SDK scanner
   const capScan = scanPluginManifest(manifest);
@@ -99,11 +102,65 @@ function validateManifestFields(m: PluginManifest, findings: Finding[]): void {
   if (m.runtime === "docker" && !m.image) findings.push({ severity: "error", code: "PLUGIN_001", message: "Docker runtime requires 'image' field", file: "plugin.json" });
 }
 
-function checkSignature(m: PluginManifest, findings: Finding[]): void {
-  if (!m.signature) {
-    findings.push({ severity: "warning", code: "PLUGIN_002", message: "Plugin is unsigned" });
+const CONFIG_DIR = join(homedir(), ".config", "sharkcage");
+const TRUST_STORE = join(CONFIG_DIR, "trusted-signers.json");
+
+interface TrustedSigner { label: string; publicKey: string; trustedAt: string; }
+interface TrustStore { signers: Record<string, TrustedSigner>; }
+
+function collectVerifyFiles(dir: string, base: string, results: string[]): void {
+  const skip = new Set(["node_modules", ".git", "dist"]);
+  for (const entry of readdirSync(dir)) {
+    if (skip.has(entry)) continue;
+    const full = join(dir, entry);
+    const rel = join(base, entry);
+    if (statSync(full).isDirectory()) {
+      collectVerifyFiles(full, rel, results);
+    } else {
+      results.push(rel);
+    }
   }
-  // TODO: Ed25519 signature verification against trust store
+}
+
+function checkSignature(m: PluginManifest, findings: Finding[], pluginPath: string): void {
+  if (!m.signature || !m.signer) {
+    findings.push({ severity: "warning", code: "PLUGIN_002", message: "Plugin is unsigned" });
+    return;
+  }
+
+  // Load trust store
+  let store: TrustStore = { signers: {} };
+  if (existsSync(TRUST_STORE)) {
+    try { store = JSON.parse(readFileSync(TRUST_STORE, "utf-8")); } catch { /* ignore */ }
+  }
+
+  const trusted = store.signers[m.signer];
+  if (!trusted) {
+    findings.push({ severity: "warning", code: "PLUGIN_002", message: `Signed by unknown signer: ${m.signer}. Run \`sc trust ${m.signer}\` to trust.` });
+    return;
+  }
+
+  // Recompute hash (same method as sign.ts)
+  const { signature: _sig, signer: _signer, ...cleanManifest } = m as unknown as Record<string, unknown>;
+  void _sig; void _signer;
+  const hash = createHash("sha256");
+  hash.update(JSON.stringify(cleanManifest));
+
+  const files: string[] = [];
+  collectVerifyFiles(pluginPath, "", files);
+  files.sort();
+  for (const rel of files) {
+    if (rel === "plugin.json") continue;
+    hash.update(readFileSync(join(pluginPath, rel)));
+  }
+  const digest = hash.digest();
+
+  const valid = cryptoVerify(null, digest, trusted.publicKey, Buffer.from(m.signature, "base64"));
+  if (valid) {
+    findings.push({ severity: "info", code: "PLUGIN_002", message: `Signature valid (signed by ${m.signer})` });
+  } else {
+    findings.push({ severity: "error", code: "PLUGIN_002", message: "Signature INVALID — file tampering detected" });
+  }
 }
 
 function readEntryPoint(path: string, name: string, findings: Finding[]): string | null {

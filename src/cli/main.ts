@@ -9,6 +9,7 @@ const commands: Record<string, () => Promise<void>> = {
   verify: () => import("./commands/verify.ts").then((m) => m.default()),
   approve: () => import("./commands/approve.ts").then((m) => m.default()),
   sign: () => import("./commands/sign.ts").then((m) => m.default()),
+  trust: () => import("./commands/trust.ts").then((m) => m.default()),
   config: () => import("./commands/config.ts").then((m) => m.default()),
   audit: () => import("./commands/audit.ts").then((m) => m.default()),
 };
@@ -30,6 +31,7 @@ Commands:
   approve <name>                 Review and approve skill capabilities
   verify <path>                  Scan a skill for issues
   sign <path>                    Sign a skill manifest
+  trust <fingerprint>            Trust a skill signer
 
   config show                    Show gateway sandbox config
   config add-service <host>      Add a host to the outer sandbox
