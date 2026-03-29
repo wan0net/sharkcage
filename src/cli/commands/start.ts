@@ -263,16 +263,15 @@ function startOpenClaw(sandboxConfigPath: string): ChildProcess {
 
   if (hasSrt) {
     log("sc", "Outer ASRT sandbox enabled");
-    // Run openclaw via `node --use-env-proxy` so fetch() routes through srt's
-    // proxy for DNS resolution. srt strips NODE_OPTIONS, so we pass the flag
-    // directly to node instead of via env.
-    const openclawEntry = execFileSync("realpath", [
-      execFileSync("which", ["openclaw"], { encoding: "utf-8" }).trim()
-    ], { encoding: "utf-8" }).trim();
+    // srt strips NODE_OPTIONS for security, but OpenClaw's child gateway process
+    // needs --use-env-proxy for DNS to work through srt's proxy. Use srt's -c
+    // flag to set NODE_OPTIONS inside the sandbox before launching openclaw.
+    const nodeFlags = "--use-env-proxy --dns-result-order=ipv4first";
+    const ocArgs = ["gateway", "run", "--port", "18789", "--auth", "token", "--token", gatewayToken];
+    const cmd = `export NODE_OPTIONS="${nodeFlags}" && openclaw ${ocArgs.join(" ")}`;
     const proc = spawn("srt", [
       "--settings", sandboxConfigPath,
-      "node", "--use-env-proxy", "--dns-result-order=ipv4first",
-      openclawEntry, ...args,
+      "-c", cmd,
     ], {
       stdio: ["pipe", "pipe", "pipe"],
       env,
