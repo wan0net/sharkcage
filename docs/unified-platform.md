@@ -8,27 +8,200 @@ description: Design doc for merging shellcode-server, food, and yeet into a sing
 
 Single conversational gateway that replaces OpenClaw/NemoClaw. Connects all personal services (meals, briefing, home automation, coding fleet) behind one AI agent accessible from Signal, Home Assistant, iOS, and webhooks.
 
-Version: 0.1.0
+Version: 0.2.0
 Date: 2026-03-29
 
 ---
 
 ## Table of Contents
 
-1. [Problem Statement](#1-problem-statement)
-2. [Architecture Overview](#2-architecture-overview)
-3. [The Unified Gateway](#3-the-unified-gateway)
-4. [Tool Definitions](#4-tool-definitions)
-5. [Multi-Agent Coding](#5-multi-agent-coding)
-6. [Data Flows](#6-data-flows)
-7. [Security Model](#7-security-model)
-8. [Plugin System](#8-plugin-system)
-9. [Dashboard](#9-dashboard)
-10. [Migration Plan](#10-migration-plan)
+1. [Personas](#1-personas)
+2. [Problem Statement](#2-problem-statement)
+3. [Architecture Overview](#3-architecture-overview)
+4. [The Unified Gateway](#4-the-unified-gateway)
+5. [Tool Definitions](#5-tool-definitions)
+6. [Multi-Agent Coding](#6-multi-agent-coding)
+7. [Data Flows](#7-data-flows)
+8. [Security Model](#8-security-model)
+9. [Plugin System](#9-plugin-system)
+10. [Dashboard](#10-dashboard)
+11. [Migration Plan](#11-migration-plan)
 
 ---
 
-## 1. Problem Statement
+## 1. Personas
+
+Four user personas guide all UX decisions — from setup wizard behaviour to capability approval language to which features are visible.
+
+### 1.1 Home User — "Alex"
+
+**Profile:** Non-technical. Wants a personal assistant for daily life. Talks via HA voice or Signal on their phone.
+
+**Typical interactions:**
+- "What's for dinner tonight?"
+- "Turn off the bedroom lights"
+- "Add milk to the shopping list"
+- "What's the weather tomorrow?"
+
+**Platform experience:**
+- `yeet init` walks through everything in plain language
+- Installs plugins from a curated list — never touches config files
+- Capability approval is simple: "Meal Planner wants to see your fridge contents. Allow?"
+- Dashboard shows: chat interface, meal suggestions, home controls
+- Never sees: terminals, Nomad, Deno, fleet, worktrees, code, logs
+
+**Technical footprint:**
+- Gateway runs on a single machine (HA box, Raspberry Pi, or NAS)
+- 1-3 plugins (meals, HA, weather)
+- Signal or HA voice as primary channel
+- No fleet, no coding agents
+
+### 1.2 Power User — "Sam"
+
+**Profile:** Tech-comfortable, runs a homelab. Uses Home Assistant, may self-host other services. Not a software developer.
+
+**Typical interactions:**
+- Everything Alex does, plus:
+- "Check my NAS storage"
+- "What's the status of my backups?"
+- "Install the calendar plugin"
+- Reviews plugin capabilities before approving
+
+**Platform experience:**
+- `yeet init` offers more configuration options (custom API endpoints, webhook setup)
+- Installs community plugins, understands scoping ("this plugin can only reach calendar.google.com")
+- Capability approval shows scope: "Calendar plugin requests External Network access to calendar.google.com. Allow?"
+- Dashboard shows: chat, home controls, meals, monitoring widgets
+- May write simple skills (SKILL.md) for domain-specific behaviour
+- Never sees: code, Deno flags, gVisor config, Nomad internals
+
+**Technical footprint:**
+- Gateway on homelab hardware
+- 3-8 plugins
+- Multiple channels (Signal + HA voice + maybe web chat)
+- No fleet, no coding agents
+
+### 1.3 Developer — "Jordan"
+
+**Profile:** Software engineer. Uses yeet for personal projects. Runs coding agents occasionally on a spare machine or two.
+
+**Typical interactions:**
+- Everything Sam does, plus:
+- "Run the auth feature on peer6"
+- "What's the build status?"
+- "Continue that last session with the new API design"
+
+**Platform experience:**
+- Uses `yeet` CLI alongside the chat interface
+- Writes custom plugins in Deno/TypeScript
+- Signs and publishes plugins
+- Understands the capability model at the manifest level
+- Dashboard shows: chat, agents, PRs, logs, cost tracking
+- Comfortable with: `yeet verify`, `yeet sign`, `plugin.json` editing
+
+**Technical footprint:**
+- Gateway on homelab
+- 5-15 plugins (meals, HA, fleet, briefing, custom integrations)
+- 1-2 fleet nodes (laptop + spare machine)
+- Single coding agent per task, may use different models
+- Uses `yeet run` and `yeet status` regularly
+
+### 1.4 Platform Engineer — "Riley"
+
+**Profile:** Runs multiple projects across a fleet of machines. Multi-model, multi-agent orchestration. Cares about cost, security, and throughput.
+
+**Typical interactions:**
+- Everything Jordan does, plus:
+- "Build the physics system — use gemini for engine code and claude for tests"
+- "Drain yeet-03, it's running hot"
+- "What's the cost breakdown this week?"
+- "Verify the new Jira plugin before deploying it"
+
+**Platform experience:**
+- Full manual configuration (gateway.json, Nomad HCL, Ansible, policies)
+- Maintains plugin library for the team
+- Runs `yeet verify --strict` in CI pipelines
+- Reviews audit logs, sandbox policies, permission broker output
+- Dashboard shows: everything — agents, fleet, PRs, costs, audit, per-model spend
+- Uses Composio for multi-agent task decomposition
+
+**Technical footprint:**
+- Gateway on dedicated homelab node
+- 10+ plugins including custom integrations
+- 3+ fleet nodes with diverse hardware (GPU, USB devices)
+- Multi-agent coding: Composio orchestrator + OpenCode workers with different models
+- gVisor sandboxing, GitHub bot account, branch protection
+- Full audit trail, cost alerting, CI-integrated plugin scanning
+
+### 1.5 Feature Matrix
+
+| Feature | Alex | Sam | Jordan | Riley |
+|---------|:----:|:---:|:------:|:-----:|
+| Chat (Signal/HA voice) | ✓ | ✓ | ✓ | ✓ |
+| Web dashboard | simple | full | full | full + audit |
+| Plugin install | curated | community | community + custom | custom + CI |
+| Capability approval | plain language | scoped | manifest-level | `yeet verify --strict` |
+| Write skills (SKILL.md) | — | ✓ | ✓ | ✓ |
+| Write plugins | — | — | ✓ | ✓ |
+| Sign/publish plugins | — | — | ✓ | ✓ |
+| CLI usage | — | light | regular | heavy |
+| Fleet management | — | — | basic | full |
+| Coding agents | — | — | single-model | multi-model, multi-agent |
+| Composio orchestration | — | — | — | ✓ |
+| GPU/device routing | — | — | — | ✓ |
+| Audit logs | — | — | — | ✓ |
+| CI scanning | — | — | — | ✓ |
+| Permission broker | — | — | — | ✓ |
+
+### 1.6 How Personas Guide Implementation
+
+**Setup (`yeet init`):**
+```
+Welcome to yeet! What best describes you?
+
+  1. I want a personal assistant (chat, meals, home control)
+  2. I run a homelab and want to extend it
+  3. I'm a developer who wants coding agents
+  4. I manage a fleet of machines
+```
+
+Selection determines:
+- Which config questions are asked (Alex never sees Nomad config)
+- Which plugins are suggested (Alex gets meals + HA, Riley gets fleet + composio)
+- How much detail is shown in output (Alex: "Installed!", Riley: manifest + scan results)
+- Dashboard layout (Alex: chat-first, Riley: fleet-first)
+
+**Capability approval adapts:**
+- Alex: "Meal Planner wants to see your fridge. Allow? [Yes / No]"
+- Sam: "Meal Planner requests: Meal Data (low risk), External Network to meals-api.wan0.cloud (medium). Allow? [Yes / No / Details]"
+- Jordan: reviews `plugin.json` capabilities array directly
+- Riley: `yeet verify --strict` in CI, auto-approve trusted signers
+
+**Dashboard adapts:**
+- Alex: chat window + meal card + home controls. No sidebar.
+- Sam: chat + home + meals + monitoring. Simple sidebar.
+- Jordan: chat + agents + PRs + logs + costs. Full sidebar.
+- Riley: everything + fleet topology + audit log + per-model spend. Tabbed layout.
+
+**Error messages adapt:**
+- Alex: "Something went wrong with the meal suggestions. Try again in a moment."
+- Riley: "meals_suggest failed: 502 from meals-api.wan0.cloud, upstream timeout after 30s. Last successful call: 2m ago."
+
+### 1.7 Auditability Principle
+
+The platform must be easy to understand and audit at every level:
+
+- **Plugin code is readable**: A plugin is one `plugin.json` manifest + one `mod.ts` entry point. No build step, no transpilation, no hidden dependencies. Anyone can read a plugin's source and understand what it does.
+- **Capabilities are explicit**: Every permission a plugin has was approved by the user. Approvals are persisted in `~/.config/yeet/approvals/` as JSON — auditable by any text editor.
+- **Every tool call is logged**: The gateway logs every tool invocation with timestamp, tool name, args, and result. Deno's audit logging (`DENO_AUDIT_PERMISSIONS`) captures every permission check.
+- **The scanner is deterministic**: `yeet verify` produces the same findings every time for the same plugin. No heuristics that sometimes pass, sometimes fail.
+- **No hidden network calls**: Plugins can only reach hosts declared in their capabilities. Undeclared network access is denied at the Deno runtime level and logged.
+- **History is queryable**: Conversation history, tool call logs, and capability approvals are all in SQLite — queryable with standard tools.
+- **Dashboard shows provenance**: Every action in the dashboard shows which plugin performed it, which capability it used, and when it was approved.
+
+---
+
+## 2. Problem Statement
 
 Three separate projects, three separate AI loops, fragmented interfaces:
 
@@ -51,7 +224,7 @@ NemoClaw attempted to unify food and the gateway via a skill-based sandbox model
 
 ---
 
-## 2. Architecture Overview
+## 3. Architecture Overview
 
 ```
  You
@@ -93,7 +266,7 @@ Three layers:
 
 ---
 
-## 3. The Unified Gateway
+## 4. The Unified Gateway
 
 Evolution of the existing yeet gateway (`~/yeet/gateway/`). The current gateway already implements: Signal channel, AI agent loop (OpenRouter), tool calling, SQLite conversation persistence, Nomad event polling, webhook server.
 
@@ -153,7 +326,7 @@ Ported from shellcode-server's `memory.ts`:
 
 ---
 
-## 4. Tool Definitions
+## 5. Tool Definitions
 
 All tools are HTTP calls to APIs the gateway controls. Defined as OpenAI-style function definitions (same format as the existing `tools.ts`).
 
@@ -231,7 +404,7 @@ These are called indirectly -- when the gateway dispatches a coding task via Nom
 
 ---
 
-## 5. Multi-Agent Coding
+## 6. Multi-Agent Coding
 
 For coding tasks that benefit from multiple agents working in parallel on the same project.
 
@@ -295,7 +468,7 @@ The yeet CLI already supports `--needs <device>`. This extends to `--needs gpu` 
 
 ---
 
-## 6. Data Flows
+## 7. Data Flows
 
 ### Flow 1: "What's for dinner?" (Signal)
 
@@ -507,9 +680,9 @@ Agent loop: LLM combines results:
 
 ---
 
-## 7. Security Model
+## 8. Security Model
 
-### 7.1 Gateway Sandbox (Deno Permissions)
+### 8.1 Gateway Sandbox (Deno Permissions)
 
 The gateway runs under Deno with a declarative permission policy in `deno.json`:
 
@@ -564,7 +737,7 @@ Run with: `deno run -P=gateway src/index.ts`
 
 **Permission broker** (optional, future): For dynamic policy decisions, Deno supports delegating all permission checks to an external broker process via `DENO_PERMISSION_BROKER_PATH`. This could enforce per-tool or per-conversation policies managed by a central policy engine.
 
-### 7.2 Filesystem Protection
+### 8.2 Filesystem Protection
 
 **The gateway cannot delete files.** Here's why, layer by layer:
 
@@ -580,7 +753,7 @@ Run with: `deno run -P=gateway src/index.ts`
 
 **For coding agents** (which DO need filesystem access), see Section 7.4.
 
-### 7.3 GitHub Account Scoping
+### 8.3 GitHub Account Scoping
 
 Concern: giving AI agents access to your personal GitHub account.
 
@@ -615,7 +788,7 @@ Nomad dispatch -> Composio AO -> OpenCode agent -> gh CLI
 
 This means even if an agent goes completely off the rails, the worst it can do is create junk PRs on repos you've allowed. It cannot merge to main, delete branches, or touch repos outside its scope.
 
-### 7.4 Coding Agent Isolation
+### 8.4 Coding Agent Isolation
 
 Coding agents execute arbitrary code. This is the highest-risk component. Defence in depth:
 
@@ -679,7 +852,7 @@ Composio AO creates a separate git worktree per agent worker. Workers cannot see
 
 Even after all the above, the agent can only create PRs. It cannot merge to main without your approval. This is the final human gate.
 
-### 7.5 API Token Isolation
+### 8.5 API Token Isolation
 
 No token has broader access than it needs:
 
@@ -695,11 +868,11 @@ No token has broader access than it needs:
 
 The gateway process cannot access any env var not in the allowlist. `Deno.env.get("GH_TOKEN")` would return `undefined` because it's not in the gateway's `env` permission list -- that token only exists inside Nomad-dispatched containers.
 
-### 7.6 Signal Channel Auth
+### 8.6 Signal Channel Auth
 
 The existing `signal_allowed_numbers` allowlist in `gateway.json` restricts who can send messages. Messages from unknown numbers are dropped with a log entry. No response is sent (don't confirm the gateway exists to unauthorized senders).
 
-### 7.7 Threat Summary
+### 8.7 Threat Summary
 
 | Threat | Mitigated By |
 |--------|-------------|
@@ -717,11 +890,11 @@ The existing `signal_allowed_numbers` allowlist in `gateway.json` restricts who 
 
 ---
 
-## 8. Plugin System
+## 9. Plugin System
 
 The gateway must be extensible. New tools, channels, and skills should be addable without modifying core gateway code. Plugins must be signed to prevent untrusted code execution.
 
-### 8.1 Plugin Types
+### 9.1 Plugin Types
 
 | Type | What it adds | Interface | Example |
 |------|-------------|-----------|---------|
@@ -731,7 +904,7 @@ The gateway must be extensible. New tools, channels, and skills should be addabl
 | **Runtime** | New agent runtime for Composio | `Runtime` plugin interface | A custom agent CLI, a WASM-based agent |
 | **Notifier** | New notification sink | `Notifier` interface (send) | Email, ntfy, Pushover, Slack |
 
-### 8.2 Plugin Manifest
+### 9.2 Plugin Manifest
 
 Each plugin is a directory with a `plugin.json` manifest:
 
@@ -763,7 +936,7 @@ Each plugin is a directory with a `plugin.json` manifest:
 
 **Key principle**: plugins declare their own permissions. The gateway merges plugin permissions into the Deno permission set at load time. A plugin that requests `run: true` would be flagged and rejected unless explicitly trusted.
 
-### 8.3 Tool Plugin Interface
+### 9.3 Tool Plugin Interface
 
 A tool plugin exports:
 
@@ -804,7 +977,7 @@ The gateway loads the plugin, registers the tool definition in the LLM's tool ar
 
 **Sandboxing**: The plugin runs inside the same Deno process as the gateway. Its permissions are the union of the gateway's base permissions and the plugin's declared permissions. A plugin cannot exceed its declared permissions because Deno enforces them at runtime. If a plugin declares `"net": ["api.open-meteo.com:443"]` but tries to fetch `evil.com`, Deno throws `PermissionDenied`.
 
-### 8.4 Plugin Signing
+### 9.4 Plugin Signing
 
 Plugins are signed to verify authorship and integrity. Unsigned or tampered plugins are rejected at load time.
 
@@ -857,7 +1030,7 @@ Gateway (load time):
 - `prompt` -- show the plugin's requested permissions and ask for confirmation before loading
 - `audit` -- load but log every permission check from this plugin to a separate audit file
 
-### 8.5 Plugin Discovery and Installation
+### 9.5 Plugin Discovery and Installation
 
 ```bash
 # Install from git
@@ -878,7 +1051,7 @@ gateway plugin verify ./my-plugin/
 
 Plugins are stored in `~/.config/yeet/plugins/`. Each plugin gets its own directory. The gateway scans this directory at startup and loads all valid, signed plugins.
 
-### 8.6 SKILL.md Compatibility
+### 9.6 SKILL.md Compatibility
 
 Skill-type plugins use the `SKILL.md` format (compatible with Outworked and NemoClaw):
 
@@ -912,7 +1085,7 @@ for load shedding.
 
 The gateway loads the SKILL.md as a persona variant. When the user activates the skill (via command, keyword, or explicit persona selection), the SKILL.md content is injected into the system prompt alongside the available tools. The `requires` field in metadata maps to the plugin permission model.
 
-### 8.7 MCP Server Plugins
+### 9.7 MCP Server Plugins
 
 Tool plugins can also be MCP servers. The gateway acts as an MCP client, connecting to the server via stdio or HTTP transport:
 
@@ -943,7 +1116,7 @@ The gateway spawns the MCP server process, discovers its tools via `tools/list`,
 
 **Note**: MCP server plugins require `run` permission (to spawn the server process). This is flagged in the signing/trust flow -- plugins requesting `run` get extra scrutiny.
 
-### 8.8 Plugin Permissions Escalation Protection
+### 9.8 Plugin Permissions Escalation Protection
 
 A plugin cannot escalate beyond its declared permissions:
 
@@ -952,7 +1125,7 @@ A plugin cannot escalate beyond its declared permissions:
 3. **Dangerous permissions are flagged**: `run`, `ffi`, `write` (to paths outside `./data`) trigger a warning at load time and require `trust: "full"` or explicit confirmation.
 4. **Runtime enforcement**: Deno's permission system is the final arbiter. Even if a bug in the plugin loader grants too much, Deno itself blocks unauthorized access.
 
-## 9. Dashboard
+## 10. Dashboard
 
 A web dashboard that aggregates status from the gateway, Nomad fleet, and Composio AO instances. Accessible on the Tailscale mesh from any device (laptop, phone, HA tablet).
 
@@ -982,7 +1155,7 @@ Outworked-style pixel art office as an optional dashboard skin. Agents visualise
 
 ---
 
-## 10. Migration Plan
+## 11. Migration Plan
 
 ### Phase 1: Gateway Foundation
 
