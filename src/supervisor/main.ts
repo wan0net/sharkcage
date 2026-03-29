@@ -9,12 +9,15 @@
  */
 
 import { createServer, type Socket } from "node:net";
-import { mkdirSync, unlinkSync } from "node:fs";
-import type { ToolCallRequest, ToolCallResponse } from "./types.js";
+import { mkdirSync, unlinkSync, writeFileSync, readFileSync } from "node:fs";
+import type { ToolCallRequest, ToolCallResponse, ApprovalResponse, SkillCapability } from "./types.js";
 import { ApprovalStore } from "./approvals.js";
+import { PendingApprovalStore } from "./pending-approvals.js";
 import { AuditLog } from "./audit.js";
 import { executeInSandbox, checkAsrtAvailable } from "./worker.js";
 import { startDashboardApi } from "./api.js";
+import { TokenRegistry } from "./token-registry.js";
+import { startLocalhostProxy } from "./proxy.js";
 
 // --- Config ---
 const home = process.env.HOME ?? ".";
@@ -25,7 +28,9 @@ const socketPath = process.env.SHARKCAGE_SOCKET ?? `${dataDir}/supervisor.sock`;
 
 // --- State ---
 const approvals = new ApprovalStore(`${configDir}/approvals`);
+const pendingApprovals = new PendingApprovalStore();
 const audit = new AuditLog(`${dataDir}/audit.jsonl`);
+const tokenRegistry = new TokenRegistry();
 
 // --- Env vars to pass to skills (resolved once at startup) ---
 function getSkillEnv(): Record<string, string> {
@@ -45,36 +50,92 @@ function getSkillEnv(): Record<string, string> {
 }
 
 // --- Handle a tool call request ---
-async function handleRequest(request: ToolCallRequest): Promise<ToolCallResponse> {
+async function handleRequest(request: ToolCallRequest, socket: Socket): Promise<ToolCallResponse> {
   const timestamp = new Date().toISOString();
 
   // Check approval
-  const approval = approvals.get(request.skill);
+  let approval = approvals.get(request.skill);
   if (!approval) {
-    const response: ToolCallResponse = {
-      id: request.id,
-      result: "",
-      error: `Skill "${request.skill}" has no approved capabilities. Run: sharkcage approve ${request.skill}`,
-      durationMs: 0,
-    };
-    await audit.log({
-      timestamp,
-      skill: request.skill,
-      tool: request.tool,
-      args: JSON.stringify(request.args),
-      result: "",
-      error: response.error!,
-      durationMs: 0,
-      blocked: true,
-      blockReason: "no approval",
-    });
-    return response;
+    // Breakout: load skill manifest for metadata, then ask human via chat
+    let version = "unknown";
+    let capabilities: SkillCapability[] = [];
+    try {
+      const manifest = JSON.parse(
+        readFileSync(`${pluginDir}/${request.skill}/plugin.json`, "utf-8")
+      );
+      version = manifest.version ?? "unknown";
+      capabilities = manifest.capabilities ?? [];
+    } catch { /* manifest unavailable */ }
+
+    const { token, promise } = pendingApprovals.enqueue(request.skill, version, capabilities);
+
+    // Push the approval request to the plugin over IPC
+    socket.write(
+      JSON.stringify({
+        type: "approval.request",
+        token,
+        skill: request.skill,
+        version,
+        capabilities,
+      }) + "\n"
+    );
+
+    let approved = false;
+    try {
+      approved = await promise;
+    } catch {
+      // timed out or rejected
+    }
+
+    if (approved) {
+      // Persist approval file and hot-reload
+      const approvalData = {
+        skill: request.skill,
+        version,
+        capabilities,
+        approvedAt: new Date().toISOString(),
+      };
+      try {
+        writeFileSync(
+          `${configDir}/approvals/${request.skill}.json`,
+          JSON.stringify(approvalData, null, 2)
+        );
+        approvals.loadAll();
+        approval = approvals.get(request.skill);
+      } catch (err) {
+        console.error("[supervisor] failed to write approval file:", err);
+      }
+    }
+
+    if (!approved || !approval) {
+      const errMsg = approved
+        ? `Failed to persist approval for skill "${request.skill}"`
+        : `Skill "${request.skill}" was not approved.`;
+      const response: ToolCallResponse = {
+        id: request.id,
+        result: "",
+        error: errMsg,
+        durationMs: 0,
+      };
+      await audit.log({
+        timestamp,
+        skill: request.skill,
+        tool: request.tool,
+        args: JSON.stringify(request.args),
+        result: "",
+        error: errMsg,
+        durationMs: 0,
+        blocked: true,
+        blockReason: approved ? "approval persist failed" : "approval denied or timed out",
+      });
+      return response;
+    }
   }
 
   // Execute in sandbox
   const skillPath = `${pluginDir}/${request.skill}`;
   const env = getSkillEnv();
-  const response = await executeInSandbox(request, approval, skillPath, env);
+  const response = await executeInSandbox(request, approval!, skillPath, env, tokenRegistry);
 
   // Audit
   await audit.log({
@@ -135,10 +196,18 @@ async function handleConnection(conn: Socket): Promise<void> {
         if (!line.trim()) continue;
 
         try {
-          const request = JSON.parse(line) as ToolCallRequest;
-          const response = await handleRequest(request);
-          const responseLine = JSON.stringify(response) + "\n";
-          conn.write(responseLine);
+          const parsed = JSON.parse(line) as { type?: string } & ToolCallRequest & ApprovalResponse;
+
+          if (parsed.type === "approval.response") {
+            // Route approval reply back to the pending store
+            pendingApprovals.resolve(parsed.token, parsed.approved);
+          } else {
+            // Regular tool call request
+            const request = parsed as ToolCallRequest;
+            const response = await handleRequest(request, conn);
+            const responseLine = JSON.stringify(response) + "\n";
+            conn.write(responseLine);
+          }
         } catch (err) {
           const errResponse = JSON.stringify({
             id: "unknown",
@@ -178,6 +247,9 @@ async function main(): Promise<void> {
     console.warn("[supervisor] Install @anthropic-ai/sandbox-runtime for full protection");
   }
 
+  // Start SOCKS5 localhost proxy
+  startLocalhostProxy(18800, tokenRegistry, audit, getSkillEnv());
+
   // Ensure directories
   for (const dir of [configDir, dataDir, pluginDir, `${configDir}/approvals`]) {
     try { mkdirSync(dir, { recursive: true }); } catch { /* exists */ }
@@ -194,7 +266,7 @@ async function main(): Promise<void> {
 
   // Start dashboard API
   const apiPort = parseInt(process.env.SHARKCAGE_API_PORT ?? "18790", 10);
-  startDashboardApi(apiPort, configDir, pluginDir, approvals, hasAsrt);
+  startDashboardApi(apiPort, configDir, pluginDir, approvals, pendingApprovals, hasAsrt);
 }
 
 // --- Shutdown ---

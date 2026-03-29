@@ -4,6 +4,7 @@
  */
 
 import { connect, type Socket } from "node:net";
+import type { ApprovalRequest, ApprovalResponse } from "../supervisor/types.js";
 
 interface ToolCallRequest {
   id: string;
@@ -28,6 +29,7 @@ export class SupervisorClient {
     reject: (e: Error) => void;
   }>();
   private nextId = 0;
+  private approvalRequestHandler: ((req: ApprovalRequest) => void) | null = null;
 
   constructor(socketPath: string) {
     this.socketPath = socketPath;
@@ -52,11 +54,20 @@ export class SupervisorClient {
           this.buffer = this.buffer.slice(idx + 1);
           if (!line.trim()) continue;
           try {
-            const response = JSON.parse(line) as ToolCallResponse;
-            const p = this.pending.get(response.id);
-            if (p) {
-              this.pending.delete(response.id);
-              p.resolve(response);
+            const parsed = JSON.parse(line) as { type?: string } & ToolCallResponse & ApprovalRequest;
+            if (parsed.type === "approval.request") {
+              if (this.approvalRequestHandler) {
+                this.approvalRequestHandler(parsed as ApprovalRequest);
+              } else {
+                console.warn("[sharkcage-plugin] received approval.request but no handler registered");
+              }
+            } else {
+              const response = parsed as ToolCallResponse;
+              const p = this.pending.get(response.id);
+              if (p) {
+                this.pending.delete(response.id);
+                p.resolve(response);
+              }
             }
           } catch {
             console.error("[sharkcage-plugin] bad response:", line.slice(0, 100));
@@ -97,6 +108,20 @@ export class SupervisorClient {
         }
       }, 300_000);
     });
+  }
+
+  /** Register a handler for inbound approval.request messages from the supervisor. */
+  onApprovalRequest(handler: (req: ApprovalRequest) => void): void {
+    this.approvalRequestHandler = handler;
+  }
+
+  /** Fire-and-forget: send an ApprovalResponse back to the supervisor. */
+  sendResponse(msg: ApprovalResponse): void {
+    if (!this.conn) {
+      console.warn("[sharkcage-plugin] sendResponse: not connected");
+      return;
+    }
+    this.conn.write(JSON.stringify(msg) + "\n");
   }
 
   close(): void {

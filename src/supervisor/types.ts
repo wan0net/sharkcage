@@ -40,6 +40,33 @@ export interface AsrtConfig {
   };
 }
 
+export interface AllowedTarget {
+  host: string;
+  port: number;
+  capability: string;
+}
+
+export interface TokenEntry {
+  skill: string;
+  capabilities: SkillCapability[];
+  issuedAt: number;
+  timeoutHandle: ReturnType<typeof setTimeout>;
+}
+
+export interface ApprovalRequest {
+  type: "approval.request";
+  token: string;
+  skill: string;
+  version: string;
+  capabilities: SkillCapability[];
+}
+
+export interface ApprovalResponse {
+  type: "approval.response";
+  token: string;
+  approved: boolean;
+}
+
 /** Audit log entry */
 export interface AuditEntry {
   timestamp: string;

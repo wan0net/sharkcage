@@ -27,6 +27,18 @@ export class AuditLog {
     appendFileSync(this.path, line);
   }
 
+  async logProxy(entry: {
+    timestamp: string;
+    skill: string;
+    host: string;
+    port: number;
+    allowed: boolean;
+    capability: string | null;
+  }): Promise<void> {
+    const line = JSON.stringify({ type: "proxy", ...entry }) + "\n";
+    appendFileSync(this.path, line);
+  }
+
   close(): void {
     // JSONL file doesn't need explicit close
   }

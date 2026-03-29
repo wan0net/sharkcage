@@ -11,6 +11,7 @@
  */
 
 import { SupervisorClient } from "./ipc.js";
+import { ApprovalHandler } from "./approval-handler.js";
 import { SkillMap } from "./skill-map.js";
 import { registerDashboardRoutes } from "./dashboard.js";
 
@@ -24,6 +25,7 @@ const socketPath = process.env.SHARKCAGE_SOCKET ?? `${dataDir}/supervisor.sock`;
 // --- State ---
 const supervisor = new SupervisorClient(socketPath);
 const skillMap = new SkillMap();
+const approvalHandler = new ApprovalHandler(18789, supervisor);
 
 /**
  * OpenClaw plugin entry point.
@@ -60,6 +62,9 @@ export function register(api: OpenClawPluginApi): void {
     console.error("[sharkcage] failed to connect to supervisor:", err);
     console.error("[sharkcage] is `sharkcage start` running?");
   });
+
+  // Wire approval handler
+  supervisor.onApprovalRequest((req) => approvalHandler.handleApprovalRequest(req));
 
   // --- tool.before interceptor ---
   // FAIL CLOSED: if the supervisor is unreachable, block ALL tool calls.
@@ -125,6 +130,22 @@ export function register(api: OpenClawPluginApi): void {
 
       console.log(`[sharkcage-audit] native tool: ${toolName}`);
       return undefined;
+    },
+  });
+
+  // --- message.before interceptor: consume sc yes/no replies ---
+  api.registerInterceptor({
+    name: "sharkcage-approval",
+    priority: 200,
+    event: "message.before",
+    handler: async (input: any) => {
+      const text = input.message?.text ?? input.text ?? "";
+      const result = approvalHandler.checkReply(text);
+      if (result.matched) {
+        approvalHandler.handleInboundReply(result.token!, result.approved!);
+        return { block: true }; // consume message, don't pass to AI
+      }
+      return undefined; // pass through
     },
   });
 

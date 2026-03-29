@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import type { ToolCallRequest, ToolCallResponse } from "./types.js";
 import { buildAsrtConfig, writeAsrtConfig } from "./sandbox.js";
 import type { SkillApproval } from "./types.js";
+import type { TokenRegistry } from "./token-registry.js";
 
 /**
  * Execute a tool call in an ASRT-sandboxed subprocess.
@@ -20,7 +21,8 @@ export async function executeInSandbox(
   request: ToolCallRequest,
   approval: SkillApproval,
   skillDir: string,
-  env?: Record<string, string>
+  env?: Record<string, string>,
+  tokenRegistry?: TokenRegistry
 ): Promise<ToolCallResponse> {
   const start = Date.now();
 
@@ -67,11 +69,25 @@ export async function executeInSandbox(
     args: request.args,
   });
 
+  // Issue a proxy token for this subprocess (if TokenRegistry is wired up)
+  const proxyToken = tokenRegistry
+    ? tokenRegistry.issue(request.skill, approval.capabilities)
+    : null;
+
+  const proxyEnv: Record<string, string> = proxyToken
+    ? {
+        ALL_PROXY: `socks5://${proxyToken}:x@127.0.0.1:18800`,
+        HTTP_PROXY: `socks5://${proxyToken}:x@127.0.0.1:18800`,
+        HTTPS_PROXY: `socks5://${proxyToken}:x@127.0.0.1:18800`,
+      }
+    : {};
+
   try {
     const child = spawn(srtCmd[0], srtCmd.slice(1), {
       stdio: ["pipe", "pipe", "pipe"],
       env: {
         ...env,
+        ...proxyEnv,
         // Don't leak supervisor env vars to the skill
         SHARKCAGE_TOOL_CALL: "1",
       },
@@ -89,7 +105,12 @@ export async function executeInSandbox(
 
     // Wait for exit
     const exitCode = await new Promise<number>((resolve) => {
-      child.on("close", (code) => resolve(code ?? 1));
+      child.on("close", (code) => {
+        if (proxyToken && tokenRegistry) {
+          tokenRegistry.revoke(proxyToken);
+        }
+        resolve(code ?? 1);
+      });
     });
 
     const duration = Date.now() - start;
