@@ -54,7 +54,7 @@ export default async function init() {
 
     // Run openclaw onboard interactively
     p.log.info("Starting OpenClaw setup wizard...\n");
-    const result = spawnSync("openclaw", ["onboard", "--no-install-daemon"], {
+    const result = spawnSync("openclaw", ["onboard", "--no-install-daemon", "--skip-skills"], {
       stdio: "inherit",
     });
 
