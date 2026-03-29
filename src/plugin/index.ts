@@ -13,7 +13,8 @@
  * - registerHttpRoute: webhook for fleet dispatch results
  */
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import type { SandboxViolation } from "../supervisor/types.js";
 import { SupervisorClient } from "./ipc.js";
 import { SkillMap } from "./skill-map.js";
 import { registerDashboardRoutes } from "./dashboard.js";
@@ -29,6 +30,86 @@ const socketPath = process.env.SHARKCAGE_SOCKET ?? `${dataDir}/supervisor.sock`;
 // --- State ---
 const supervisor = new SupervisorClient(socketPath);
 const skillMap = new SkillMap();
+
+/** Violations awaiting user approval, keyed by skill name */
+const pendingViolations = new Map<string, SandboxViolation>();
+
+// --- Violation helpers ---
+
+/**
+ * Return true if this violation target is on the skill's deny list.
+ */
+function isDenied(skill: string, violation: SandboxViolation): boolean {
+  const deniedPath = `${configDir}/denied/${skill}.json`;
+  if (!existsSync(deniedPath)) return false;
+  try {
+    const data = JSON.parse(readFileSync(deniedPath, "utf-8"));
+    const list: Array<{ type: string; target: string }> = data.denied ?? [];
+    return list.some((d) => d.type === violation.type && d.target === violation.target);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Append this violation target to the skill's deny list.
+ */
+function addToDenyList(skill: string, violation: SandboxViolation): void {
+  const deniedDir = `${configDir}/denied`;
+  try { mkdirSync(deniedDir, { recursive: true }); } catch { /* exists */ }
+  const deniedPath = `${deniedDir}/${skill}.json`;
+  let data: { skill: string; denied: Array<{ type: string; target: string; deniedAt: string }> } = {
+    skill,
+    denied: [],
+  };
+  if (existsSync(deniedPath)) {
+    try { data = JSON.parse(readFileSync(deniedPath, "utf-8")); } catch { /* corrupt, overwrite */ }
+  }
+  data.denied.push({ type: violation.type, target: violation.target, deniedAt: new Date().toISOString() });
+  writeFileSync(deniedPath, JSON.stringify(data, null, 2) + "\n");
+}
+
+/**
+ * Add the violation target to the skill's approval file as a new capability scope entry.
+ * The supervisor reads approval files from disk on each call, so no reload is needed here.
+ */
+function updateSkillCapabilities(skill: string, violation: SandboxViolation): void {
+  const approvalPath = `${configDir}/approvals/${skill}.json`;
+  if (!existsSync(approvalPath)) {
+    console.warn(`[sharkcage] cannot update capabilities — approval file not found for ${skill}`);
+    return;
+  }
+  try {
+    const approval = JSON.parse(readFileSync(approvalPath, "utf-8"));
+    const capabilities: Array<{ capability: string; reason: string; scope?: string[] }> =
+      approval.capabilities ?? [];
+
+    const capabilityName = violation.type === "network" ? "network.external"
+      : violation.type === "filesystem" ? "system.files.write"
+      : "system.exec";
+
+    const existing = capabilities.find((c) => c.capability === capabilityName);
+    if (existing) {
+      // Merge target into scope
+      const scope = existing.scope ?? [];
+      if (!scope.includes(violation.target)) {
+        existing.scope = [...scope, violation.target];
+      }
+    } else {
+      capabilities.push({
+        capability: capabilityName,
+        reason: `User-approved at runtime: ${violation.target}`,
+        scope: [violation.target],
+      });
+    }
+
+    approval.capabilities = capabilities;
+    writeFileSync(approvalPath, JSON.stringify(approval, null, 2) + "\n");
+    console.log(`[sharkcage] updated capabilities for ${skill}: ${capabilityName} += ${violation.target}`);
+  } catch (err) {
+    console.error(`[sharkcage] failed to update capabilities for ${skill}:`, err);
+  }
+}
 
 /**
  * OpenClaw plugin entry point.
@@ -89,6 +170,11 @@ export function register(api: OpenClawPluginApi): void {
       execute: async (params: Record<string, unknown>) => {
         try {
           const response = await supervisor.call(skillName, toolName, params);
+          if (response.violation) {
+            // Store the violation for the before_tool_call hook to surface to the user
+            pendingViolations.set(skillName, response.violation);
+            return `This action requires additional permissions. Requesting approval...`;
+          }
           if (response.error) return response.error;
           return response.result;
         } catch {
@@ -105,6 +191,50 @@ export function register(api: OpenClawPluginApi): void {
     const toolName = event.toolName;
     const skill = skillMap.getSkill(toolName);
     if (!skill) return undefined; // not a sharkcage-managed skill, pass through
+
+    // --- Check for a pending sandbox violation from the previous call ---
+    const pendingViolation = pendingViolations.get(skill);
+    if (pendingViolation) {
+      pendingViolations.delete(skill);
+
+      // If already on the deny list, silently block without prompting
+      if (isDenied(skill, pendingViolation)) {
+        return {
+          block: true,
+          blockReason: `Blocked: ${pendingViolation.type} access to "${pendingViolation.target}" was previously denied for skill "${skill}".`,
+        };
+      }
+
+      const violationLabel = pendingViolation.type === "network"
+        ? `network access to "${pendingViolation.target}"`
+        : pendingViolation.type === "filesystem"
+        ? `filesystem access to "${pendingViolation.target}"`
+        : `exec access to "${pendingViolation.target}"`;
+
+      const capturedViolation = pendingViolation;
+      return {
+        requireApproval: {
+          title: `Skill "${skill}" needs ${pendingViolation.type} access`,
+          description: `Wants to reach: ${pendingViolation.target}\nReason: ${pendingViolation.detail}\n\nAllow "${skill}" to have ${violationLabel}?`,
+          severity: "warning" as const,
+          timeoutMs: 240_000,
+          timeoutBehavior: "deny" as const,
+          onResolution: async (decision: string) => {
+            if (decision === "approved" || decision === "allow") {
+              // Persist the capability so the next call succeeds
+              updateSkillCapabilities(skill, capturedViolation);
+              console.log(`[sharkcage] violation approved for ${skill}: ${capturedViolation.type}:${capturedViolation.target}`);
+            } else if (decision === "never" || decision === "deny") {
+              addToDenyList(skill, capturedViolation);
+              console.log(`[sharkcage] violation denied (never) for ${skill}: ${capturedViolation.type}:${capturedViolation.target}`);
+            } else {
+              // "deny" once — don't persist either way, just don't allow
+              console.log(`[sharkcage] violation denied (once) for ${skill}: ${capturedViolation.type}:${capturedViolation.target}`);
+            }
+          },
+        },
+      };
+    }
 
     const approvalPath = `${configDir}/approvals/${skill}.json`;
     if (existsSync(approvalPath)) {

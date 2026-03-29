@@ -1,9 +1,49 @@
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
-import type { ToolCallRequest, ToolCallResponse } from "./types.js";
+import type { ToolCallRequest, ToolCallResponse, SandboxViolation } from "./types.js";
 import { buildAsrtConfig, writeAsrtConfig } from "./sandbox.js";
 import type { SkillApproval } from "./types.js";
 import type { TokenRegistry } from "./token-registry.js";
+
+/**
+ * Parse sandbox violation details from subprocess stderr.
+ * Returns null if no recognisable violation is found.
+ * Detection is best-effort regex — not exhaustive.
+ */
+export function parseSandboxViolation(stderr: string): SandboxViolation | null {
+  // Network: ECONNREFUSED / ENOTFOUND — extract hostname
+  const networkMatch = stderr.match(/(?:ECONNREFUSED|ENOTFOUND)\s+([^\s:,]+)/);
+  if (networkMatch) {
+    return {
+      type: "network",
+      target: networkMatch[1],
+      detail: stderr.slice(0, 500),
+    };
+  }
+
+  // Filesystem: "Operation not permitted" near a path
+  const fsMatch = stderr.match(/Operation not permitted[^\n]*?(\/[^\s,'"]+)/);
+  if (fsMatch) {
+    return {
+      type: "filesystem",
+      target: fsMatch[1],
+      detail: stderr.slice(0, 500),
+    };
+  }
+
+  // Exec: "sandbox" + "denied" (ASRT generic denial)
+  if (/sandbox/i.test(stderr) && /denied/i.test(stderr)) {
+    // Try to extract a binary name or path from the message
+    const execMatch = stderr.match(/denied[^\n]*?(\/[^\s,'"]+|[a-zA-Z][\w.-]+)/);
+    return {
+      type: "exec",
+      target: execMatch ? execMatch[1] : "unknown",
+      detail: stderr.slice(0, 500),
+    };
+  }
+
+  return null;
+}
 
 /**
  * Execute a tool call in an ASRT-sandboxed subprocess.
@@ -116,11 +156,13 @@ export async function executeInSandbox(
     const duration = Date.now() - start;
 
     if (exitCode !== 0) {
+      const violation = parseSandboxViolation(stderr);
       return {
         id: request.id,
         result: "",
         error: `Skill exited with code ${exitCode}: ${stderr.slice(0, 500)}`,
         durationMs: duration,
+        ...(violation ? { violation } : {}),
       };
     }
 

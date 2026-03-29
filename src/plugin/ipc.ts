@@ -12,11 +12,18 @@ interface ToolCallRequest {
   args: Record<string, unknown>;
 }
 
+interface SandboxViolation {
+  type: "network" | "filesystem" | "exec";
+  target: string;
+  detail: string;
+}
+
 interface ToolCallResponse {
   id: string;
   result: string;
   error?: string;
   durationMs: number;
+  violation?: SandboxViolation;
 }
 
 export class SupervisorClient {

@@ -6,12 +6,20 @@ export interface ToolCallRequest {
   args: Record<string, unknown>;
 }
 
+/** A sandbox policy violation detected from subprocess stderr */
+export interface SandboxViolation {
+  type: "network" | "filesystem" | "exec";
+  target: string; // hostname, file path, or binary name
+  detail: string; // raw error message
+}
+
 /** IPC response from supervisor to OpenClaw plugin */
 export interface ToolCallResponse {
   id: string;
   result: string;
   error?: string;
   durationMs: number;
+  violation?: SandboxViolation;
 }
 
 /** Approved capabilities for a skill */
