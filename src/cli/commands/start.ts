@@ -28,9 +28,7 @@ const socketPath = `${dataDir}/supervisor.sock`;
 const pidFile = `${dataDir}/sharkcage.pid`;
 
 export default async function start() {
-  console.log("");
   log("sc", "sharkcage starting");
-  console.log("");
 
   // --- 1. Check dependencies ---
   const deps = checkDependencies();
@@ -102,14 +100,13 @@ export default async function start() {
   }));
 
   // --- 10. Running ---
-  console.log("");
   log("sc", "━━━ sharkcage running ━━━");
   log("sc", `Gateway:   ws://127.0.0.1:18789`);
   log("sc", `Token:     ${gatewayToken}`);
+  log("sc", `Web UI:    http://127.0.0.1:18789/?token=${gatewayToken}`);
   log("sc", `Dashboard: http://127.0.0.1:18789/sharkcage/?token=${gatewayToken}`);
-  log("sc", `PIDs:      supervisor=${supervisorProc.pid} openclaw=${openclawProc.pid}`);
+  log("sc", `API:       http://127.0.0.1:18790/api/status`);
   log("sc", "Press Ctrl+C to stop");
-  console.log("");
 
   // --- 11. Monitor + shutdown ---
   let shuttingDown = false;
