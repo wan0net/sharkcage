@@ -351,9 +351,30 @@ function generateGatewaySandboxConfig(outPath: string): void {
       allowRead: ["/usr", "/lib", "/bin", "/sbin", "/etc", "/opt/homebrew", "/tmp", `${home}/.openclaw`, `${configDir}`],
       allowWrite: [`${home}/.openclaw/data`, `${configDir}/data`, "/tmp"],
       denyRead: [
-        `${home}/.ssh`, `${home}/.aws`, `${home}/.gnupg`,
+        // Credentials & keys
+        `${home}/.ssh`,
+        `${home}/.aws`,
+        `${home}/.gnupg`,
+        `${home}/.netrc`,
+        `${home}/.npmrc`,
+        `${home}/.docker`,
+        `${home}/.kube`,
+        `${home}/.config/gh`,
+        `${home}/.config/gcloud`,
+        `${home}/.config/op`,      // 1Password CLI
+        `${home}/.password-store`,
+        // Shell configs (can leak env vars / secrets)
+        `${home}/.bashrc`,
+        `${home}/.zshrc`,
+        `${home}/.bash_profile`,
+        `${home}/.zprofile`,
+        `${home}/.profile`,
+        `${home}/.bash_history`,
+        `${home}/.zsh_history`,
+        `${home}/.gitconfig`,
+        // Sharkcage internals
         `${configDir}/approvals`,
-        `${home}/.bashrc`, `${home}/.zshrc`, `${home}/.gitconfig`,
+        `${configDir}/gateway-sandbox.json`,
       ],
       denyWrite: [],
     },

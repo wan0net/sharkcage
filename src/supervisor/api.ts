@@ -106,8 +106,12 @@ export function startDashboardApi(
     }
   });
 
+  server.on("error", (err) => {
+    console.error(`dashboard API failed to start: ${err}`);
+  });
+
   server.listen(port, "127.0.0.1", () => {
-    console.log(`[supervisor] dashboard API on http://127.0.0.1:${port}`);
+    console.log(`dashboard API listening on http://127.0.0.1:${port}`);
   });
 }
 
