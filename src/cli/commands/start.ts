@@ -294,17 +294,23 @@ function ensureOpenClawPluginRegistered(): void {
       log("sc", "Plugin already registered");
     }
 
-    // Lock down tools: deny all skills by default, allow only safe basics.
-    // Users approve additional skills through sharkcage's approval flow.
+    // Lock down: disable all bundled skills and deny dangerous tools.
+    // Users approve skills through sharkcage's approval flow.
+    if (!config.skills) config.skills = {};
+    if (!Array.isArray(config.skills.allowBundled) || config.skills.allowBundled.length !== 0) {
+      config.skills.allowBundled = []; // no bundled skills loaded
+      changed = true;
+      log("sc", "Bundled skills disabled — approve via sharkcage");
+    }
+
     if (!config.tools) config.tools = {};
-    const safeTools = [
-      "read", "write", "edit", "apply_patch",   // filesystem (sandboxed by ASRT)
-      "web_search", "web_fetch",                  // web (sandboxed by ASRT network)
-      "sharkcage_status",                         // our own status tool
-    ];
     if (!config.tools.deny || !config.tools.deny.includes("*")) {
       config.tools.deny = ["*"];
-      config.tools.allow = safeTools;
+      config.tools.allow = [
+        "read", "write", "edit", "apply_patch",   // filesystem (sandboxed by ASRT)
+        "web_search", "web_fetch",                  // web (sandboxed by ASRT network)
+        "sharkcage_status",                         // our own status tool
+      ];
       changed = true;
       log("sc", "Tools locked down — only safe basics allowed");
     }
