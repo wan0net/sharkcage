@@ -39,6 +39,9 @@ const VIOLATION_PATTERNS = [
 const home = process.env.HOME ?? "";
 const auditPath = `${home}/.config/sharkcage/data/audit.jsonl`;
 
+/** Dedup: track last violation message per source to avoid spam */
+const lastViolation = new Map<string, string>();
+
 function timestamp(): string {
   const now = new Date();
   const h = String(now.getHours()).padStart(2, "0");
@@ -58,25 +61,32 @@ function formatLine(tag: string, line: string): string {
   return `${timestamp()} ${color}[${tag}]${RESET} ${cleaned}`;
 }
 
-function checkViolation(tag: string, line: string): void {
+/** Returns true if this line should be suppressed from console (duplicate violation) */
+function checkViolation(tag: string, line: string): boolean {
   const cleaned = cleanLine(line);
   for (const pattern of VIOLATION_PATTERNS) {
     if (pattern.test(cleaned)) {
-      // Log to audit file
+      const msg = cleaned.trim();
+
+      // Deduplicate: suppress repeated identical violations
+      if (lastViolation.get(tag) === msg) return true; // suppress
+      lastViolation.set(tag, msg);
+
       const entry = {
         type: "sandbox-violation",
         timestamp: new Date().toISOString(),
         source: tag,
-        message: cleaned.trim(),
+        message: msg,
       };
       try {
         if (existsSync(auditPath)) {
           appendFileSync(auditPath, JSON.stringify(entry) + "\n");
         }
       } catch { /* audit dir may not exist yet */ }
-      return; // only log once per line
+      return false; // first occurrence — show it
     }
   }
+  return false; // not a violation
 }
 
 export function prefixOutput(proc: ChildProcess, tag: string): void {
@@ -90,15 +100,17 @@ export function prefixOutput(proc: ChildProcess, tag: string): void {
         const line = buffer.slice(0, idx);
         buffer = buffer.slice(idx + 1);
         if (line.trim()) {
-          checkViolation(tag, line);
-          target.write(formatLine(tag, line) + "\n");
+          if (!checkViolation(tag, line)) {
+            target.write(formatLine(tag, line) + "\n");
+          }
         }
       }
     });
     stream.on("end", () => {
       if (buffer.trim()) {
-        checkViolation(tag, buffer);
-        target.write(formatLine(tag, buffer) + "\n");
+        if (!checkViolation(tag, buffer)) {
+          target.write(formatLine(tag, buffer) + "\n");
+        }
       }
     });
   };

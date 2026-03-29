@@ -106,7 +106,7 @@ export default async function start() {
   log("sc", "━━━ sharkcage running ━━━");
   log("sc", `Gateway:   ws://127.0.0.1:18789`);
   log("sc", `Token:     ${gatewayToken}`);
-  log("sc", `Dashboard: http://127.0.0.1:18790/sharkcage/`);
+  log("sc", `Dashboard: http://127.0.0.1:18789/sharkcage/?token=${gatewayToken}`);
   log("sc", `PIDs:      supervisor=${supervisorProc.pid} openclaw=${openclawProc.pid}`);
   log("sc", "Press Ctrl+C to stop");
   console.log("");
