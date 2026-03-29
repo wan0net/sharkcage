@@ -346,7 +346,7 @@ function generateGatewaySandboxConfig(outPath: string): void {
     },
     filesystem: {
       allowRead: ["/usr", "/lib", "/bin", "/sbin", "/etc", "/opt/homebrew", "/tmp", `${home}/.openclaw`, `${configDir}`],
-      allowWrite: [`${home}/.openclaw/data`, `${configDir}/data`, "/tmp"],
+      allowWrite: [`${home}/.openclaw`, `${configDir}/data`, "/tmp"],
       denyRead: [
         // Credentials & keys
         `${home}/.ssh`,
