@@ -15,12 +15,15 @@ import { join } from "node:path";
 interface AsrtSessionPolicy {
   network: {
     allowedDomains: string[];
-    allowUnixSockets?: boolean;
+    deniedDomains: string[];
+    allowLocalBinding: boolean;
+    allowUnixSockets: string[];
   };
   filesystem: {
     allowRead?: string[];
     allowWrite: string[];
     denyRead: string[];
+    denyWrite: string[];
   };
 }
 
@@ -135,8 +138,10 @@ function buildSessionPolicy(
 ): AsrtSessionPolicy {
   return {
     network: {
-      allowedDomains: [], // sessions don't need outbound network by default
-      allowUnixSockets: true, // needed for supervisor IPC
+      allowedDomains: [],
+      deniedDomains: [],
+      allowLocalBinding: true,
+      allowUnixSockets: [`${home}/.config/sharkcage/data/supervisor.sock`],
     },
     filesystem: {
       allowRead: [
@@ -146,11 +151,12 @@ function buildSessionPolicy(
         "/bin",
         "/sbin",
         "/etc",
-        "/opt/homebrew", // macOS Homebrew
+        "/opt/homebrew",
         "/tmp",
-        "/var/folders", // macOS temp scratch space
-        "/Library/Frameworks/Python.framework", // macOS system Python
+        "/var/folders",
+        "/Library/Frameworks/Python.framework",
         "/usr/bin/python3",
+        "/private/var/run", // mDNSResponder for DNS
         workspaceDir,
         agentWorkspaceDir,
         `${home}/.node_modules`,
@@ -164,6 +170,7 @@ function buildSessionPolicy(
         agentWorkspaceDir,
       ],
       denyRead: MANDATORY_DENY_READ,
+      denyWrite: [],
     },
   };
 }
