@@ -13,3 +13,9 @@
 [submodule "packages/sandbox"]
 	path = packages/sandbox
 	url = https://github.com/wan0net/yeet-sandbox.git
+[submodule "packages/supervisor"]
+	path = packages/supervisor
+	url = https://github.com/wan0net/yeet-supervisor.git
+[submodule "packages/openclaw-plugin"]
+	path = packages/openclaw-plugin
+	url = https://github.com/wan0net/yeet-openclaw-plugin.git
