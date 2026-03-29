@@ -641,7 +641,22 @@ yeet-skill-godot/                  # Godot game dev via MCP (NOT STARTED)
 Any existing OpenClaw/ClawHub skill also works — AI infers capabilities automatically.
 MCP servers run as sandboxed skills (supervisor spawns them in ASRT, stdio transport).
 
-### 12.4 Dependency Graph
+### 12.4 Runtime
+
+Node.js + TypeScript everywhere. Consistent with OpenClaw.
+
+| Component | Runtime | Why |
+|-----------|---------|-----|
+| OpenClaw | Node.js | It's an OpenClaw ecosystem |
+| Supervisor | Node.js (via tsx) | Same runtime as OpenClaw |
+| CLI | Node.js (via tsx) | Same runtime |
+| Skills | Node.js (via tsx) | Compatible with OpenClaw skills |
+| SDK | Pure TypeScript | Runtime-agnostic (works anywhere) |
+| ASRT (srt) | Go binary | Wraps everything, runtime doesn't matter |
+
+No Deno. One runtime, one ecosystem. User installs Node.js (required for OpenClaw anyway) and that's it.
+
+### 12.5 Dependency Graph
 
 ```
 yeet-sdk                           (zero deps — DONE)
