@@ -57,9 +57,10 @@ fi
 echo "  Installing packages..."
 for pkg in packages/sdk packages/supervisor packages/openclaw-plugin packages/cli; do
   if [ -f "$pkg/package.json" ]; then
-    (cd "$pkg" && npm install --silent 2>/dev/null) || (cd "$pkg" && npm install)
+    (cd "$pkg" && npm install --silent 2>&1) >/dev/null
   fi
 done
+echo "  [ok] Packages installed"
 
 # --- Install srt ---
 if ! command -v srt &>/dev/null; then
