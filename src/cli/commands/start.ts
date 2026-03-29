@@ -262,11 +262,14 @@ function startOpenClaw(sandboxConfigPath: string): ChildProcess {
   const env = { ...process.env, NODE_OPTIONS: nodeOptions } as NodeJS.ProcessEnv;
 
   if (hasSrt) {
-    // TODO: Outer srt sandbox disabled — srt's proxy doesn't handle DNS for
-    // Node's WebSocket client (getaddrinfo bypasses HTTP_PROXY). The per-session
-    // ASRT backend and per-skill supervisor sandboxing still provide enforcement.
-    // Re-enable once srt supports transparent DNS proxying.
-    log("sc", "srt available (per-session + per-skill sandboxing active)");
+    log("sc", "Outer ASRT sandbox enabled");
+    const proc = spawn("srt", ["--settings", sandboxConfigPath, "openclaw", ...args], {
+      stdio: ["pipe", "pipe", "pipe"],
+      env,
+      detached: false,
+    });
+    prefixOutput(proc, "openclaw");
+    return proc;
   }
   const proc = spawn("openclaw", args, {
     stdio: ["pipe", "pipe", "pipe"],
