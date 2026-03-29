@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>yeet - Throw code tasks at cheap hardware and walk away</title>
-<meta name="description" content="Agent-agnostic AI coding orchestrator for physical runner fleets. Nomad-powered. Cheap hardware approved.">
+<title>sharkcage - OpenClaw inside a kernel-level sandbox</title>
+<meta name="description" content="Runs the entire OpenClaw binary inside a kernel-level ASRT sandbox. Per-skill sandboxing, capability model, approve once enforce always.">
 <script>(function(){var t=localStorage.getItem('theme')||'dark';document.documentElement.setAttribute('data-theme',t)})();</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -225,358 +225,167 @@
 <body>
 
 <nav class="nav">
-  <a href="./" class="nav-logo">yeet</a>
+  <a href="./" class="nav-logo">sharkcage</a>
   <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme"></button>
 </nav>
 
 <div class="container">
 
   <header class="hero">
-    <img src="yeet-logo.svg" alt="yeet logo" width="120" height="120" style="margin-bottom: 16px;">
-    <h1>yeet</h1>
-    <p class="tagline">Yeet your code tasks at whatever hardware you have lying around and walk away.</p>
+    <img src="sharkcage-logo.svg" alt="sharkcage logo" width="120" height="120" style="margin-bottom: 16px;">
+    <h1>sharkcage</h1>
+    <p class="tagline">OpenClaw inside a kernel-level sandbox. Per-skill ASRT sandboxing. Approve once, enforce always.</p>
     <div class="hero-links">
-      <a href="https://github.com/wan0net/yeet" class="primary">GitHub</a>
-      <a href="architecture" class="secondary">Documentation</a>
+      <a href="https://github.com/wan0net/sharkcage" class="primary">GitHub</a>
+      <a href="unified-platform" class="secondary">Documentation</a>
     </div>
   </header>
 
   <section class="fade-in">
     <div class="section-title">The pitch</div>
-    <p>You have tasks. You have small computers. You <strong>yeet</strong> the tasks at the computers.</p>
-    <p>The computers run AI coding agents -- Claude Code, OpenCode, Aider -- autonomously.
-       You go get coffee. Or sleep. Or touch grass. Whatever people do when they're not
-       babysitting AI.</p>
-    <p>When you come back, there are <strong>draft PRs</strong> waiting for you. Reviewed, tested, ready to merge.
-       Like a very cheap, very quiet development team that never asks about sprint velocity.</p>
-    <p>If something scary happens -- like the AI wanting to <code>rm -rf /</code> -- yeet
-       <strong>pauses and texts you</strong>. Because even reckless abandonment has limits.</p>
-  </section>
-
-  <section class="fade-in">
-    <div class="section-title">The stack</div>
-    <div class="compare">
-      <div class="compare-col">
-        <h3>What you'd expect</h3>
-        <ul>
-          <li>Kubernetes</li>
-          <li>47 microservices</li>
-          <li>A dedicated DevOps team</li>
-          <li>$2,000/month in cloud bills</li>
-          <li>A Slack channel called #incidents</li>
-        </ul>
-      </div>
-      <div class="compare-col reality">
-        <h3>What yeet uses</h3>
-        <ul>
-          <li>Nomad (single binary, one server)</li>
-          <li>A shell script and a job template</li>
-          <li>Whatever PCs you have lying around</li>
-          <li>~$5/year in electricity per node</li>
-          <li>About 1,800 lines total</li>
-        </ul>
-      </div>
-    </div>
-    <p>Orchestration: <strong>Nomad</strong>. Networking: <strong>Tailscale</strong>.
-       Provisioning: <strong>Ansible</strong>. Device routing: <strong>udev + flock</strong>.
-       Custom infrastructure: <strong>none</strong>.
-       Vibes: <strong>immaculate</strong>.</p>
+    <p>OpenClaw is great. But skills run as untrusted code with no permission model. The sandbox is global. Eventually everyone ends up at <code>--dangerously-skip-permissions</code>.</p>
+    <p>Sharkcage fixes this. The <strong>entire OpenClaw binary</strong> runs inside a kernel-level outer sandbox. Every skill gets its own inner sandbox, scoped to exactly what you approved. No permission prompts at runtime. No prompt fatigue. No skipping.</p>
+    <p>Approve once at install. The kernel enforces it from then on.</p>
   </section>
 
   <section class="fade-in">
     <div class="section-title">How it works</div>
     <div class="flow">
-      <span class="node">You</span>
+      <span class="node">sc start</span>
       <span class="arrow">--></span>
-      <span class="node">yeet run</span>
-      <span style="color:var(--text-dim);font-size:11px;"> or Signal</span>
+      <span class="node">Supervisor</span>
       <span class="arrow">--></span>
-      <span class="node">Nomad</span>
+      <span class="node">Outer ASRT</span>
       <span class="arrow">--></span>
-      <span class="node">Cheap PC</span>
+      <span class="node">OpenClaw</span>
       <span class="arrow">--></span>
-      <span class="node">AI Agent</span>
+      <span class="node">IPC</span>
       <span class="arrow">--></span>
-      <span class="node">Draft PR</span>
+      <span class="node">Inner ASRT</span>
       <span class="arrow">--></span>
-      <span class="node">You</span>
-      <span style="color:var(--text-dim);font-size:11px;"> (hours later, caffeinated)</span>
+      <span class="node">Skill</span>
     </div>
-    <p>That's it. That's the architecture diagram. No, there isn't a second slide.</p>
-    <p>The <code>yeet</code> CLI dispatches a
-       <a href="https://developer.hashicorp.com/nomad/docs/job-specification/parameterized">parameterized Nomad job</a>.
-       Nomad schedules it onto a machine that has the right project cloned
-       and the right USB devices plugged in. A shell script (<code>run-agent.sh</code>) handles
-       git, spawns the AI, commits results, opens a PR, and records cost.
-       Nomad handles health, retries, logs, and fleet management. You handle being elsewhere.</p>
-    <p>The entire implementation is about 1,800 lines across a shell script, a TypeScript CLI, an HCL job template, and Ansible playbooks.</p>
+    <p>The supervisor is the only unsandboxed process (~200 lines). It owns all ASRT sandbox lifecycles. OpenClaw talks to skills via IPC through the supervisor — they never touch each other's network scope or filesystem.</p>
+    <pre><code><span class="comment"># Two layers of kernel enforcement:</span>
+<span class="arg">Outer ASRT → OpenClaw (entire binary, init-locked, signed)</span>
+<span class="arg">  network: [signal-cli, openrouter.ai]</span>
+<span class="arg">  deny: [~/.ssh, ~/.aws, ~/.gnupg]</span>
+
+<span class="arg">Inner ASRT → meals skill (scoped to approved capabilities)</span>
+<span class="arg">  network: [meals-api.wan0.cloud]</span>
+<span class="arg">  filesystem: none</span>
+
+<span class="arg">Inner ASRT → HA skill</span>
+<span class="arg">  network: [homeassistant.local:8123]</span>
+<span class="arg">  filesystem: none</span></code></pre>
   </section>
 
   <section class="fade-in">
     <div class="section-title">Features</div>
     <div class="features">
       <div class="feature">
-        <h3>Agent-agnostic</h3>
-        <p>We don't play favorites. Claude Code, OpenCode, Aider -- whoever gets the job done. Bring your own agent if you want. We're not your mom.</p>
+        <h3>Entire process sandboxed</h3>
+        <p>The outer ASRT contains the whole OpenClaw binary — not just plugins. Even a vulnerability in OpenClaw itself can't escape the outer sandbox constraints.</p>
       </div>
       <div class="feature">
-        <h3>Device-aware routing</h3>
-        <p>Need a YubiKey plugged in? yeet knows which box has one. It's like Uber but for USB devices.</p>
+        <h3>Per-skill isolation</h3>
+        <p>Each skill runs in its own ASRT sandbox. Meals can't reach HA. HA can't reach meals. Installing a new skill never widens the gateway's attack surface.</p>
       </div>
       <div class="feature">
-        <h3>Cost controls</h3>
-        <p>Set a budget so your AI doesn't spend your rent money on API calls. Capitalism requires guardrails.</p>
+        <h3>Approve once, enforce always</h3>
+        <p>Review capabilities at install time. The kernel enforces them from then on. No prompts during use. No fatigue. No skipping.</p>
       </div>
       <div class="feature">
-        <h3>Approval gates</h3>
-        <p>If the AI tries something sketchy, yeet pauses and asks you first. Like a responsible adult.</p>
+        <h3>AI capability inference</h3>
+        <p>Existing ClawHub skills have no manifests. Sharkcage reads the skill code and generates one automatically. User reviews and approves. Skill runs sandboxed.</p>
       </div>
       <div class="feature">
-        <h3>Kernel-level sandboxing</h3>
-        <p>Each task runs inside an <a href="https://github.com/NVIDIA/OpenShell">NVIDIA OpenShell</a> sandbox. Landlock, seccomp, network namespaces. The agent can only touch what the policy says.</p>
+        <h3>Init-locked gateway</h3>
+        <p>The outer sandbox config is generated at setup and signed. Widening it requires deliberate action, re-signing, and restart. Tampering → won't start.</p>
       </div>
       <div class="feature">
-        <h3>Fleet management</h3>
-        <p>Drain a runner, take it offline, bring it back. Like managing a very small, very cheap data center.</p>
-      </div>
-      <div class="feature">
-        <h3>Nomad-powered</h3>
-        <p>We literally just wrapped Nomad's API. Standing on the shoulders of HashiCorp giants. They did the hard part.</p>
+        <h3>Audit trail</h3>
+        <p>Every tool call logged: timestamp, tool, args, result, skill, capability. Blocked calls logged too. Queryable from the CLI or dashboard.</p>
       </div>
     </div>
   </section>
 
   <section class="fade-in">
-    <div class="section-title">Supported runtimes</div>
-    <table class="runtime-table">
-      <thead>
-        <tr>
-          <th>Runtime</th>
-          <th>Headless</th>
-          <th>Resume</th>
-          <th>Providers</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td><strong>OpenCode</strong></td>
-          <td><code>opencode run "..."</code></td>
-          <td><code>--session</code></td>
-          <td>15+ (Anthropic, OpenAI, Google, etc.)</td>
-        </tr>
-        <tr>
-          <td><strong>Claude Code</strong></td>
-          <td><code>claude -p "..."</code></td>
-          <td><code>--resume</code></td>
-          <td>Anthropic</td>
-        </tr>
-        <tr>
-          <td><strong>Aider</strong></td>
-          <td><code>aider --message "..."</code></td>
-          <td>Limited</td>
-          <td>Multi-provider</td>
-        </tr>
-      </tbody>
-    </table>
-    <p>Adding a new runtime means adding a <code>case</code> branch to a shell script. That's the whole plugin system.</p>
+    <div class="section-title">The permission problem</div>
+    <div class="compare">
+      <div class="compare-col">
+        <h3>Before sharkcage</h3>
+        <ul>
+          <li>Skills run as untrusted code</li>
+          <li>Global sandbox or per-action prompts</li>
+          <li>Prompt fatigue → skip permissions</li>
+          <li>No per-skill network scope</li>
+          <li>Malicious skill reaches anything</li>
+        </ul>
+      </div>
+      <div class="compare-col reality">
+        <h3>With sharkcage</h3>
+        <ul>
+          <li>Entire OpenClaw binary in outer ASRT</li>
+          <li>Each skill in its own inner ASRT</li>
+          <li>Approve once at install</li>
+          <li>Kernel-enforced per-skill network scope</li>
+          <li>Violations blocked and logged silently</li>
+        </ul>
+      </div>
+    </div>
   </section>
 
   <section class="fade-in">
     <div class="section-title">CLI</div>
-    <pre><code><span class="comment"># Yeet a task and forget about it</span>
-<span class="cmd">yeet run</span> <span class="arg">peer6 "implement the notification system"</span>
+    <pre><code><span class="comment"># Start everything</span>
+<span class="cmd">sc start</span>
 
-<span class="comment"># Pick your weapon</span>
-<span class="cmd">yeet run</span> <span class="arg">peer6 "refactor auth" --runtime opencode --model anthropic/claude-sonnet-4</span>
-<span class="cmd">yeet run</span> <span class="arg">peer6 "refactor auth" --runtime claude --model opus</span>
+<span class="comment"># Install a skill</span>
+<span class="cmd">sc plugin add</span> <span class="arg">https://github.com/wan0net/sharkcage-skill-meals</span>
 
-<span class="comment"># Needs hardware? yeet routes to the right box.</span>
-<span class="cmd">yeet run</span> <span class="arg">login2 "test FIDO2 flow" --needs yubikey</span>
+<span class="comment"># Review and approve capabilities</span>
+<span class="cmd">sc approve</span> <span class="arg">meals</span>
 
-<span class="comment"># Check on your fleet of discount workstations</span>
-<span class="cmd">yeet runners</span>
+<span class="comment"># Scan a skill for issues</span>
+<span class="cmd">sc verify</span> <span class="arg">./my-skill</span>
 
-<span class="comment"># What's happening right now</span>
-<span class="cmd">yeet status</span>
+<span class="comment"># Check the audit log</span>
+<span class="cmd">sc audit</span> <span class="arg">--skill meals</span>
+<span class="cmd">sc audit</span> <span class="arg">--blocked</span>
 
-<span class="comment"># Oh no, what's it doing</span>
-<span class="cmd">yeet logs</span> <span class="arg">peer6-abc123</span>
+<span class="comment"># Add a host to the outer sandbox</span>
+<span class="cmd">sc config add-service</span> <span class="arg">api.telegram.org</span>
 
-<span class="comment"># It's 90% done, just fix the edge case</span>
-<span class="cmd">yeet continue</span> <span class="arg">peer6-abc123 "also handle the null case in auth"</span>
-
-<span class="comment"># STOP STOP STOP</span>
-<span class="cmd">yeet stop</span> <span class="arg">peer6-abc123</span>
-
-<span class="comment"># How much did that cost me</span>
-<span class="cmd">yeet cost</span> <span class="arg">--period week</span></code></pre>
-    <p>Every command is a thin wrapper around a
-       <a href="https://developer.hashicorp.com/nomad/api-docs">Nomad API call</a>.
-       If <code>yeet</code> doesn't do what you need, <code>nomad</code> CLI does.
-       They're interchangeable.</p>
-  </section>
-
-  <section class="fade-in">
-    <div class="section-title">The hardware</div>
-    <p>You know that old PC in the cupboard? The thin client you decommissioned?
-       The NUC gathering dust? It runs yeet.</p>
-    <div class="hw-grid">
-      <div class="hw-stat">
-        <span class="val">Any</span>
-        <span class="label">x86 Linux box</span>
-      </div>
-      <div class="hw-stat">
-        <span class="val">~15W</span>
-        <span class="label">thin clients sip power</span>
-      </div>
-      <div class="hw-stat">
-        <span class="val">~$5/yr</span>
-        <span class="label">electricity per node</span>
-      </div>
-      <div class="hw-stat">
-        <span class="val">USB</span>
-        <span class="label">plug in your devices</span>
-      </div>
-      <div class="hw-stat">
-        <span class="val">24/7</span>
-        <span class="label">runs forever</span>
-      </div>
-      <div class="hw-stat">
-        <span class="val">Signal</span>
-        <span class="label">text to deploy</span>
-      </div>
-    </div>
-    <p>The AI runs in the cloud. These boxes just manage repos, shuttle files, and look
-       unassuming. A $50 thin client from eBay has more computing power than the job requires.
-       An old laptop works too. Anything that runs Linux and stays on.</p>
+<span class="comment"># Stop everything</span>
+<span class="cmd">sc stop</span></code></pre>
   </section>
 
   <section class="fade-in">
     <div class="section-title">Sandboxing</div>
-    <p>Letting an AI agent loose on a machine with full access is a bad idea. So we don't.</p>
-    <p>Every task runs inside an <a href="https://github.com/NVIDIA/OpenShell">NVIDIA OpenShell</a> sandbox --
-       the new hotness in agent isolation. The standalone <code>openshell-sandbox</code> binary wraps
-       the agent process in kernel-level isolation -- no Kubernetes, no Docker, no overhead. Just Linux
-       security primitives doing what they were designed to do.</p>
+    <p>Sharkcage uses the <a href="https://github.com/anthropic-experimental/sandbox-runtime">Anthropic Sandbox Runtime</a> (ASRT) — OS-level primitives, no containers, no overhead.</p>
     <div class="features" style="grid-template-columns: 1fr 1fr 1fr;">
       <div class="feature">
-        <h3>Landlock LSM</h3>
-        <p>Kernel-enforced filesystem allowlists. The agent can read/write its project workspace and /tmp. Everything else is invisible.</p>
+        <h3>macOS: Seatbelt</h3>
+        <p>sandbox-exec wraps the process. Filesystem and network restrictions enforced by the macOS kernel. No root required.</p>
       </div>
       <div class="feature">
-        <h3>seccomp BPF</h3>
-        <p>Syscall filtering. No privilege escalation, no raw sockets, no kernel module loading. The boring kind of security.</p>
+        <h3>Linux: bubblewrap + seccomp</h3>
+        <p>Bind-mount filesystem namespaces. Network namespace with egress proxy. seccomp BPF syscall filtering.</p>
       </div>
       <div class="feature">
-        <h3>Network namespaces</h3>
-        <p>All traffic forced through an HTTP proxy with per-binary OPA policies. The agent can reach the LLM API and GitHub. Nothing else.</p>
+        <h3>Silent violations</h3>
+        <p>Blocked calls get ECONNREFUSED or EPERM. The skill doesn't know why. The audit log does. No prompts.</p>
       </div>
     </div>
-    <p>Policies are generated per-task from the dispatch metadata. A review task gets a read-only
-       workspace. A task that needs a YubiKey gets <code>/dev/yubikey-1</code> in its allowlist
-       and nothing else in <code>/dev/</code>. A task that doesn't declare a device can't touch one,
-       even on a node that has one plugged in.</p>
-    <pre><code><span class="comment"># What a sandbox policy looks like</span>
-<span class="arg">filesystem:</span>
-<span class="arg">  read_only:  [/usr, /lib, /etc, /opt/yeet/devices/]</span>
-<span class="arg">  read_write: [/opt/yeet/workspaces/peer6/, /tmp]</span>
-<span class="arg">network:</span>
-<span class="arg">  allowed_hosts:</span>
-<span class="arg">    - api.anthropic.com:443</span>
-<span class="arg">    - github.com:443</span>
-<span class="arg">    - registry.npmjs.org:443</span></code></pre>
-    <p>The agent physically cannot read your SSH keys, call your internal APIs,
-       or phone home to anywhere not on the list. Defense in depth without the DevOps tax.</p>
-  </section>
-
-  <section class="fade-in">
-    <div class="section-title">Talk to your fleet</div>
-    <p>Why type CLI commands when you can just <strong>text your fleet from Signal</strong>?</p>
-    <p>The master node runs <a href="https://github.com/NVIDIA/NemoClaw">NemoClaw</a> --
-       NVIDIA's sandboxed OpenClaw runtime. It connects to Signal via
-       <a href="https://github.com/AsamK/signal-cli">signal-cli</a>, understands natural
-       language, and translates your messages into Nomad API calls. Like a very obedient
-       ops intern who never sleeps and doesn't need a desk.</p>
-    <div class="flow">
-      <span class="node">You (Signal)</span>
-      <span class="arrow">--></span>
-      <span class="node">NemoClaw</span>
-      <span class="arrow">--></span>
-      <span class="node">Nomad API</span>
-      <span class="arrow">--></span>
-      <span class="node">Workers</span>
-      <span class="arrow">--></span>
-      <span class="node">Draft PR</span>
-      <span class="arrow">--></span>
-      <span class="node">You (Signal)</span>
-      <span style="color:var(--text-dim);font-size:11px;"> (notified on your phone)</span>
-    </div>
-    <div class="features">
-      <div class="feature">
-        <h3>Signal-native</h3>
-        <p>Message from your phone. "run peer6 implement pagination" just works. No app to install. No dashboard to bookmark.</p>
-      </div>
-      <div class="feature">
-        <h3>7 fleet skills</h3>
-        <p>Dispatch, status, logs, stop, continue, drain, cost. Custom SKILL.md files teach the agent how to manage Nomad.</p>
-      </div>
-      <div class="feature">
-        <h3>Sandboxed brain</h3>
-        <p>The gateway runs inside OpenShell. It can reach Signal, Nomad, and OpenRouter. Nothing else. Default-deny networking.</p>
-      </div>
-      <div class="feature">
-        <h3>Proactive notifications</h3>
-        <p>Job done? You get a text. Job failed? You get a text. Node down? Text. Like pagerduty but free and less annoying.</p>
-      </div>
-    </div>
-    <pre><code><span class="comment"># From your phone, via Signal:</span>
-<span class="arg">"what's running?"</span>
-<span class="comment"># → 2 jobs active: peer6 (implement), login2 (review)</span>
-<span class="comment">#   3 nodes: yeet-01 ready, yeet-02 busy, yeet-03 ready</span>
-
-<span class="arg">"run peer6 add rate limiting to the API"</span>
-<span class="comment"># → Dispatched: run-coding-agent/dispatch-abc123</span>
-<span class="comment">#   I'll notify you when it's done.</span>
-
-<span class="comment"># ... 20 minutes later ...</span>
-<span class="comment"># → ✓ Job completed: peer6 (opencode)</span>
-<span class="comment">#   Draft PR opened. 4 files changed.</span></code></pre>
-    <p>The gateway runs as a <strong>Nomad service job</strong> -- always on, auto-restarts,
-       health-checked, visible in <code>yeet status</code>. Managed by the same infrastructure
-       it manages. It's turtles all the way down.</p>
   </section>
 
   <section class="fade-in">
     <div class="section-title">Documentation</div>
-    <p>Overengineered the docs, then wrote ~1,800 lines of code. The docs are still longer.</p>
     <div class="docs-grid">
-      <a class="doc-link" href="architecture">
-        <span class="doc-title">Architecture</span>
-        <span class="doc-desc">Components, Nomad config, job templates, CLI-to-API mapping, security model, OpenShell sandboxing.</span>
-      </a>
-      <a class="doc-link" href="data-flows">
-        <span class="doc-title">Data Flows</span>
-        <span class="doc-desc">ASCII sequence diagrams for every operation. Task submission, device routing, log streaming, retries, the lot.</span>
-      </a>
-      <a class="doc-link" href="use-cases">
-        <span class="doc-title">Use Cases</span>
-        <span class="doc-desc">17 concrete scenarios with exact CLI commands, Nomad API calls, and expected outcomes.</span>
-      </a>
-      <a class="doc-link" href="runtime-adapters">
-        <span class="doc-title">Runtime Adapters</span>
-        <span class="doc-desc">How OpenCode, Claude Code, and Aider are integrated. The shell script. The env vars. Adding your own.</span>
-      </a>
-      <a class="doc-link" href="device-management">
-        <span class="doc-title">Device Management</span>
-        <span class="doc-desc">USB security keys, HSMs, dev boards. udev rules, flock locking, wrapper scripts, health monitoring.</span>
-      </a>
-      <a class="doc-link" href="deployment">
-        <span class="doc-title">Deployment</span>
-        <span class="doc-desc">Setup guide, Ansible playbooks, Nomad config, Tailscale mesh, systemd services. Bare metal to running fleet.</span>
-      </a>
-      <a class="doc-link" href="gateway">
-        <span class="doc-title">Gateway</span>
-        <span class="doc-desc">NemoClaw + Signal. Talk to your fleet from your phone. Skills, sandbox policy, master/worker Ansible.</span>
+      <a class="doc-link" href="unified-platform">
+        <span class="doc-title">Design Doc</span>
+        <span class="doc-desc">Full architecture, capability model, sandbox enforcement, AI inference, security model, implementation plan.</span>
       </a>
     </div>
   </section>
@@ -585,8 +394,8 @@
 
 <footer>
   <div class="container">
-    <p><a href="https://github.com/wan0net/yeet">wan0net/yeet</a></p>
-    <p>Built by someone who got tired of babysitting AI coding sessions.<br>Now you can babysit from Signal instead.</p>
+    <p><a href="https://github.com/wan0net/sharkcage">wan0net/sharkcage</a></p>
+    <p>OpenClaw, but the entire binary is in a cage.</p>
   </div>
 </footer>
 

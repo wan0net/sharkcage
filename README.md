@@ -1,146 +1,103 @@
-# yeet
+# sharkcage
 
-Yeet your code tasks at whatever hardware you have lying around and walk away.
+OpenClaw, but you trust it.
 
-## What This Is
+Sharkcage runs the **entire OpenClaw binary inside a kernel-level sandbox** (outer ASRT). On top of that, every skill gets its own sandboxed process (inner ASRT). Capabilities approved once at install, enforced always at the kernel level. No permission prompts at runtime.
 
-An agent-agnostic autonomous coding orchestrator built on HashiCorp Nomad. Point it at a fleet of machines -- old laptops, thin clients, rack servers, whatever -- and dispatch AI coding tasks to them from the comfort of your actual workstation.
-
-Two custom components, everything else off-the-shelf:
-
-- **`yeet` CLI** -- TypeScript, ~220 lines. Thin wrapper around the Nomad HTTP API with opinionated defaults.
-- **`run-agent.sh`** -- Bash, 538 lines. Runtime adapter that normalizes the interface across coding agents (OpenCode, Claude Code, Aider).
-
-No custom servers, databases, or message queues.
-
-## Architecture
+## Security Model
 
 ```
-┌──────────┐                ┌──────────────────────────────────┐
-│ yeet CLI │─── Nomad API ──▶  Nomad Server  (yeet-01)         │
-│  (laptop)│    :4646/v1    │                                  │
-│          │◀── HTTP ───────│  Schedules onto:                 │
-└──────────┘                │  ┌─────────┬─────────┬─────────┐ │
-     │                      │  │yeet-01  │yeet-02  │yeet-03  │ │
-     │ Tailscale mesh       │  │client   │client   │client   │ │
-     │                      │  │projectA │projectB │projectC │ │
-     │                      │  │         │USB: YK  │USB: HSM │ │
-     │                      │  └─────────┴─────────┴─────────┘ │
-     │                      │                                  │
-     │                      │  Built-in: scheduling, logs,     │
-     │                      │  health, drain, retry, UI, ACLs  │
-     └──────────────────────┴──────────────────────────────────┘
+sc start (supervisor — the only unsandboxed process, ~200 lines)
+  │
+  ├── OUTER ASRT SANDBOX → OpenClaw (the entire binary)
+  │   network: [signal-cli, openrouter.ai]  (init-locked, signed)
+  │   filesystem: [~/.openclaw/data]
+  │   deny: [~/.ssh, ~/.aws, ~/.gnupg]
+  │
+  │   On tool call → IPC to supervisor via unix socket
+  │
+  ├── INNER ASRT SANDBOX → meals skill
+  │   network: [meals-api.example.com]
+  │
+  ├── INNER ASRT SANDBOX → home-assistant skill
+  │   network: [homeassistant.local:8123]
+  │
+  └── INNER ASRT SANDBOX → any other skill
+      scoped to its approved capabilities only
 ```
 
-The CLI runs on your laptop and talks to Nomad over Tailscale. One node runs the Nomad server; all nodes (including the server) run Nomad clients. Each node has projects cloned locally and optionally has USB devices attached.
+Two layers of kernel enforcement:
 
-## How It Works
+1. **Outer sandbox** — the entire OpenClaw process is contained. Init-locked and signed at setup. Cannot be widened without deliberate user action.
+2. **Inner sandboxes** — each skill runs in a separate process with its own ASRT config derived from approved capabilities. Skills cannot reach each other's hosts or the gateway's hosts.
 
-1. You run `yeet run myproject "implement feature X"` from your laptop.
-2. The CLI templates a Nomad parameterized job dispatch with your parameters.
-3. Nomad schedules it onto an available node that has `myproject` cloned (via node metadata constraints).
-4. Nomad's `raw_exec` driver runs `run-agent.sh`, which invokes the chosen coding agent directly on the host.
-5. You stream logs with `yeet logs <job-id>` or check progress in the Nomad UI.
-6. On completion, results are committed to a branch and optionally a draft PR is created.
-
-## CLI Commands
-
-```
-yeet run <project> "<prompt>"       Submit a task
-  --runtime opencode|claude|aider   Runtime (default: opencode)
-  --model <provider/model>          Model override
-  --mode implement|test|review      Task mode
-  --needs <device-type>             Require a USB device
-  --budget <usd>                    Cost cap
-  --priority low|normal|high        Priority
-
-yeet status                         List all active tasks
-yeet logs <job-id>                  Stream task output
-yeet stop <job-id>                  Cancel a running task
-yeet continue <job-id> "<prompt>"   Resume with new instructions
-yeet runners                        Fleet overview
-yeet drain <node>                   Drain a node
-yeet activate <node>                Reactivate a node
-yeet devices                        Device inventory
-yeet cost [--period day|week|month] Cost report
-yeet policy <name>                  Apply a sandbox policy
-```
-
-## Supported Runtimes
-
-| Runtime | CLI invocation | Structured Output | Session Resume | Multi-provider |
-|---|---|---|---|---|
-| OpenCode | `opencode run "..."` | JSON | `--session {id}` | 15+ providers |
-| Claude Code | `claude -p "..."` | `--output-format stream-json` | `--resume {id}` | Anthropic only |
-| Aider | `aider --message "..."` | Limited | Limited | Multi-provider |
-
-## Sandboxing
-
-Integration with NVIDIA's OpenShell for per-task sandboxing (v2 feature). Each agent runs inside a restricted environment using Landlock (filesystem), seccomp (syscalls), and network namespaces. USB device access controlled via allowlists in sandbox policies.
-
-Policies are defined in `policies/` as YAML. See the [architecture docs, section 9](https://wan0.net/yeet/architecture#9-sandboxing) for the full design.
-
-## What Nomad Gives Us
-
-| Need | Without Nomad | With Nomad |
-|------|---------------|------------|
-| Task queue | BullMQ + Redis | Nomad job dispatch |
-| Worker daemon | Custom daemon | Nomad client (raw_exec) |
-| Fleet health | Custom heartbeat | Nomad node health |
-| Log streaming | Custom pub/sub | `GET /v1/client/fs/logs?follow=true` |
-| Job cancellation | Custom signal handling | `DELETE /v1/job/:id` |
-| Retry/restart | Custom logic | Nomad restart policies |
-| Fleet drain | Custom drain logic | `POST /v1/node/:id/drain` |
-| Metadata storage | SQLite/D1 | Nomad Variables (encrypted) |
-| Monitoring UI | Custom dashboard | Nomad UI (:4646/ui) |
-| Auth | API keys | Nomad ACL tokens |
-| Device routing | Custom queue-per-device | Node metadata + constraints |
-
-## Project Structure
-
-```
-yeet/
-  cli/                              # yeet CLI (TypeScript)
-    src/
-      index.ts                      # CLI entry point -- 11 commands
-      config.ts                     # Config loader
-      nomad.ts                      # Nomad API client
-  jobs/
-    run-coding-agent.nomad.hcl      # Parameterized job template
-    scripts/
-      run-agent.sh                  # Runtime adapter (538 lines)
-  ansible/                          # Fleet provisioning (9 roles)
-  policies/                         # OpenShell sandbox policies
-  docs/                             # Design documentation + site
-```
+The supervisor mediates all communication via IPC. It is ~200 lines and auditable in 15 minutes.
 
 ## Quick Start
 
 ```bash
-# 1. Install Nomad on a machine
-# 2. Run in dev mode for local testing
-nomad agent -dev
+# 1. Clone
+git clone --recursive https://github.com/wan0net/sharkcage.git
+cd sharkcage
 
-# 3. Register the job template
-nomad job run jobs/run-coding-agent.nomad.hcl
+# 2. Bootstrap (installs packages, optionally installs OpenClaw + srt)
+./bootstrap.sh
 
-# 4. Build the CLI
-cd cli && npm install && npm run build
+# 3. Add sc to PATH
+export PATH="$PWD/bin:$PATH"
 
-# 5. Dispatch a task
-yeet run myproject "hello world"
+# 4. Set your API key
+export OPENROUTER_API_KEY=your-key-here
+
+# 5. Run the setup wizard
+sc init
+
+# 6. Start
+sc start
 ```
 
-## Design Principles
+See [INSTALL.md](INSTALL.md) for full installation instructions.
 
-- **Agent-agnostic.** Runtime adapters normalize the interface across coding agents. Adding a new agent means writing one adapter function in `run-agent.sh`.
-- **Device-aware.** Tasks can declare required USB devices (YubiKeys, HSMs, dev boards). Nomad routes tasks to nodes with matching metadata.
-- **Off-the-shelf where possible.** Nomad for orchestration, Tailscale for networking, Ansible for provisioning, udev for device detection. Custom code is minimal.
-- **Fail-closed.** Nodes stop accepting work if Nomad marks them unhealthy. No autonomous work without a functioning control plane.
-- **Audit everything.** Every tool call, file write, and shell command executed by an agent is logged and attributable to a task via Nomad's allocation logs.
+## CLI
 
-## Status
+```
+sc start                            Start supervisor + sandboxed OpenClaw
+sc stop                             Stop everything
+sc init                             First-time setup wizard
+sc status                           Show sandbox state, uptime, skill stats
 
-Implementation complete. All core components built. Not yet deployed to physical hardware. See `docs/` for the full design, or [wan0.net/yeet](https://wan0.net/yeet) for the project page.
+sc plugin add <url|path>            Install a skill
+sc plugin list                      List installed skills
+sc plugin remove <name>             Remove a skill
+sc approve <name>                   Review and approve skill capabilities
 
-**Links:** [wan0.net/yeet](https://wan0.net/yeet) | [architecture](https://wan0.net/yeet/architecture) | [data flows](https://wan0.net/yeet/data-flows) | [deployment](https://wan0.net/yeet/deployment)
+sc verify <path>                    Scan a skill for issues
+sc sign <path>                      Sign a skill with your key
+
+sc config show                      Show gateway sandbox config
+sc config add-service <host>        Add a host to the outer sandbox
+sc config remove-service <host>     Remove a host from the outer sandbox
+
+sc audit                            Show recent audit log entries
+sc audit --skill <name>             Filter by skill
+sc audit --blocked                  Show only blocked calls
+```
+
+## Capability Model
+
+Capabilities are approved once at install and enforced at the kernel level from then on. No runtime prompts. No fatigue. No `--dangerously-skip-permissions`.
+
+When you install a skill, sharkcage:
+
+1. Downloads it
+2. Scans for dangerous patterns and missing fields
+3. Generates a capability manifest (via AI inference if the skill has none)
+4. Shows requested capabilities with risk levels
+5. Asks you to approve
+
+After approval, the skill runs in its own ASRT sandbox scoped to exactly what was approved. If it tries to reach a host outside its scope, the kernel blocks it silently and logs the attempt.
+
+## Documentation
+
+- [INSTALL.md](INSTALL.md) — Installation and setup
+- [docs/unified-platform.md](docs/unified-platform.md) — Full design doc: architecture, capability model, sandbox enforcement, security model

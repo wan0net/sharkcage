@@ -1,7 +1,7 @@
-title: yeet
-description: Yeet your code tasks at whatever hardware you have lying around and walk away.
+title: sharkcage
+description: OpenClaw inside a kernel-level sandbox. Per-skill ASRT sandboxing, capability model, approve once enforce always.
 url: https://wan0.net
-baseurl: /yeet
+baseurl: /sharkcage
 markdown: kramdown
 kramdown:
   input: GFM

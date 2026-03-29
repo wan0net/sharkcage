@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# curl -fsSL https://raw.githubusercontent.com/wan0net/yeet/main/install.sh | bash
+# curl -fsSL https://raw.githubusercontent.com/wan0net/sharkcage/main/install.sh | bash
 #
 # Or if you prefer wget:
-# wget -qO- https://raw.githubusercontent.com/wan0net/yeet/main/install.sh | bash
+# wget -qO- https://raw.githubusercontent.com/wan0net/sharkcage/main/install.sh | bash
 
-REPO="https://github.com/wan0net/yeet.git"
-INSTALL_DIR="${YEET_DIR:-$HOME/.yeet}"
+REPO="https://github.com/wan0net/sharkcage.git"
+INSTALL_DIR="${SHARKCAGE_DIR:-$HOME/.sharkcage}"
 
 echo ""
 echo "  ╭─────────────────────────────────────╮"
-echo "  │     sandcastle installer             │"
+echo "  │     sharkcage installer              │"
 echo "  │                                      │"
-echo "  │     OpenClaw, but you trust it.      │"
+echo "  │     Attack surface in your pocket.   │"
 echo "  ╰─────────────────────────────────────╯"
 echo ""
 
@@ -46,49 +46,25 @@ if [ -d "$INSTALL_DIR" ]; then
   echo "  Updating $INSTALL_DIR..."
   cd "$INSTALL_DIR"
   git pull --quiet
-  git submodule update --init --recursive --quiet
 else
   echo "  Cloning to $INSTALL_DIR..."
-  git clone --recursive --quiet "$REPO" "$INSTALL_DIR"
+  git clone --quiet "$REPO" "$INSTALL_DIR"
   cd "$INSTALL_DIR"
 fi
 
-# --- Install packages ---
-echo "  Installing packages..."
-for pkg in packages/sdk packages/supervisor packages/openclaw-plugin packages/cli; do
-  if [ -f "$pkg/package.json" ]; then
-    (cd "$pkg" && npm install --silent 2>&1) >/dev/null
-  fi
-done
-echo "  [ok] Packages installed"
-
-# --- Install srt ---
-if ! command -v srt &>/dev/null; then
-  echo ""
-  echo "  Installing srt (Anthropic Sandbox Runtime)..."
-  npm install -g @anthropic-ai/sandbox-runtime 2>/dev/null || {
-    echo "  WARNING: srt install failed. You can install it later:"
-    echo "    npm install -g @anthropic-ai/sandbox-runtime"
-  }
+# --- Run bootstrap ---
+echo "  Running bootstrap..."
+if [ -f "$INSTALL_DIR/bootstrap.sh" ]; then
+  bash "$INSTALL_DIR/bootstrap.sh"
 fi
 
-# --- Install OpenClaw ---
-if ! command -v openclaw &>/dev/null; then
-  echo ""
-  echo "  Installing OpenClaw..."
-  npm install -g openclaw 2>/dev/null || {
-    echo "  WARNING: OpenClaw install failed. You can install it later:"
-    echo "    npm install -g openclaw"
-  }
-fi
-
-# --- Create yeet wrapper ---
+# --- Create sc wrapper ---
 mkdir -p "$INSTALL_DIR/bin"
-cat > "$INSTALL_DIR/bin/yeet" << WRAPPER
+cat > "$INSTALL_DIR/bin/sc" << WRAPPER
 #!/usr/bin/env bash
 exec npx tsx "$INSTALL_DIR/packages/cli/src/main.ts" "\$@"
 WRAPPER
-chmod +x "$INSTALL_DIR/bin/yeet"
+chmod +x "$INSTALL_DIR/bin/sc"
 
 # --- Shell config ---
 SHELL_RC=""
@@ -103,7 +79,7 @@ PATH_LINE="export PATH=\"$INSTALL_DIR/bin:\$PATH\""
 if [ -n "$SHELL_RC" ]; then
   if ! grep -q "$INSTALL_DIR/bin" "$SHELL_RC" 2>/dev/null; then
     echo "" >> "$SHELL_RC"
-    echo "# yeet" >> "$SHELL_RC"
+    echo "# sharkcage" >> "$SHELL_RC"
     echo "$PATH_LINE" >> "$SHELL_RC"
     echo ""
     echo "  Added to $SHELL_RC:"
@@ -126,8 +102,8 @@ echo "    2. Set your API key:"
 echo "       export OPENROUTER_API_KEY=your-key"
 echo ""
 echo "    3. Run the setup wizard:"
-echo "       yeet init"
+echo "       sc init"
 echo ""
 echo "    4. Start:"
-echo "       yeet start"
+echo "       sc start"
 echo ""

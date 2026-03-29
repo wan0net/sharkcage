@@ -1,10 +1,11 @@
-# Installing yeet
+# Installing sharkcage
 
 > OpenClaw, but you trust it.
 
-yeet adds per-skill kernel sandboxing to OpenClaw. Every skill runs in its own
+Sharkcage runs the **entire OpenClaw binary inside a kernel-level sandbox** (outer ASRT) and
+adds per-skill sandboxing for plugins (inner ASRT). Every skill runs in its own
 [Anthropic Sandbox Runtime](https://github.com/anthropic-experimental/sandbox-runtime)
-(ASRT) with only the capabilities the user approved. No permission prompts at runtime.
+with only the capabilities the user approved. No permission prompts at runtime.
 
 ## Prerequisites
 
@@ -16,52 +17,52 @@ yeet adds per-skill kernel sandboxing to OpenClaw. Every skill runs in its own
 
 ```bash
 # 1. Clone
-git clone --recursive https://github.com/wan0net/yeet.git
-cd yeet
+git clone --recursive https://github.com/wan0net/sharkcage.git
+cd sharkcage
 
 # 2. Bootstrap (installs packages, optionally installs OpenClaw + srt)
 ./bootstrap.sh
 
-# 3. Add yeet to PATH
+# 3. Add sc to PATH
 export PATH="$PWD/bin:$PATH"
 
 # 4. Set your API key
 export OPENROUTER_API_KEY=your-key-here
 
 # 5. Run the setup wizard
-yeet init
+sc init
 
 # 6. Start
-yeet start
+sc start
 ```
 
-## What `yeet start` does
+## What `sc start` does
 
 1. Checks dependencies — installs OpenClaw and srt if missing
 2. Runs the setup wizard if no config exists
 3. Generates a signed gateway sandbox config (outer ASRT)
-4. Registers the yeet plugin with OpenClaw
+4. Registers the sharkcage plugin with OpenClaw
 5. Starts the supervisor (IPC, audit log, skill sandbox spawning)
-6. Starts OpenClaw inside the outer ASRT sandbox
+6. Starts the **entire OpenClaw binary** inside the outer ASRT sandbox
 7. Monitors both processes
 
 ## Installing skills
 
 ```bash
 # From a git URL
-yeet plugin add https://github.com/wan0net/yeet-plugin-meals
+sc plugin add https://github.com/wan0net/sharkcage-plugin-meals
 
 # From a local path (creates a symlink)
-yeet plugin add ./my-skill
+sc plugin add ./my-skill
 
 # List installed skills
-yeet plugin list
+sc plugin list
 
 # Remove
-yeet plugin remove meals
+sc plugin remove meals
 ```
 
-When you install a skill, yeet:
+When you install a skill, sharkcage:
 1. Downloads it
 2. Scans for issues (dangerous patterns, missing fields)
 3. Shows the requested capabilities with risk levels
@@ -70,7 +71,7 @@ When you install a skill, yeet:
 ## Approving capabilities
 
 ```bash
-yeet approve meals
+sc approve meals
 ```
 
 Shows each capability the skill requests:
@@ -100,7 +101,7 @@ the kernel blocks it silently and the attempt is logged to the audit trail.
 
 ## Dashboard
 
-Open `http://127.0.0.1:18789/yeet/` in your browser. Shows:
+Open `http://127.0.0.1:18789/sharkcage/` in your browser. Shows:
 
 - **Status** — ASRT state, uptime, skill counts, tool call stats
 - **Skills** — installed skills with approval status
@@ -111,29 +112,29 @@ Open `http://127.0.0.1:18789/yeet/` in your browser. Shows:
 
 ```bash
 # Show recent entries
-yeet audit
+sc audit
 
 # Filter by skill
-yeet audit --skill meals
+sc audit --skill meals
 
 # Show only blocked calls
-yeet audit --blocked
+sc audit --blocked
 
 # Show all
-yeet audit --all
+sc audit --all
 ```
 
 ## Managing the gateway sandbox
 
 ```bash
 # Show current config
-yeet config show
+sc config show
 
 # Add a service host to the outer sandbox allowlist
-yeet config add-service api.telegram.org
+sc config add-service api.telegram.org
 
 # Remove a service
-yeet config remove-service api.telegram.org
+sc config remove-service api.telegram.org
 ```
 
 Changes require confirmation and restart.
@@ -141,7 +142,7 @@ Changes require confirmation and restart.
 ## Stopping
 
 ```bash
-yeet stop
+sc stop
 ```
 
 ## Architecture
@@ -149,12 +150,13 @@ yeet stop
 See [docs/unified-platform.md](docs/unified-platform.md) for the full design doc,
 or [docs/architecture.svg](docs/architecture.svg) for the diagram.
 
-**TL;DR:** yeet is a supervisor process that owns all ASRT sandboxes. OpenClaw runs
-inside one sandbox. Each skill runs inside its own. The supervisor is the only
-unsandboxed process (~200 lines, auditable in 15 minutes).
+**TL;DR:** sharkcage is a supervisor process that owns all ASRT sandboxes. The entire
+OpenClaw binary runs inside the outer sandbox. Each skill runs inside its own inner sandbox.
+The supervisor is the only unsandboxed process (~200 lines, auditable in 15 minutes).
 
 ## Security Model
 
+- **Entire OpenClaw process sandboxed** — the outer ASRT contains the whole gateway binary, not just plugins
 - **Fail closed** — if the supervisor is unreachable, all tool calls are blocked
 - **Per-skill sandboxing** — each skill gets its own ASRT config (kernel-enforced)
 - **Init-locked gateway** — outer sandbox only allows init-configured services

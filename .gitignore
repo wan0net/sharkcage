@@ -3,6 +3,5 @@ dist/
 *.js
 *.js.map
 *.d.ts
-!jobs/scripts/*.sh
 .env
 .playwright-mcp/

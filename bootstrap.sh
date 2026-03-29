@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Yeet bootstrap — sets up all packages from a fresh clone
+# Sharkcage bootstrap — sets up the monorepo from a fresh clone
 #
 # Usage:
-#   git clone --recursive https://github.com/wan0net/yeet.git
-#   cd yeet
+#   git clone https://github.com/wan0net/sharkcage.git
+#   cd sharkcage
 #   ./bootstrap.sh
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
 echo "╭─────────────────────────────────────╮"
-echo "│         yeet bootstrap              │"
+echo "│      sharkcage bootstrap            │"
 echo "╰─────────────────────────────────────╯"
 echo ""
 
@@ -42,31 +42,10 @@ fi
 
 echo ""
 
-# --- Init submodules ---
-echo "Initialising submodules..."
-git submodule update --init --recursive
-echo "  [ok] Submodules ready"
-echo ""
-
-# --- Install each package ---
-PACKAGES=(
-  "packages/sdk"
-  "packages/supervisor"
-  "packages/openclaw-plugin"
-  "packages/cli"
-)
-
-for pkg in "${PACKAGES[@]}"; do
-  if [ -f "$SCRIPT_DIR/$pkg/package.json" ]; then
-    echo "Installing $pkg..."
-    cd "$SCRIPT_DIR/$pkg"
-    npm install --silent 2>/dev/null || npm install
-    echo "  [ok] $pkg"
-  else
-    echo "  [skip] $pkg — no package.json"
-  fi
-done
-
+# --- Install root dependencies ---
+echo "Installing root dependencies..."
+npm install --silent 2>/dev/null || npm install
+echo "  [ok] Dependencies installed"
 echo ""
 
 # --- Optional: install srt (ASRT) ---
@@ -107,21 +86,20 @@ echo ""
 
 # --- Create config directories ---
 echo "Creating config directories..."
-YEET_DIR="${HOME}/.config/yeet"
-mkdir -p "$YEET_DIR"/{data,plugins,approvals}
-echo "  [ok] $YEET_DIR"
+SHARKCAGE_DIR="${HOME}/.config/sharkcage"
+mkdir -p "$SHARKCAGE_DIR"/{data,plugins,approvals}
+echo "  [ok] $SHARKCAGE_DIR"
 echo ""
 
 # --- Link CLI for development ---
-echo "Linking yeet CLI..."
-cd "$SCRIPT_DIR/packages/cli"
+echo "Linking sharkcage CLI..."
 if command -v npx &>/dev/null; then
   # Create a wrapper script
-  WRAPPER="$SCRIPT_DIR/bin/yeet"
+  WRAPPER="$SCRIPT_DIR/bin/sc"
   mkdir -p "$SCRIPT_DIR/bin"
   cat > "$WRAPPER" << WRAPPER_EOF
 #!/usr/bin/env bash
-exec npx tsx "$SCRIPT_DIR/packages/cli/src/main.ts" "\$@"
+exec npx tsx "$SCRIPT_DIR/src/cli/main.ts" "\$@"
 WRAPPER_EOF
   chmod +x "$WRAPPER"
   echo "  [ok] $WRAPPER"
@@ -130,17 +108,17 @@ fi
 
 echo ""
 echo "╭─────────────────────────────────────╮"
-echo "│         bootstrap complete          │"
+echo "│      bootstrap complete             │"
 echo "╰─────────────────────────────────────╯"
 echo ""
 echo "Next steps:"
 echo ""
-echo "  1. Add yeet to your PATH:"
+echo "  1. Add sharkcage to your PATH:"
 echo "     export PATH=\"$SCRIPT_DIR/bin:\$PATH\""
 echo ""
 echo "  2. Run the setup wizard:"
-echo "     yeet init"
+echo "     sc init"
 echo ""
-echo "  3. Start yeet:"
-echo "     yeet start"
+echo "  3. Start sharkcage:"
+echo "     sc start"
 echo ""

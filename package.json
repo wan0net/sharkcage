@@ -1,0 +1,23 @@
+{
+  "name": "sharkcage",
+  "version": "0.1.0",
+  "description": "Trust layer for OpenClaw — runs the entire binary in a kernel-level sandbox with per-skill capability enforcement",
+  "type": "module",
+  "bin": {
+    "sc": "dist/cli/main.js"
+  },
+  "scripts": {
+    "dev": "npx tsx src/cli/main.ts",
+    "build": "npx tsc",
+    "check": "npx tsc --noEmit",
+    "supervisor": "npx tsx src/supervisor/main.ts"
+  },
+  "dependencies": {
+    "@clack/prompts": "^1.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.7.0"
+  }
+}
