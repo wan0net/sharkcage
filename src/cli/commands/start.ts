@@ -76,9 +76,10 @@ export default async function start() {
     try { unlinkSync(pidFile); } catch { /* gone */ }
   }
 
-  // --- 6b. Pre-export Claude CLI credentials for sandbox ---
-  // The sandbox blocks keychain access, so read the credential now (unsandboxed)
-  // and write to ~/.claude/.credentials.json which OpenClaw uses as fallback.
+  // --- 6b. Pre-sync CLI auth credentials before sandboxing ---
+  // CLI-based auth (Claude CLI, Codex CLI, etc.) stores credentials in the
+  // keychain. The sandbox blocks keychain access, but the file-based fallback
+  // works. Ensure the file fallback exists by reading keychain BEFORE sandbox.
   const credFile = `${home}/.claude/.credentials.json`;
   if (!existsSync(credFile)) {
     try {
@@ -87,10 +88,10 @@ export default async function start() {
       ], { encoding: "utf-8", timeout: 10_000 }).trim();
       if (raw) {
         writeFileSync(credFile, raw);
-        log("sc", "Claude CLI credentials exported for sandbox");
+        log("sc", "CLI credentials exported for sandbox");
       }
     } catch {
-      // No Claude CLI credentials or user cancelled — that's fine
+      // No keychain entry or user declined — not all providers use keychain
     }
   }
 
@@ -250,11 +251,14 @@ function startOpenClaw(sandboxConfigPath: string): ChildProcess {
   }
   const args = ["gateway", "run", "--port", "18789", "--auth", "token", "--token", gatewayToken];
 
-  // Force IPv4 for localhost resolution (Node defaults to IPv6 ::1 which
-  // OpenClaw's loopback bind check rejects as non-loopback)
-  const existing = process.env.NODE_OPTIONS ?? "";
-  const ipv4Flag = "--dns-result-order=ipv4first";
-  const nodeOptions = existing.includes(ipv4Flag) ? existing : `${existing} ${ipv4Flag}`.trim();
+  // Node options for sandboxed OpenClaw:
+  // --dns-result-order=ipv4first: prevent IPv6 ::1 for localhost (breaks bind check)
+  // --use-env-proxy: route fetch() through srt's HTTP/SOCKS proxy (required for DNS)
+  const flags = ["--dns-result-order=ipv4first", "--use-env-proxy"];
+  let nodeOptions = process.env.NODE_OPTIONS ?? "";
+  for (const flag of flags) {
+    if (!nodeOptions.includes(flag)) nodeOptions = `${nodeOptions} ${flag}`.trim();
+  }
   const env = { ...process.env, NODE_OPTIONS: nodeOptions } as NodeJS.ProcessEnv;
 
   if (hasSrt) {
@@ -393,6 +397,7 @@ function generateGatewaySandboxConfig(outPath: string): void {
   const providerDomains: Record<string, string[]> = {
     anthropic: ["api.anthropic.com"],
     openai: ["api.openai.com"],
+    "openai-codex": ["api.openai.com", "auth.openai.com"],
     openrouter: ["openrouter.ai"],
     google: ["generativelanguage.googleapis.com"],
     xai: ["api.x.ai"],
