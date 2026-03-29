@@ -117,42 +117,126 @@ Multi-project, multi-model, multi-agent. Full fleet.
 
 ## 3. Architecture
 
+### 3.1 Dual ASRT Sandbox
+
+The entire OpenClaw process runs inside an outer ASRT sandbox. Individual skill tool calls run inside inner per-skill ASRT sandboxes. Two kernel-enforced boundaries, nested.
+
 ```
-Chat Apps                       Fleet
-(Signal, Telegram,              (Nomad + your machines)
- WhatsApp, Discord,
- iMessage, Slack...)                 ┌──────────────┐
-       │                             │ Fleet Node   │
-       ▼                             │ OpenClaw     │
-┌──────────────────┐    dispatch     │ + yeet       │
-│ OpenClaw Gateway │ ──────────────▶ │ + ASRT       │
-│ + Pi Agent       │    (Nomad)      │              │
-│ + yeet plugin    │ ◀──────────────│ Results/PRs  │
-│ + ASRT sandbox   │    webhook      └──────────────┘
-│                  │
-│ Web UI / Mobile  │
-└──────────────────┘
-
-yeet hooks into OpenClaw at these points:
-
-Pi Agent ──▶ tool call ──▶ Interceptor (tool.before)
-                               │
-                          yeet: check capability approval
-                          ✓ approved → generate ASRT config
-                          ✗ denied → block, return error
-                               │
-                          ASRT: wrap command with sandbox
-                          kernel-enforced filesystem + network
-                               │
-                          tool executes (sandboxed)
-                               │
-                          Interceptor (tool.after)
-                          yeet: audit log
+┌─────────────────────────────────────────────────────────┐
+│ OUTER ASRT SANDBOX (wraps entire OpenClaw process)       │
+│                                                          │
+│  Locked to services configured at init time:             │
+│  network: [signal-cli, openrouter.ai, meals-api, HA]    │
+│  filesystem: write only ~/.openclaw/data, ~/.config/yeet │
+│  deny: ~/.ssh, ~/.aws, ~/.gnupg (always)                 │
+│                                                          │
+│  Config is SIGNED. Tampering = refuse to start.          │
+│  Changes require: yeet config → confirm → re-sign.       │
+│                                                          │
+│  ┌──────────────────────────────────────────────────┐    │
+│  │ OpenClaw Gateway (Node.js)                        │    │
+│  │  ├── Channels (only configured ones work —        │    │
+│  │  │   unconfigured APIs blocked by outer sandbox)  │    │
+│  │  ├── Yeet plugin (interceptors, hooks)            │    │
+│  │  ├── Fleet plugin (Nomad dispatch)                │    │
+│  │  ├── Pi Agent                                     │    │
+│  │  │                                                │    │
+│  │  │  Tool call → yeet interceptor (capability check)    │
+│  │  │       │                                        │    │
+│  │  │       ▼                                        │    │
+│  │  │  ┌────────────────────────────────────┐        │    │
+│  │  │  │ INNER ASRT (per-skill sandbox)      │        │    │
+│  │  │  │ Tighter than outer — only this      │        │    │
+│  │  │  │ skill's approved hosts/paths        │        │    │
+│  │  │  │                                     │        │    │
+│  │  │  │  Tool executes (kernel-restricted)  │        │    │
+│  │  │  └────────────────────────────────────┘        │    │
+│  │  │       │                                        │    │
+│  │  │       ▼                                        │    │
+│  │  │  yeet interceptor (audit log)                  │    │
+│  │  │                                                │    │
+│  └──────────────────────────────────────────────────┘    │
+│                                                          │
+│  Fleet nodes run the same stack:                         │
+│  ┌──────────────┐  ┌──────────────┐                      │
+│  │ yeet-02      │  │ yeet-03      │  (same dual ASRT,    │
+│  │ OpenClaw     │  │ OpenClaw     │   capabilities        │
+│  │ + yeet       │  │ + yeet       │   propagated from     │
+│  │ + dual ASRT  │  │ + dual ASRT  │   dispatch)           │
+│  └──────────────┘  └──────────────┘                      │
+└─────────────────────────────────────────────────────────┘
 ```
 
-### Yeet Sits Above the Agent
+### 3.2 Init-Locked Gateway Config
 
-The coding agent (Claude Code, Pi, OpenCode, Aider) runs inside the sandbox unaware of restrictions. It never sees permission prompts — yeet already decided, ASRT already enforced:
+The outer sandbox config is generated at `yeet init` from the user's choices and **signed**:
+
+```bash
+$ yeet init
+  Which channels? → Signal
+  Which services? → Meals API, Home Assistant
+  LLM provider?  → OpenRouter
+
+→ Generates ~/.config/yeet/gateway-sandbox.json:
+  {
+    "network": {
+      "allowedDomains": [
+        "127.0.0.1:7583",
+        "openrouter.ai",
+        "meals-api.wan0.cloud",
+        "homeassistant.local:8123"
+      ]
+    },
+    "filesystem": {
+      "allowWrite": ["~/.openclaw/data", "~/.config/yeet"],
+      "denyRead": ["~/.ssh", "~/.aws", "~/.gnupg"]
+    },
+    "signature": "ed25519:...",
+    "configuredAt": "2026-03-29T10:00:00Z"
+  }
+```
+
+**Changing the config is a deliberate act:**
+
+```bash
+$ yeet config add-service telegram
+  Adding: api.telegram.org to network allowlist
+  Confirm? [Y/n] → y
+  Config updated and re-signed.
+  Restart OpenClaw to apply.
+
+$ yeet config remove-service meals
+  Removing: meals-api.wan0.cloud from network allowlist
+  Confirm? [Y/n] → y
+  Config updated and re-signed.
+```
+
+**Tampering detection:**
+
+If `gateway-sandbox.json` is modified outside `yeet config` (by hand, by a compromised plugin, by anything):
+
+```
+[yeet] gateway-sandbox.json signature mismatch
+[yeet] expected: sha256:abc123...
+[yeet] actual:   sha256:def456...
+[yeet] REFUSING TO START — config may have been tampered with
+[yeet] Run 'yeet config verify' to investigate
+[yeet] Run 'yeet config resign' if you made intentional changes
+```
+
+**Immutable audit trail:**
+
+Every config change is appended to `~/.config/yeet/config-audit.jsonl`:
+
+```jsonl
+{"ts":"2026-03-29T10:00:00Z","action":"init","services":["signal","meals","ha","openrouter"]}
+{"ts":"2026-04-15T08:30:00Z","action":"add-service","service":"telegram","domain":"api.telegram.org"}
+{"ts":"2026-05-01T12:00:00Z","action":"remove-service","service":"meals","domain":"meals-api.wan0.cloud"}
+```
+
+### 3.3 Yeet Sits Above the Agent
+
+The coding agent (Claude Code, Pi, OpenCode, Aider) runs inside the inner sandbox unaware of restrictions. No permission prompts — yeet decided at install time, ASRT enforces at the kernel:
 
 ```
 ┌─────────────────────────────────────────────────┐
@@ -160,17 +244,18 @@ The coding agent (Claude Code, Pi, OpenCode, Aider) runs inside the sandbox unaw
 │ "Does this skill have approved capabilities?"    │
 │ YES → continue. NO → block.                     │
 ├─────────────────────────────────────────────────┤
-│ ASRT Sandbox                                     │
-│ Kernel-enforced filesystem + network             │
-│ Per-skill config from approved capabilities      │
+│ Inner ASRT Sandbox (per-skill)                   │
+│ Kernel-enforced, scoped to approved hosts/paths  │
 ├─────────────────────────────────────────────────┤
 │ Coding Agent (Claude Code / Pi / OpenCode)       │
 │ Runs as if --dangerously-skip-permissions        │
-│ But actual permissions are TIGHTER than default  │
-│ because ASRT is kernel-enforced + scoped         │
-│                                                  │
+│ Actual permissions are TIGHTER than default      │
 │ Agent's own permission system = irrelevant       │
 │ No prompts. No fatigue. No skipping.            │
+├─────────────────────────────────────────────────┤
+│ Outer ASRT Sandbox (whole gateway)               │
+│ Even if inner sandbox is misconfigured,          │
+│ outer sandbox is the backstop                    │
 ├─────────────────────────────────────────────────┤
 │ OS Kernel                                        │
 │ Seatbelt (macOS) / bubblewrap+seccomp (Linux)   │
@@ -178,11 +263,9 @@ The coding agent (Claude Code, Pi, OpenCode, Aider) runs inside the sandbox unaw
 └─────────────────────────────────────────────────┘
 ```
 
-The agent thinks it has full access. It doesn't. Every file write, network call, and subprocess is filtered by the kernel before it completes. The agent gets clean errors for denied actions, not permission prompts.
+Any agent runtime works — Claude Code, Pi, OpenCode, Aider, Codex CLI — without modifying the agent or its permission model.
 
-This means any agent runtime works — Claude Code, Pi, OpenCode, Aider, Codex CLI — without modifying the agent or its permission model. Yeet wraps them all the same way.
-
-### Integration Points (no fork needed)
+### 3.4 Integration Points (no fork needed)
 
 | Hook | What yeet does |
 |------|---------------|
@@ -193,6 +276,7 @@ This means any agent runtime works — Claude Code, Pi, OpenCode, Aider, Codex C
 | **Plugin `before_tool_call`** | Approval flow for first-time dangerous capabilities |
 | **OpenClaw `registerTool`** | Register fleet dispatch as a tool |
 | **OpenClaw `registerHttpRoute`** | Webhook endpoint for fleet results |
+| **Process wrapper** | `srt --settings gateway-sandbox.json "node openclaw"` |
 
 ---
 
@@ -582,29 +666,97 @@ The scanner's job is to make sure the user sees the risk before approving. ASRT'
 
 ## 10. Security Model
 
-### 10.1 Threat Matrix
+### 10.1 Defence in Depth (6 Layers)
 
-| Threat | Mitigation |
-|--------|-----------|
-| Skill reads ~/.ssh | ASRT mandatory deny path — always blocked |
-| Skill exfiltrates data to unknown host | ASRT network allowlist — kernel-enforced |
-| Skill writes outside workspace | ASRT filesystem allowWrite — kernel-enforced |
-| Skill runs rm -rf / | yeet capability gate — blocked unless system.exec approved; ASRT allowWrite scoping |
-| Skill requests broad permissions | Scanner flags unscoped dangerous capabilities; user warned before approval |
-| Malicious skill on ClawHub | Scanning on install; unsigned = warning; signing = signer accountability |
-| Coding agent merges bad code | Branch protection: PR + approval required, bot account can't force push |
-| Fleet node compromised | Same ASRT sandbox on every node; node can only reach approved hosts |
-| OpenClaw gateway compromised | Gateway runs in Docker with restricted network; fleet access via Nomad API only |
-| Prompt injection via tool results | Tool results are data (tool role), not system prompts; truncated to prevent stuffing |
+```
+Layer 1: Init-locked gateway config (signed, audited)
+  Only configured services reachable. Tampering = refuse to start.
 
-### 10.2 What Yeet Cannot Protect Against
+Layer 2: OpenClaw tool policy
+  deny: ["group:automation"], exec.security: "ask", elevated: disabled
 
-- A user who approves `system.exec` + `network.external` with no scope — that's root access. The scanner warns loudly, but the user decides.
-- Bugs in ASRT itself (kernel sandbox escapes — extremely rare but theoretically possible)
-- A compromised LLM provider returning malicious tool calls — the capability gate limits blast radius but can't prevent all misuse of approved capabilities
-- Social engineering in skill descriptions ("This skill needs full network access to... check the weather")
+Layer 3: Yeet capability gate (interceptor tool.before)
+  Block if skill lacks approved capability for this action
 
-Yeet's philosophy: make the risk visible, make the boundaries enforceable, let the user decide. Don't nag on every action — that just trains users to click "allow" without reading.
+Layer 4: Yeet approval flow (before_tool_call)
+  First-time dangerous ops → user confirms once → persisted
+
+Layer 5: Inner ASRT sandbox (per-skill)
+  Kernel-enforced filesystem + network scoped to approved capabilities
+
+Layer 6: Outer ASRT sandbox (whole gateway process)
+  Backstop — even if inner sandbox misconfigured, gateway can only
+  reach init-configured services. Mandatory denies always apply.
+```
+
+### 10.2 Threat Matrix
+
+| Threat | Layer(s) | Mitigation |
+|--------|----------|-----------|
+| Skill reads ~/.ssh | 5, 6 | ASRT mandatory deny path — always blocked, both layers |
+| Skill exfiltrates to unknown host | 5, 6 | Inner: only skill's approved hosts. Outer: only init-configured hosts. Both kernel-enforced. |
+| Skill writes outside workspace | 5, 6 | Inner: allowWrite scoped. Outer: allowWrite scoped. Kernel-enforced. |
+| Skill runs rm -rf / | 3, 5 | Gate: blocked unless system.exec approved. ASRT: allowWrite scoped. |
+| Malicious in-process OpenClaw plugin | 6, 1 | Outer ASRT restricts the entire gateway process. Plugin can't reach non-configured hosts or read sensitive files. Signed gateway config can't be widened without user action. |
+| Plugin tries to widen gateway config | 1 | Config is signed. Modification = signature mismatch = refuse to start. Changes require `yeet config` + user confirm + re-sign. Audit trail. |
+| Unconfigured channel accessed | 6 | Outer ASRT blocks the API host. If Telegram wasn't configured at init, api.telegram.org is unreachable at the kernel level. |
+| Skill requests broad permissions | 3, scanner | Scanner flags unscoped dangerous capabilities. User warned before approval. |
+| Malicious skill on ClawHub | scanner, signing | Scanning on install; unsigned = warning; signing = signer accountability. |
+| Coding agent merges bad code | GitHub | Branch protection: PR + approval required, bot account can't force push. |
+| Fleet node runs rogue task | 5, 6 | Same dual ASRT on every node. Capabilities propagated from dispatch — can't escalate. |
+| Prompt injection via tool results | 3 | Tool results are data (tool role). Subsequent tool calls still go through capability gate — injected instructions can't bypass capability checks. |
+| Supply chain attack on ASRT itself | — | ASRT is Anthropic-maintained, kernel-level. Compromise here = game over for any sandbox. Same risk class as OS kernel bugs. |
+| Social engineering in skill descriptions | scanner, UX | Scanner flags suspicious permissions. Persona-adapted warnings. But ultimately the user decides. |
+
+### 10.3 Remaining Gaps
+
+**Gap 1: User approves too broadly**
+
+If a user approves `system.exec` + `network.external` with no scope, the skill has wide access within the sandbox. ASRT mandatory denies (.ssh, .bashrc, etc.) still protect critical files, but damage is possible in allowed paths.
+
+*Current mitigation:* Scanner warns loudly. Persona-adapted UI makes the risk visible.
+*Possible improvement:* Require scoping for dangerous capabilities. Refuse to approve `system.exec` without a binary allowlist.
+
+**Gap 2: Cross-skill context leakage**
+
+If two skills are loaded in the same Pi session, they share conversation context. A malicious skill could read tool results from other skills (fridge contents, sensor values, etc.).
+
+*Current mitigation:* None. OpenClaw sessions are shared.
+*Possible improvement:* Per-skill session isolation or tool result redaction. Significant agent loop change.
+
+**Gap 3: Prompt injection causing cross-skill tool calls**
+
+A malicious API response from skill A could trick the LLM into calling a tool from skill B. If skill B has `system.exec` approved, the injected instruction executes with skill B's broader sandbox.
+
+*Current mitigation:* Capability gate applies to all tool calls regardless of which skill initiated the conversation. But the gate checks the tool's owning skill, not the initiating skill.
+*Possible improvement:* Track which skill initiated the turn. Only allow tools from that skill's capability set within the same turn. Requires interceptor state management.
+
+**Gap 4: No runtime cost enforcement**
+
+A skill with `cost.api` approval can make unlimited LLM calls. No budget cap.
+
+*Current mitigation:* Audit log tracks usage. Informational only.
+*Possible improvement:* Budget caps per skill per day. Kill session on exceed.
+
+**Gap 5: Nested ASRT behaviour**
+
+Running ASRT inside ASRT (outer wrapping gateway, inner wrapping tool execution) may have edge cases. ASRT was designed for single-layer use. The inner sandbox inherits the outer sandbox's restrictions, so the inner can only be tighter — but interaction between two Seatbelt profiles or two bubblewrap layers needs testing.
+
+*Current mitigation:* The inner sandbox is strictly a subset of the outer. Any conflict resolves to the tighter restriction.
+*Needs:* Testing on both macOS and Linux to confirm nested ASRT works correctly.
+
+**Gap 6: Startup race window**
+
+Between OpenClaw starting and yeet's interceptors registering, there's a brief window where tool calls could execute without capability checks.
+
+*Current mitigation:* OpenClaw doesn't process messages until all plugins are loaded. If plugin load order is guaranteed, there's no window.
+*Needs:* Verify OpenClaw's plugin load lifecycle. If not guaranteed, yeet should block the gateway from accepting messages until its interceptors are registered.
+
+### 10.4 Philosophy
+
+Make the risk visible. Make the boundaries enforceable. Let the user decide once, enforce always. Don't nag on every action — that trains users to skip security entirely.
+
+The outer ASRT sandbox is the innovation: even if everything else fails — capability gate bypassed, inner sandbox misconfigured, malicious plugin loaded — the gateway process itself can only reach services the user explicitly configured. The attack surface is bounded by init-time choices, not runtime behaviour.
 
 ---
 
