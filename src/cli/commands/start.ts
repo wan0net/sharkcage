@@ -284,12 +284,33 @@ function ensureOpenClawPluginRegistered(): void {
     }
 
     const paths: string[] = config.plugins.load.paths;
+    let changed = false;
+
     if (!paths.includes(pluginPath)) {
       paths.push(pluginPath);
-      writeFileSync(ocConfigPath, JSON.stringify(config, null, 2) + "\n");
+      changed = true;
       log("sc", "Plugin registered with OpenClaw");
     } else {
       log("sc", "Plugin already registered");
+    }
+
+    // Lock down tools: deny all skills by default, allow only safe basics.
+    // Users approve additional skills through sharkcage's approval flow.
+    if (!config.tools) config.tools = {};
+    const safeTools = [
+      "read", "write", "edit", "apply_patch",   // filesystem (sandboxed by ASRT)
+      "web_search", "web_fetch",                  // web (sandboxed by ASRT network)
+      "sharkcage_status",                         // our own status tool
+    ];
+    if (!config.tools.deny || !config.tools.deny.includes("*")) {
+      config.tools.deny = ["*"];
+      config.tools.allow = safeTools;
+      changed = true;
+      log("sc", "Tools locked down — only safe basics allowed");
+    }
+
+    if (changed) {
+      writeFileSync(ocConfigPath, JSON.stringify(config, null, 2) + "\n");
     }
   } catch {
     log("sc", "Could not read OpenClaw config — skipping plugin registration");
