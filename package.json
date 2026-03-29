@@ -8,8 +8,8 @@
   },
   "scripts": {
     "dev": "npx tsx src/cli/main.ts",
-    "build": "npx tsc",
-    "check": "npx tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json",
+    "check": "tsc --noEmit",
     "supervisor": "npx tsx src/supervisor/main.ts"
   },
   "dependencies": {

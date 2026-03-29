@@ -88,7 +88,7 @@ export default async function init() {
 
   // --- Config check ---
   mkdirSync(configDir, { recursive: true });
-  const configPath = `${configDir}/sandcastle.json`;
+  const configPath = `${configDir}/gateway.json`;
 
   if (existsSync(configPath)) {
     const overwrite = await p.confirm({ message: "Config already exists. Overwrite?" });

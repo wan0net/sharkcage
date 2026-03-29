@@ -8,7 +8,7 @@
  *   regenerate           Regenerate from OpenClaw config
  */
 
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, appendFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 
 const home = process.env.HOME ?? ".";
@@ -152,10 +152,6 @@ async function configRemoveService(): Promise<void> {
 async function configRegenerate(): Promise<void> {
   console.log("Regenerating gateway sandbox config from OpenClaw channel config...\n");
 
-  // Delegate to start.ts's config generator
-  const start = await import("./start.js");
-  // The start module exports generateGatewaySandboxConfig indirectly —
-  // for now just tell the user to re-run start
   console.log("Run 'sc stop && sc start' to regenerate from current OpenClaw config.");
 }
 
@@ -167,7 +163,6 @@ function logConfigChange(action: string, details: Record<string, string>): void 
   };
   const line = JSON.stringify(entry) + "\n";
   try {
-    const { appendFileSync } = require("node:fs") as typeof import("node:fs");
     appendFileSync(auditPath, line);
   } catch { /* audit dir may not exist */ }
 }
