@@ -57,6 +57,20 @@ export class SkillMap {
   }
 
   /**
+   * Return all concrete tool→skill mappings (excludes wildcard entries).
+   * Used by the plugin to register shadow tools for each skill tool.
+   */
+  getAllMappings(): Map<string, string> {
+    const result = new Map<string, string>();
+    for (const [pattern, skill] of this.toolToSkill) {
+      if (!pattern.endsWith("_*")) {
+        result.set(pattern, skill);
+      }
+    }
+    return result;
+  }
+
+  /**
    * Find which skill owns a tool.
    */
   getSkill(toolName: string): string | null {

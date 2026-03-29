@@ -19,15 +19,52 @@
 const API = "http://127.0.0.1:18790";
 
 export function registerDashboardRoutes(api: {
-  registerHttpRoute(config: { method: string; path: string; handler: (req: Request) => Promise<Response> }): void;
+  registerHttpRoute(config: {
+    path: string;
+    auth: "gateway" | "plugin";
+    handler: (req: any, res: any) => Promise<void>;
+    match?: "exact" | "prefix";
+  }): void;
 }): void {
-  api.registerHttpRoute({ method: "GET", path: "/sharkcage", handler: () => servePage("status") });
-  api.registerHttpRoute({ method: "GET", path: "/sharkcage/skills", handler: () => servePage("skills") });
-  api.registerHttpRoute({ method: "GET", path: "/sharkcage/audit", handler: () => servePage("audit") });
-  api.registerHttpRoute({ method: "GET", path: "/sharkcage/config", handler: () => servePage("config") });
+  api.registerHttpRoute({
+    path: "/sharkcage",
+    auth: "gateway",
+    handler: async (_req, res) => {
+      const html = await buildPage("status");
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(html);
+    },
+  });
+  api.registerHttpRoute({
+    path: "/sharkcage/skills",
+    auth: "gateway",
+    handler: async (_req, res) => {
+      const html = await buildPage("skills");
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(html);
+    },
+  });
+  api.registerHttpRoute({
+    path: "/sharkcage/audit",
+    auth: "gateway",
+    handler: async (_req, res) => {
+      const html = await buildPage("audit");
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(html);
+    },
+  });
+  api.registerHttpRoute({
+    path: "/sharkcage/config",
+    auth: "gateway",
+    handler: async (_req, res) => {
+      const html = await buildPage("config");
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(html);
+    },
+  });
 }
 
-function servePage(view: string): Promise<Response> {
+async function buildPage(view: string): Promise<string> {
   const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -130,7 +167,5 @@ views[V]();
 </body>
 </html>`;
 
-  return Promise.resolve(new Response(html, {
-    headers: { "Content-Type": "text/html; charset=utf-8" },
-  }));
+  return html;
 }

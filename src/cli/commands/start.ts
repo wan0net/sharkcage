@@ -13,7 +13,13 @@
 
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync } from "node:fs";
-import { resolve } from "node:path";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import crypto from "node:crypto";
+import { prefixOutput, log } from "../log-prefix.ts";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const repoRoot = resolve(__dirname, "../../..");
 
 const home = process.env.HOME ?? ".";
 const configDir = process.env.SHARKCAGE_CONFIG_DIR ?? `${home}/.config/sharkcage`;
@@ -82,20 +88,20 @@ export default async function start() {
   }
 
   // --- 7. Start supervisor ---
-  console.log("Starting supervisor...");
+  log("sc", "Starting supervisor...");
   const supervisorProc = startSupervisor();
-  console.log(`  PID: ${supervisorProc.pid}`);
+  log("sc", `Supervisor PID ${supervisorProc.pid}`);
 
   await waitForSocket(socketPath, 10_000);
-  console.log(`  [ok] Supervisor ready\n`);
+  log("sc", "Supervisor ready");
 
   // --- 8. Start OpenClaw ---
-  console.log("Starting OpenClaw...");
+  log("sc", "Starting OpenClaw...");
   const openclawProc = startOpenClaw(sandboxConfigPath);
-  console.log(`  PID: ${openclawProc.pid}`);
+  log("sc", `OpenClaw PID ${openclawProc.pid}`);
 
   await waitForHttp("http://127.0.0.1:18789", 30_000);
-  console.log("  [ok] OpenClaw ready\n");
+  log("sc", "OpenClaw ready");
 
   // --- 9. Write PID file ---
   writeFileSync(pidFile, JSON.stringify({
@@ -105,18 +111,17 @@ export default async function start() {
   }));
 
   // --- 10. Running ---
+  console.log("");
   console.log("╭─────────────────────────────────────╮");
-  console.log("│      sharkcage is running            │");
+  console.log("│          sharkcage running            │");
   console.log("╰─────────────────────────────────────╯");
-  console.log(`
-  Supervisor:  PID ${supervisorProc.pid}
-  OpenClaw:    PID ${openclawProc.pid}
-  Dashboard:   http://127.0.0.1:18789
-  Socket:      ${socketPath}
-  Audit log:   ${dataDir}/audit.jsonl
-
-  Press Ctrl+C to stop.
-`);
+  console.log(`  Gateway:   ws://127.0.0.1:18789`);
+  console.log(`  Token:     ${gatewayToken}`);
+  console.log(`  Dashboard: http://127.0.0.1:18790/sharkcage/`);
+  console.log(`  Supervisor PID: ${supervisorProc.pid}  OpenClaw PID: ${openclawProc.pid}`);
+  console.log("");
+  console.log("  Press Ctrl+C to stop.");
+  console.log("");
 
   // --- 11. Monitor + shutdown ---
   let shuttingDown = false;
@@ -211,7 +216,7 @@ function startSupervisor(): ChildProcess {
   const supervisorPath = findPath([
     process.env.SHARKCAGE_SUPERVISOR_PATH,
     `${configDir}/supervisor/src/main.ts`,
-    resolve("./src/supervisor/main.ts"),
+    resolve(repoRoot, "src/supervisor/main.ts"),
   ]);
 
   if (!supervisorPath) {
@@ -219,29 +224,47 @@ function startSupervisor(): ChildProcess {
     process.exit(1);
   }
 
-  return spawn("npx", ["tsx", supervisorPath], {
-    stdio: "inherit",
+  const proc = spawn("npx", ["tsx", supervisorPath], {
+    stdio: ["pipe", "pipe", "pipe"],
     env: passEnvVars(),
     detached: false,
   });
+  prefixOutput(proc, "supervisor");
+  return proc;
 }
+
+// Module-level so it's accessible after startup for printing
+let gatewayToken = "";
 
 function startOpenClaw(sandboxConfigPath: string): ChildProcess {
   const hasSrt = commandExists("srt");
-  const args = ["start", "--port", "18789"];
+  gatewayToken = process.env.OPENCLAW_GATEWAY_TOKEN ?? crypto.randomUUID().slice(0, 16);
+  const args = ["gateway", "run", "--port", "18789", "--auth", "token", "--token", gatewayToken];
+
+  // Force IPv4 for localhost resolution (Node defaults to IPv6 ::1 which
+  // OpenClaw's loopback bind check rejects as non-loopback)
+  const existing = process.env.NODE_OPTIONS ?? "";
+  const ipv4Flag = "--dns-result-order=ipv4first";
+  const nodeOptions = existing.includes(ipv4Flag) ? existing : `${existing} ${ipv4Flag}`.trim();
+  const env = { ...process.env, NODE_OPTIONS: nodeOptions } as NodeJS.ProcessEnv;
 
   if (hasSrt) {
-    return spawn("srt", ["--settings", sandboxConfigPath, "openclaw", ...args], {
-      stdio: "inherit",
-      detached: false,
-    });
+    // TODO: re-enable outer srt wrap once bind issue is resolved
+    // return spawn("srt", ["--settings", sandboxConfigPath, "openclaw", ...args], {
+    //   stdio: "inherit",
+    //   env,
+    //   detached: false,
+    // });
+    console.log("  [info] Outer ASRT sandbox available (srt found)");
   }
 
-  console.warn("  WARNING: srt not found — OpenClaw running WITHOUT outer sandbox");
-  return spawn("openclaw", args, {
-    stdio: "inherit",
+  const proc = spawn("openclaw", args, {
+    stdio: ["pipe", "pipe", "pipe"],
+    env,
     detached: false,
   });
+  prefixOutput(proc, "openclaw");
+  return proc;
 }
 
 // --- OpenClaw plugin registration ---
@@ -256,20 +279,24 @@ function ensureOpenClawPluginRegistered(): void {
   try {
     const config = JSON.parse(readFileSync(ocConfigPath, "utf-8"));
     if (!config.plugins) config.plugins = {};
+    if (!config.plugins.load) config.plugins.load = {};
+    if (!config.plugins.load.paths) config.plugins.load.paths = [];
 
-    if (!config.plugins.sharkcage) {
-      const pluginPath = findPath([
-        resolve("./src/plugin"),
-        `${configDir}/openclaw-plugin`,
-      ]);
+    const pluginPath = findPath([
+      resolve(repoRoot, "dist/sharkcage"),
+      `${configDir}/openclaw-plugin`,
+    ]);
 
-      if (pluginPath) {
-        config.plugins.sharkcage = { enabled: true, path: pluginPath };
-        writeFileSync(ocConfigPath, JSON.stringify(config, null, 2) + "\n");
-        console.log("  [ok] Sharkcage plugin registered with OpenClaw\n");
-      } else {
-        console.warn("  [skip] sharkcage-openclaw-plugin not found\n");
-      }
+    if (!pluginPath) {
+      console.warn("  [skip] sharkcage plugin not found\n");
+      return;
+    }
+
+    const paths: string[] = config.plugins.load.paths;
+    if (!paths.includes(pluginPath)) {
+      paths.push(pluginPath);
+      writeFileSync(ocConfigPath, JSON.stringify(config, null, 2) + "\n");
+      console.log("  [ok] Sharkcage plugin registered with OpenClaw\n");
     } else {
       console.log("  [ok] Sharkcage plugin already registered\n");
     }
@@ -324,18 +351,24 @@ function generateGatewaySandboxConfig(outPath: string): void {
     allowedDomains.add(signalUrl.replace(/^https?:\/\//, ""));
   }
 
+  // srt config format: domains must be valid hostnames (no ports), arrays for all fields
+  const domainList = [...allowedDomains].map((d) => d.replace(/:\d+$/, "")); // strip ports
+
   const sandboxConfig = {
     network: {
-      allowedDomains: [...allowedDomains],
-      allowUnixSockets: true,
+      allowedDomains: domainList.length > 0 ? domainList : [],
+      deniedDomains: [],
+      allowUnixSockets: [`${configDir}/data/supervisor.sock`],
     },
     filesystem: {
-      allowWrite: [`${home}/.openclaw/data`, `${configDir}/data`],
+      allowRead: ["/usr", "/lib", "/bin", "/sbin", "/etc", "/opt/homebrew", "/tmp", `${home}/.openclaw`, `${configDir}`],
+      allowWrite: [`${home}/.openclaw/data`, `${configDir}/data`, "/tmp"],
       denyRead: [
-        "~/.ssh", "~/.aws", "~/.gnupg",
+        `${home}/.ssh`, `${home}/.aws`, `${home}/.gnupg`,
         `${configDir}/approvals`,
-        "~/.bashrc", "~/.zshrc", "~/.gitconfig",
+        `${home}/.bashrc`, `${home}/.zshrc`, `${home}/.gitconfig`,
       ],
+      denyWrite: [],
     },
     generatedAt: new Date().toISOString(),
   };

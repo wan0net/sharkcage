@@ -279,7 +279,7 @@ const asrtBackendManager: BackendManager = {
  * without registering so the plugin continues to work with other backends.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function registerAsrtBackend(api: any): void {
+export async function registerAsrtBackend(api: any): Promise<void> {
   let hasSrt = false;
   try {
     execFileSync("srt", ["--version"], { stdio: "pipe" });
@@ -295,16 +295,26 @@ export function registerAsrtBackend(api: any): void {
     return;
   }
 
-  if (!api.registerSandboxBackend) {
+  // registerSandboxBackend is a module-level export, not on the plugin API
+  let registerSandboxBackend: ((id: string, registration: unknown) => void) | null = null;
+  try {
+    const modulePath = "openclaw/sandbox";
+    const sandboxModule = await import(/* @vite-ignore */ modulePath);
+    registerSandboxBackend = sandboxModule.registerSandboxBackend ?? null;
+  } catch {
+    // OpenClaw sandbox module not available in this context
+  }
+
+  if (!registerSandboxBackend) {
     console.log(
-      "[sharkcage] OpenClaw does not expose registerSandboxBackend — ASRT backend skipped"
+      "[sharkcage] registerSandboxBackend not available — ASRT backend skipped"
     );
     return;
   }
 
   console.log("[sharkcage] registering ASRT sandbox backend");
 
-  api.registerSandboxBackend("asrt", {
+  registerSandboxBackend("asrt", {
     factory: createAsrtBackend,
     manager: asrtBackendManager,
   });

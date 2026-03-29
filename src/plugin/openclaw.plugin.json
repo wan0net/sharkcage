@@ -1,0 +1,10 @@
+{
+  "id": "sharkcage",
+  "name": "Sharkcage",
+  "description": "Trust layer — ASRT sandbox backend, per-skill capability enforcement, approval flow, audit logging.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}
