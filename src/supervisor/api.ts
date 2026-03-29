@@ -9,7 +9,6 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import type { ApprovalStore } from "./approvals.js";
-import type { PendingApprovalStore } from "./pending-approvals.js";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -22,7 +21,6 @@ export function startDashboardApi(
   configDir: string,
   pluginDir: string,
   approvals: ApprovalStore,
-  pendingApprovals: PendingApprovalStore,
   hasAsrt: boolean
 ): void {
   const dataDir = `${configDir}/data`;
@@ -99,12 +97,6 @@ export function startDashboardApi(
           sandbox: sandboxConfig,
           gateway: gatewayConfig,
         });
-        return;
-      }
-
-      // --- GET /api/approvals/pending ---
-      if (path === "/api/approvals/pending" && req.method === "GET") {
-        respond(res, 200, pendingApprovals.getPending());
         return;
       }
 

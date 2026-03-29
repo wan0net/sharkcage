@@ -1,17 +1,20 @@
 /**
  * Sharkcage OpenClaw Plugin
  *
- * Hooks into OpenClaw's interceptor pipeline to route all tool calls
+ * Hooks into OpenClaw's native hook system to route all tool calls
  * through the sharkcage supervisor for per-skill sandboxed execution.
  *
  * Integration points (no OpenClaw fork needed):
- * - tool.before interceptor: routes tool calls to supervisor via IPC
- * - tool.after interceptor: audit logging
+ * - before_tool_call hook (priority 150): approval gate via native UX
+ * - tool.before interceptor (priority 100): routes approved calls to supervisor
+ * - tool.after interceptor (priority 50): audit logging
+ * - inbound_claim hook (priority 200): handles `sc install` commands
+ * - before_message_write hook (priority 100): scrubs sharkcage internal messages
  * - registerHttpRoute: webhook for fleet dispatch results
  */
 
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { SupervisorClient } from "./ipc.js";
-import { ApprovalHandler } from "./approval-handler.js";
 import { SkillMap } from "./skill-map.js";
 import { registerDashboardRoutes } from "./dashboard.js";
 
@@ -25,13 +28,12 @@ const socketPath = process.env.SHARKCAGE_SOCKET ?? `${dataDir}/supervisor.sock`;
 // --- State ---
 const supervisor = new SupervisorClient(socketPath);
 const skillMap = new SkillMap();
-const approvalHandler = new ApprovalHandler(18789, supervisor);
 
 /**
  * OpenClaw plugin entry point.
  *
  * Called by OpenClaw's plugin loader with the plugin API.
- * We register interceptors that route tool calls through the supervisor.
+ * We register hooks and interceptors that route tool calls through the supervisor.
  */
 export function register(api: OpenClawPluginApi): void {
   console.log("[sharkcage] registering plugin...");
@@ -63,28 +65,82 @@ export function register(api: OpenClawPluginApi): void {
     console.error("[sharkcage] is `sharkcage start` running?");
   });
 
-  // Wire approval handler
-  supervisor.onApprovalRequest((req) => approvalHandler.handleApprovalRequest(req));
+  // --- Hook 1: before_tool_call (priority 150) — approval gate ---
+  // Runs before the tool.before interceptor. If the skill has no approval file,
+  // prompt the user natively via their channel. The AI never sees this exchange.
+  api.on("before_tool_call", async (event: BeforeToolCallEvent) => {
+    const toolName = event.toolName;
+    const skill = skillMap.getSkill(toolName);
+    if (!skill) return undefined; // not a sharkcage-managed skill, pass through
 
-  // --- tool.before interceptor ---
+    const approvalPath = `${configDir}/approvals/${skill}.json`;
+    if (existsSync(approvalPath)) {
+      // Already approved — let the tool.before interceptor handle routing
+      return undefined;
+    }
+
+    // Not yet approved — gather metadata and require approval via native channel UX
+    const manifestPath = `${pluginDir}/${skill}/plugin.json`;
+    let capabilities: Array<{ capability: string; reason: string; scope?: string[] }> = [];
+    let version = "unknown";
+    try {
+      const manifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
+      capabilities = manifest.capabilities ?? [];
+      version = manifest.version ?? "unknown";
+    } catch { /* manifest unavailable */ }
+
+    const capDescription = capabilities.length > 0
+      ? capabilities.map((c) => `• ${c.capability} — ${c.reason}`).join("\n")
+      : "No capabilities declared";
+
+    return {
+      requireApproval: {
+        title: `Skill "${skill}" requires approval`,
+        description: `${capDescription}\n\nVersion: ${version}`,
+        severity: "warning" as const,
+        timeoutMs: 240_000, // 4 minutes
+        timeoutBehavior: "deny" as const,
+        onResolution: async (decision: string) => {
+          if (decision === "approved" || decision === "allow") {
+            const approval = {
+              skill,
+              version,
+              capabilities: capabilities.map((c) => c.capability),
+              approvedAt: new Date().toISOString(),
+              approvedVia: "channel",
+            };
+            try {
+              writeFileSync(approvalPath, JSON.stringify(approval, null, 2) + "\n");
+              console.log(`[sharkcage] approval granted for ${skill} via channel`);
+            } catch (err) {
+              console.error(`[sharkcage] failed to write approval file for ${skill}:`, err);
+            }
+          } else {
+            console.log(`[sharkcage] approval denied for ${skill}`);
+          }
+        },
+      },
+    };
+  }, { priority: 150 });
+
+  // --- Hook 2: tool.before interceptor (priority 100) — route to supervisor ---
   // FAIL CLOSED: if the supervisor is unreachable, block ALL tool calls.
   // The supervisor IS the security layer. Without it, there are no
   // capability checks and no sandbox enforcement.
   api.registerInterceptor({
     name: "sharkcage-sandbox",
-    priority: 100, // highest — runs before other interceptors
+    priority: 100,
     event: "tool.before",
-    handler: async (input: any) => {
-      const toolName = input.toolCall?.name ?? input.name;
-      const args = input.toolCall?.args ?? input.args ?? {};
+    handler: async (input: Record<string, unknown>) => {
+      const toolName = (input.toolCall as Record<string, unknown> | undefined)?.name as string ?? input.name as string;
+      const args = (input.toolCall as Record<string, unknown> | undefined)?.args as Record<string, unknown> ?? input.args as Record<string, unknown> ?? {};
 
       // Which skill owns this tool?
       const skill = skillMap.getSkill(toolName);
 
       if (!skill) {
         // Not a sharkcage-managed skill — let OpenClaw handle it natively
-        // (built-in tools like bash/read/write go through OpenClaw's own sandbox)
-        return undefined; // pass through
+        return undefined;
       }
 
       // Route to supervisor — FAIL CLOSED on any error
@@ -115,16 +171,16 @@ export function register(api: OpenClawPluginApi): void {
     },
   });
 
-  // --- tool.after interceptor ---
+  // --- Hook 3: tool.after interceptor (priority 50) — audit logging ---
   // Logs tool calls that went through OpenClaw natively (not sharkcage-managed).
   api.registerInterceptor({
     name: "sharkcage-audit",
     priority: 50,
     event: "tool.after",
-    handler: async (input: any) => {
+    handler: async (input: Record<string, unknown>) => {
       // Sharkcage-managed tools are already audited by the supervisor.
       // This catches OpenClaw-native tool calls (bash, read, write, edit).
-      const toolName = input.toolCall?.name ?? input.name;
+      const toolName = (input.toolCall as Record<string, unknown> | undefined)?.name as string ?? input.name as string;
       const skill = skillMap.getSkill(toolName);
       if (skill) return undefined; // already audited by supervisor
 
@@ -133,27 +189,48 @@ export function register(api: OpenClawPluginApi): void {
     },
   });
 
-  // --- message.before interceptor: consume sc yes/no replies ---
-  api.registerInterceptor({
-    name: "sharkcage-approval",
-    priority: 200,
-    event: "message.before",
-    handler: async (input: any) => {
-      const text = input.message?.text ?? input.text ?? "";
-      const result = approvalHandler.checkReply(text);
-      if (result.matched) {
-        approvalHandler.handleInboundReply(result.token!, result.approved!);
-        return { block: true }; // consume message, don't pass to AI
-      }
-      return undefined; // pass through
-    },
-  });
+  // --- Hook 4: inbound_claim (priority 200) — handle `sc install` commands ---
+  api.on("inbound_claim", async (event: InboundClaimEvent) => {
+    const text = (event.content ?? "").trim();
+    const installMatch = text.match(/^sc\s+install\s+(.+)$/i);
+    if (!installMatch) return undefined;
+
+    const source = installMatch[1].trim();
+    console.log(`[sharkcage] install request from chat: ${source}`);
+
+    const { execFileSync } = await import("node:child_process");
+    try {
+      execFileSync("npx", ["tsx", `${process.cwd()}/src/cli/main.ts`, "plugin", "add", source], {
+        stdio: "pipe",
+        timeout: 60_000,
+      });
+      // Reload skill map to pick up new tools
+      skillMap.load(pluginDir);
+    } catch (err) {
+      console.error(`[sharkcage] install failed:`, err);
+    }
+
+    return { handled: true }; // consume message, AI never sees it
+  }, { priority: 200 });
+
+  // --- Hook 5: before_message_write (priority 100) — scrub sharkcage internals ---
+  api.on("before_message_write", async (event: BeforeMessageWriteEvent) => {
+    const content = typeof event.message?.content === "string" ? event.message.content : "";
+    if (
+      content.includes("[sharkcage]") ||
+      content.includes("sc yes ") ||
+      content.includes("sc no ")
+    ) {
+      return { block: true };
+    }
+    return undefined;
+  }, { priority: 100 });
 
   // --- Fleet webhook endpoint ---
   api.registerHttpRoute({
     method: "POST",
     path: "/sharkcage/fleet/webhook",
-    handler: async (req) => {
+    handler: async (req: Request) => {
       const body = await req.json();
       console.log("[sharkcage] fleet webhook:", JSON.stringify(body).slice(0, 200));
       // TODO: route to appropriate channel for notification
@@ -174,9 +251,50 @@ export function cleanup(): void {
   console.log("[sharkcage] plugin cleanup complete");
 }
 
-// --- Type stubs for OpenClaw's plugin API ---
-// These match OpenClaw's actual API. In production, imported from OpenClaw's types.
+// --- Type stubs for OpenClaw's native hook API ---
+
+interface BeforeToolCallEvent {
+  toolName: string;
+  args?: Record<string, unknown>;
+}
+
+interface InboundClaimEvent {
+  content?: string;
+}
+
+interface BeforeMessageWriteEvent {
+  message?: { content?: string };
+}
+
+interface RequireApprovalResult {
+  requireApproval: {
+    title: string;
+    description: string;
+    severity: "info" | "warning" | "error";
+    timeoutMs: number;
+    timeoutBehavior: "deny" | "allow";
+    onResolution: (decision: string) => Promise<void>;
+  };
+}
+
 interface OpenClawPluginApi {
+  /** Register a hook handler. */
+  on(
+    event: "before_tool_call",
+    handler: (event: BeforeToolCallEvent) => Promise<RequireApprovalResult | undefined>,
+    opts?: { priority?: number }
+  ): void;
+  on(
+    event: "inbound_claim",
+    handler: (event: InboundClaimEvent) => Promise<{ handled: true } | undefined>,
+    opts?: { priority?: number }
+  ): void;
+  on(
+    event: "before_message_write",
+    handler: (event: BeforeMessageWriteEvent) => Promise<{ block: true } | undefined>,
+    opts?: { priority?: number }
+  ): void;
+
   registerInterceptor(config: {
     name: string;
     priority: number;

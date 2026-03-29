@@ -5,14 +5,13 @@
  * Receives tool call requests from OpenClaw via unix socket,
  * executes them in per-skill ASRT sandboxes, returns results.
  *
- * ~200 lines. Auditable in an afternoon.
+ * ~150 lines. Auditable in an afternoon.
  */
 
 import { createServer, type Socket } from "node:net";
-import { mkdirSync, unlinkSync, writeFileSync, readFileSync } from "node:fs";
-import type { ToolCallRequest, ToolCallResponse, ApprovalResponse, SkillCapability } from "./types.js";
+import { mkdirSync, unlinkSync } from "node:fs";
+import type { ToolCallRequest, ToolCallResponse } from "./types.js";
 import { ApprovalStore } from "./approvals.js";
-import { PendingApprovalStore } from "./pending-approvals.js";
 import { AuditLog } from "./audit.js";
 import { executeInSandbox, checkAsrtAvailable } from "./worker.js";
 import { startDashboardApi } from "./api.js";
@@ -28,7 +27,6 @@ const socketPath = process.env.SHARKCAGE_SOCKET ?? `${dataDir}/supervisor.sock`;
 
 // --- State ---
 const approvals = new ApprovalStore(`${configDir}/approvals`);
-const pendingApprovals = new PendingApprovalStore();
 const audit = new AuditLog(`${dataDir}/audit.jsonl`);
 const tokenRegistry = new TokenRegistry();
 
@@ -50,92 +48,39 @@ function getSkillEnv(): Record<string, string> {
 }
 
 // --- Handle a tool call request ---
-async function handleRequest(request: ToolCallRequest, socket: Socket): Promise<ToolCallResponse> {
+async function handleRequest(request: ToolCallRequest): Promise<ToolCallResponse> {
   const timestamp = new Date().toISOString();
 
-  // Check approval
-  let approval = approvals.get(request.skill);
+  // Check approval — if not approved, return error.
+  // Approval is handled by the OpenClaw plugin via native hooks BEFORE the
+  // tool call reaches the supervisor.
+  const approval = approvals.get(request.skill);
   if (!approval) {
-    // Breakout: load skill manifest for metadata, then ask human via chat
-    let version = "unknown";
-    let capabilities: SkillCapability[] = [];
-    try {
-      const manifest = JSON.parse(
-        readFileSync(`${pluginDir}/${request.skill}/plugin.json`, "utf-8")
-      );
-      version = manifest.version ?? "unknown";
-      capabilities = manifest.capabilities ?? [];
-    } catch { /* manifest unavailable */ }
-
-    const { token, promise } = pendingApprovals.enqueue(request.skill, version, capabilities);
-
-    // Push the approval request to the plugin over IPC
-    socket.write(
-      JSON.stringify({
-        type: "approval.request",
-        token,
-        skill: request.skill,
-        version,
-        capabilities,
-      }) + "\n"
-    );
-
-    let approved = false;
-    try {
-      approved = await promise;
-    } catch {
-      // timed out or rejected
-    }
-
-    if (approved) {
-      // Persist approval file and hot-reload
-      const approvalData = {
-        skill: request.skill,
-        version,
-        capabilities,
-        approvedAt: new Date().toISOString(),
-      };
-      try {
-        writeFileSync(
-          `${configDir}/approvals/${request.skill}.json`,
-          JSON.stringify(approvalData, null, 2)
-        );
-        approvals.loadAll();
-        approval = approvals.get(request.skill);
-      } catch (err) {
-        console.error("[supervisor] failed to write approval file:", err);
-      }
-    }
-
-    if (!approved || !approval) {
-      const errMsg = approved
-        ? `Failed to persist approval for skill "${request.skill}"`
-        : `Skill "${request.skill}" was not approved.`;
-      const response: ToolCallResponse = {
-        id: request.id,
-        result: "",
-        error: errMsg,
-        durationMs: 0,
-      };
-      await audit.log({
-        timestamp,
-        skill: request.skill,
-        tool: request.tool,
-        args: JSON.stringify(request.args),
-        result: "",
-        error: errMsg,
-        durationMs: 0,
-        blocked: true,
-        blockReason: approved ? "approval persist failed" : "approval denied or timed out",
-      });
-      return response;
-    }
+    const errMsg = `Skill "${request.skill}" is not approved. Approve via your chat channel first.`;
+    const response: ToolCallResponse = {
+      id: request.id,
+      result: "",
+      error: errMsg,
+      durationMs: 0,
+    };
+    await audit.log({
+      timestamp,
+      skill: request.skill,
+      tool: request.tool,
+      args: JSON.stringify(request.args),
+      result: "",
+      error: errMsg,
+      durationMs: 0,
+      blocked: true,
+      blockReason: "not approved",
+    });
+    return response;
   }
 
   // Execute in sandbox
   const skillPath = `${pluginDir}/${request.skill}`;
   const env = getSkillEnv();
-  const response = await executeInSandbox(request, approval!, skillPath, env, tokenRegistry);
+  const response = await executeInSandbox(request, approval, skillPath, env, tokenRegistry);
 
   // Audit
   await audit.log({
@@ -196,26 +141,16 @@ async function handleConnection(conn: Socket): Promise<void> {
         if (!line.trim()) continue;
 
         try {
-          const parsed = JSON.parse(line) as { type?: string } & ToolCallRequest & ApprovalResponse;
-
-          if (parsed.type === "approval.response") {
-            // Route approval reply back to the pending store
-            pendingApprovals.resolve(parsed.token, parsed.approved);
-          } else {
-            // Regular tool call request
-            const request = parsed as ToolCallRequest;
-            const response = await handleRequest(request, conn);
-            const responseLine = JSON.stringify(response) + "\n";
-            conn.write(responseLine);
-          }
+          const request = JSON.parse(line) as ToolCallRequest;
+          const response = await handleRequest(request);
+          conn.write(JSON.stringify(response) + "\n");
         } catch (err) {
-          const errResponse = JSON.stringify({
+          conn.write(JSON.stringify({
             id: "unknown",
             result: "",
             error: `Parse error: ${err instanceof Error ? err.message : String(err)}`,
             durationMs: 0,
-          }) + "\n";
-          conn.write(errResponse);
+          }) + "\n");
         }
       }
     });
@@ -266,7 +201,7 @@ async function main(): Promise<void> {
 
   // Start dashboard API
   const apiPort = parseInt(process.env.SHARKCAGE_API_PORT ?? "18790", 10);
-  startDashboardApi(apiPort, configDir, pluginDir, approvals, pendingApprovals, hasAsrt);
+  startDashboardApi(apiPort, configDir, pluginDir, approvals, hasAsrt);
 }
 
 // --- Shutdown ---
