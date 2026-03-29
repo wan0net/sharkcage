@@ -2,36 +2,32 @@
 
 OpenClaw, but you trust it.
 
-Sharkcage runs the **entire OpenClaw binary inside a kernel-level sandbox** (outer ASRT). On top of that, every skill gets its own sandboxed process (inner ASRT). Capabilities approved once at install, enforced always at the kernel level. No permission prompts at runtime.
+Sharkcage registers as OpenClaw's **sandbox backend**, replacing Docker with kernel-level ASRT isolation. Every bash command, file read/write, and skill execution goes through `srt`. Capabilities approved once at install, enforced always at the kernel level.
 
 ## Security Model
 
 ```
-sc start (supervisor — the only unsandboxed process, ~200 lines)
+OpenClaw + sharkcage plugin
   │
-  ├── OUTER ASRT SANDBOX → OpenClaw (the entire binary)
-  │   network: [signal-cli, openrouter.ai]  (init-locked, signed)
-  │   filesystem: [~/.openclaw/data]
-  │   deny: [~/.ssh, ~/.aws, ~/.gnupg]
+  ├── ASRT sandbox backend (registered via registerSandboxBackend)
+  │   Every exec/bash call → srt --settings <policy> /bin/sh -c <cmd>
+  │   Every file read/write → srt --settings <policy> /bin/sh -c <script>
+  │   Per-session policy: workspace access, deny ~/.ssh etc.
   │
-  │   On tool call → IPC to supervisor via unix socket
+  ├── Capability enforcement (before_tool_call hook)
+  │   Unapproved skill? → native channel approval (AI cannot see it)
+  │   Approved? → route to supervisor for sandboxed execution
   │
-  ├── INNER ASRT SANDBOX → meals skill
-  │   network: [meals-api.example.com]
+  ├── Localhost proxy (SOCKS5 on :18800)
+  │   Per-skill tokens, blocks unapproved localhost access
   │
-  ├── INNER ASRT SANDBOX → home-assistant skill
-  │   network: [homeassistant.local:8123]
-  │
-  └── INNER ASRT SANDBOX → any other skill
-      scoped to its approved capabilities only
+  └── Audit log
+      Every tool call logged, blocked or allowed
 ```
 
-Two layers of kernel enforcement:
-
-1. **Outer sandbox** — the entire OpenClaw process is contained. Init-locked and signed at setup. Cannot be widened without deliberate user action.
-2. **Inner sandboxes** — each skill runs in a separate process with its own ASRT config derived from approved capabilities. Skills cannot reach each other's hosts or the gateway's hosts.
-
-The supervisor mediates all communication via IPC. It is ~200 lines and auditable in 15 minutes.
+- **Sandbox backend** — OpenClaw calls sharkcage's `buildExecSpec` for every command and `runShellCommand` for every file operation. All go through `srt` with per-session ASRT policies.
+- **Skill sandboxing** — each skill gets its own ASRT config derived from approved capabilities. Skills cannot reach each other's hosts.
+- **Approval flow** — uses OpenClaw's native `requireApproval` so the human sees approval prompts in their chat channel but the AI never does.
 
 ## Quick Start
 
@@ -96,6 +92,16 @@ When you install a skill, sharkcage:
 5. Asks you to approve
 
 After approval, the skill runs in its own ASRT sandbox scoped to exactly what was approved. If it tries to reach a host outside its scope, the kernel blocks it silently and logs the attempt.
+
+## Platform Support
+
+| Platform | Sandbox | How |
+|----------|---------|-----|
+| macOS | Seatbelt (sandbox-exec) | Native via `srt` |
+| Linux | bubblewrap + seccomp | Native via `srt` |
+| Windows | bubblewrap + seccomp | Via WSL2 — run OpenClaw inside WSL2 |
+
+`srt` (Anthropic Sandbox Runtime) provides kernel-level enforcement on all three. On Windows, WSL2 gives you a real Linux kernel, so the same bubblewrap+seccomp sandbox works identically.
 
 ## Documentation
 
