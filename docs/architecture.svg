@@ -1,0 +1,154 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-20 -20 1120 740" font-family="system-ui, -apple-system, sans-serif">
+  <!-- Title -->
+  <text x="420" y="20" font-size="26" font-weight="bold" text-anchor="middle" fill="#1e1e1e">Yeet — System Architecture</text>
+  <text x="420" y="42" font-size="14" text-anchor="middle" fill="#757575">Trust layer for OpenClaw</text>
+
+  <!-- Outer ASRT Sandbox -->
+  <rect x="0" y="60" width="820" height="620" rx="12" fill="#ffc9c9" fill-opacity="0.2" stroke="#ef4444" stroke-width="2" stroke-dasharray="8,4"/>
+  <text x="15" y="80" font-size="13" fill="#ef4444" font-weight="600">OUTER ASRT SANDBOX (kernel-enforced, init-locked, signed config)</text>
+
+  <!-- OpenClaw Zone -->
+  <rect x="30" y="100" width="760" height="555" rx="10" fill="#dbe4ff" fill-opacity="0.25" stroke="#4a9eed" stroke-width="1"/>
+  <text x="45" y="120" font-size="17" fill="#2563eb" font-weight="600">OpenClaw Gateway</text>
+
+  <!-- Channel boxes -->
+  <rect x="50" y="135" width="105" height="42" rx="8" fill="#a5d8ff" stroke="#4a9eed" stroke-width="1.5"/>
+  <text x="102" y="161" font-size="14" text-anchor="middle" fill="#1e1e1e">Signal</text>
+
+  <rect x="165" y="135" width="105" height="42" rx="8" fill="#a5d8ff" stroke="#4a9eed" stroke-width="1.5"/>
+  <text x="217" y="161" font-size="14" text-anchor="middle" fill="#1e1e1e">Telegram</text>
+
+  <rect x="280" y="135" width="105" height="42" rx="8" fill="#a5d8ff" stroke="#4a9eed" stroke-width="1.5"/>
+  <text x="332" y="161" font-size="14" text-anchor="middle" fill="#1e1e1e">WhatsApp</text>
+
+  <rect x="395" y="135" width="105" height="42" rx="8" fill="#a5d8ff" stroke="#4a9eed" stroke-width="1.5"/>
+  <text x="447" y="161" font-size="14" text-anchor="middle" fill="#1e1e1e">Discord</text>
+
+  <rect x="510" y="135" width="105" height="42" rx="8" fill="#a5d8ff" stroke="#4a9eed" stroke-width="1.5"/>
+  <text x="562" y="161" font-size="14" text-anchor="middle" fill="#1e1e1e">HA Voice</text>
+
+  <rect x="625" y="135" width="105" height="42" rx="8" fill="#a5d8ff" stroke="#4a9eed" stroke-width="1.5"/>
+  <text x="677" y="161" font-size="14" text-anchor="middle" fill="#1e1e1e">iMessage</text>
+
+  <rect x="740" y="135" width="40" height="42" rx="8" fill="#a5d8ff" stroke="#4a9eed" stroke-width="1.5"/>
+  <text x="760" y="161" font-size="14" text-anchor="middle" fill="#1e1e1e">...</text>
+
+  <text x="50" y="195" font-size="11" fill="#757575">Only configured channel APIs reachable — outer sandbox blocks unconfigured ones</text>
+
+  <!-- Arrow down -->
+  <line x1="410" y1="205" x2="410" y2="225" stroke="#4a9eed" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Gateway -->
+  <rect x="230" y="230" width="360" height="45" rx="8" fill="#d0bfff" stroke="#8b5cf6" stroke-width="1.5"/>
+  <text x="410" y="258" font-size="15" text-anchor="middle" fill="#1e1e1e">Gateway (routing, sessions, presence, web UI)</text>
+
+  <line x1="410" y1="275" x2="410" y2="295" stroke="#8b5cf6" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Pi Agent -->
+  <rect x="270" y="300" width="280" height="45" rx="8" fill="#d0bfff" stroke="#8b5cf6" stroke-width="1.5"/>
+  <text x="410" y="328" font-size="15" text-anchor="middle" fill="#1e1e1e">Pi Agent (LLM inference + tool calling)</text>
+
+  <line x1="410" y1="345" x2="410" y2="365" stroke="#8b5cf6" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Yeet Capability Gate -->
+  <rect x="180" y="370" width="460" height="50" rx="8" fill="#fff3bf" stroke="#f59e0b" stroke-width="2.5"/>
+  <text x="410" y="392" font-size="16" text-anchor="middle" fill="#1e1e1e" font-weight="600">Yeet Capability Gate</text>
+  <text x="410" y="410" font-size="12" text-anchor="middle" fill="#757575">Approve once at install — enforce always — no runtime prompts</text>
+
+  <line x1="410" y1="420" x2="410" y2="440" stroke="#f59e0b" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Inner ASRT Sandbox -->
+  <rect x="100" y="445" width="600" height="195" rx="10" fill="#ffc9c9" fill-opacity="0.2" stroke="#ef4444" stroke-width="2" stroke-dasharray="8,4"/>
+  <text x="115" y="465" font-size="13" fill="#ef4444" font-weight="600">INNER ASRT SANDBOX (per-skill, kernel-enforced, tighter than outer)</text>
+
+  <!-- Agent -->
+  <rect x="180" y="480" width="440" height="40" rx="8" fill="#c3fae8" stroke="#22c55e" stroke-width="1.5"/>
+  <text x="400" y="505" font-size="14" text-anchor="middle" fill="#1e1e1e">Coding Agent (Claude Code / Pi / OpenCode / Aider)</text>
+
+  <text x="400" y="535" font-size="11" text-anchor="middle" fill="#757575">Runs as if --dangerously-skip-permissions — but ASRT enforces tighter boundaries</text>
+
+  <!-- Tool boxes -->
+  <rect x="130" y="550" width="150" height="35" rx="6" fill="#b2f2bb" stroke="#22c55e" stroke-width="1"/>
+  <text x="205" y="573" font-size="13" text-anchor="middle" fill="#1e1e1e">bash / read / write</text>
+
+  <rect x="300" y="550" width="150" height="35" rx="6" fill="#b2f2bb" stroke="#22c55e" stroke-width="1"/>
+  <text x="375" y="573" font-size="13" text-anchor="middle" fill="#1e1e1e">skill tools (HTTP)</text>
+
+  <rect x="470" y="550" width="150" height="35" rx="6" fill="#b2f2bb" stroke="#22c55e" stroke-width="1"/>
+  <text x="545" y="573" font-size="13" text-anchor="middle" fill="#1e1e1e">fleet dispatch</text>
+
+  <!-- Kernel label -->
+  <rect x="100" y="600" width="600" height="30" rx="4" fill="#1e1e1e" fill-opacity="0.05"/>
+  <text x="400" y="620" font-size="12" text-anchor="middle" fill="#757575">OS Kernel — Seatbelt (macOS) / bubblewrap + seccomp (Linux) — cannot be bypassed</text>
+
+  <!-- Audit Log -->
+  <rect x="660" y="370" width="120" height="50" rx="8" fill="#eebefa" stroke="#8b5cf6" stroke-width="1.5"/>
+  <text x="720" y="392" font-size="14" text-anchor="middle" fill="#1e1e1e">Audit Log</text>
+  <text x="720" y="408" font-size="11" text-anchor="middle" fill="#757575">(SQLite)</text>
+  <line x1="640" y1="395" x2="660" y2="395" stroke="#8b5cf6" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arr)"/>
+
+  <!-- External Services -->
+  <text x="860" y="80" font-size="16" font-weight="600" fill="#1e1e1e">External Services</text>
+
+  <rect x="860" y="95" width="170" height="36" rx="6" fill="#ffd8a8" stroke="#f59e0b" stroke-width="1"/>
+  <text x="945" y="118" font-size="13" text-anchor="middle" fill="#1e1e1e">Meals API</text>
+
+  <rect x="860" y="140" width="170" height="36" rx="6" fill="#ffd8a8" stroke="#f59e0b" stroke-width="1"/>
+  <text x="945" y="163" font-size="13" text-anchor="middle" fill="#1e1e1e">Home Assistant</text>
+
+  <rect x="860" y="185" width="170" height="36" rx="6" fill="#ffd8a8" stroke="#f59e0b" stroke-width="1"/>
+  <text x="945" y="208" font-size="13" text-anchor="middle" fill="#1e1e1e">OpenRouter (LLM)</text>
+
+  <rect x="860" y="230" width="170" height="36" rx="6" fill="#ffd8a8" stroke="#f59e0b" stroke-width="1"/>
+  <text x="945" y="253" font-size="13" text-anchor="middle" fill="#1e1e1e">GitHub (bot account)</text>
+
+  <line x1="820" y1="113" x2="860" y2="113" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#arr)"/>
+  <line x1="820" y1="158" x2="860" y2="158" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#arr)"/>
+  <line x1="820" y1="203" x2="860" y2="203" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#arr)"/>
+  <line x1="820" y1="248" x2="860" y2="248" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <text x="860" y="290" font-size="11" fill="#757575">Only init-configured hosts</text>
+  <text x="860" y="304" font-size="11" fill="#757575">reachable (outer ASRT)</text>
+
+  <!-- Fleet -->
+  <text x="860" y="345" font-size="16" font-weight="600" fill="#1e1e1e">Fleet (Nomad)</text>
+
+  <rect x="860" y="360" width="170" height="70" rx="8" fill="#d3f9d8" stroke="#22c55e" stroke-width="1.5"/>
+  <text x="945" y="385" font-size="13" text-anchor="middle" fill="#1e1e1e">Fleet Node</text>
+  <text x="945" y="402" font-size="11" text-anchor="middle" fill="#757575">OpenClaw + yeet</text>
+  <text x="945" y="416" font-size="11" text-anchor="middle" fill="#757575">+ dual ASRT</text>
+
+  <rect x="860" y="440" width="170" height="70" rx="8" fill="#d3f9d8" stroke="#22c55e" stroke-width="1.5"/>
+  <text x="945" y="465" font-size="13" text-anchor="middle" fill="#1e1e1e">GPU Node</text>
+  <text x="945" y="482" font-size="11" text-anchor="middle" fill="#757575">OpenClaw + yeet</text>
+  <text x="945" y="496" font-size="11" text-anchor="middle" fill="#757575">+ dual ASRT</text>
+
+  <!-- Fleet arrows -->
+  <line x1="820" y1="395" x2="855" y2="395" stroke="#22c55e" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="822" y="388" font-size="10" fill="#22c55e">dispatch</text>
+
+  <line x1="860" y1="415" x2="825" y2="415" stroke="#22c55e" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arr)"/>
+  <text x="825" y="428" font-size="10" fill="#22c55e">PRs back</text>
+
+  <text x="860" y="530" font-size="11" fill="#757575">Same trust model</text>
+  <text x="860" y="544" font-size="11" fill="#757575">on every node</text>
+
+  <!-- Legend -->
+  <rect x="860" y="575" width="170" height="100" rx="6" fill="white" stroke="#ccc" stroke-width="1"/>
+  <text x="870" y="593" font-size="12" font-weight="600" fill="#1e1e1e">Legend</text>
+  <rect x="870" y="600" width="12" height="12" fill="#ffc9c9" stroke="#ef4444" stroke-width="1"/>
+  <text x="888" y="611" font-size="11" fill="#1e1e1e">ASRT Sandbox (kernel)</text>
+  <rect x="870" y="618" width="12" height="12" fill="#fff3bf" stroke="#f59e0b" stroke-width="1"/>
+  <text x="888" y="629" font-size="11" fill="#1e1e1e">Yeet trust layer</text>
+  <rect x="870" y="636" width="12" height="12" fill="#dbe4ff" stroke="#4a9eed" stroke-width="1"/>
+  <text x="888" y="647" font-size="11" fill="#1e1e1e">OpenClaw (unmodified)</text>
+  <rect x="870" y="654" width="12" height="12" fill="#b2f2bb" stroke="#22c55e" stroke-width="1"/>
+  <text x="888" y="665" font-size="11" fill="#1e1e1e">Execution / Fleet</text>
+
+  <!-- Arrow marker -->
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+    </marker>
+  </defs>
+</svg>
