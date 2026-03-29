@@ -1,15 +1,15 @@
 [submodule "packages/sdk"]
 	path = packages/sdk
-	url = https://github.com/wan0net/yeet-sdk.git
+	url = https://github.com/wan0net/sharkcage-sdk.git
 [submodule "packages/cli"]
 	path = packages/cli
-	url = https://github.com/wan0net/yeet-cli.git
+	url = https://github.com/wan0net/sharkcage-cli.git
 [submodule "packages/frontend"]
 	path = packages/frontend
-	url = https://github.com/wan0net/yeet-frontend.git
+	url = https://github.com/wan0net/sharkcage-frontend.git
 [submodule "packages/supervisor"]
 	path = packages/supervisor
-	url = https://github.com/wan0net/yeet-supervisor.git
+	url = https://github.com/wan0net/sharkcage-supervisor.git
 [submodule "packages/openclaw-plugin"]
 	path = packages/openclaw-plugin
-	url = https://github.com/wan0net/yeet-openclaw-plugin.git
+	url = https://github.com/wan0net/sharkcage-openclaw-plugin.git
