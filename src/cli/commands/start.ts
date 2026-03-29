@@ -101,9 +101,7 @@ export default async function start() {
 
   // --- 10. Running ---
   log("sc", "━━━ sharkcage running ━━━");
-  log("sc", `Gateway:   ws://127.0.0.1:18789`);
-  log("sc", `Token:     ${gatewayToken}`);
-  log("sc", `Web UI:    http://127.0.0.1:18789/?token=${gatewayToken}`);
+  log("sc", `Web UI:    http://127.0.0.1:18789/#token=${gatewayToken}`);
   log("sc", `Dashboard: http://127.0.0.1:18789/sharkcage/?token=${gatewayToken}`);
   log("sc", `API:       http://127.0.0.1:18790/api/status`);
   log("sc", "Press Ctrl+C to stop");
@@ -221,7 +219,17 @@ let gatewayToken = "";
 
 function startOpenClaw(sandboxConfigPath: string): ChildProcess {
   const hasSrt = commandExists("srt");
-  gatewayToken = process.env.OPENCLAW_GATEWAY_TOKEN ?? crypto.randomUUID().slice(0, 16);
+  // Use OpenClaw's configured token if available, then env var, then generate
+  gatewayToken = process.env.OPENCLAW_GATEWAY_TOKEN ?? "";
+  if (!gatewayToken) {
+    try {
+      const ocConfig = JSON.parse(readFileSync(`${home}/.openclaw/openclaw.json`, "utf-8"));
+      gatewayToken = ocConfig.gateway?.auth?.token ?? "";
+    } catch { /* no config */ }
+  }
+  if (!gatewayToken) {
+    gatewayToken = crypto.randomUUID().replace(/-/g, "").slice(0, 24);
+  }
   const args = ["gateway", "run", "--port", "18789", "--auth", "token", "--token", gatewayToken];
 
   // Force IPv4 for localhost resolution (Node defaults to IPv6 ::1 which
