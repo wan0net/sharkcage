@@ -30,13 +30,13 @@ export class ApprovalStore {
             this.cache.set(approval.skill, approval);
           }
         } catch {
-          console.error(`[approvals] failed to load ${name}`);
+          console.error(`failed to load ${name}`);
         }
       }
     } catch {
-      console.log(`[approvals] no approvals directory at ${this.dir}`);
+      console.log(`no approvals directory at ${this.dir}`);
     }
-    console.log(`[approvals] loaded ${this.cache.size} approval(s)`);
+    console.log(`loaded ${this.cache.size} approval(s)`);
   }
 
   /** Get approval for a skill */

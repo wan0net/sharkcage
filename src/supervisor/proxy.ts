@@ -207,7 +207,7 @@ async function handleSocks5(
 
     if (!check.allowed) {
       console.warn(
-        `[proxy] DENIED ${identity.skill} → ${host}:${port} (no matching capability)`
+        `DENIED ${identity.skill} → ${host}:${port} (no matching capability)`
       );
       conn.write(socks5Reply(REP_NOT_ALLOWED));
       conn.destroy();
@@ -227,11 +227,11 @@ async function handleSocks5(
       conn.pipe(upstream);
       upstream.pipe(conn);
 
-      console.log(`[proxy] ALLOWED ${identity.skill} → ${host}:${port} (${check.capability})`);
+      console.log(`ALLOWED ${identity.skill} → ${host}:${port} (${check.capability})`);
     });
 
     upstream.on("error", (err) => {
-      console.error(`[proxy] upstream error ${host}:${port}:`, err.message);
+      console.error(`upstream error ${host}:${port}:`, err.message);
       conn.write(socks5Reply(REP_HOST_UNREACHABLE));
       conn.destroy();
     });
@@ -257,17 +257,17 @@ export function startLocalhostProxy(
 ): Server {
   const server = createServer((conn: Socket) => {
     handleSocks5(conn, tokenRegistry, audit, env).catch((err) => {
-      console.error("[proxy] unhandled error:", err);
+      console.error("unhandled error:", err);
       conn.destroy();
     });
   });
 
   server.listen(port, "127.0.0.1", () => {
-    console.log(`[proxy] SOCKS5 listening on 127.0.0.1:${port}`);
+    console.log(`SOCKS5 listening on 127.0.0.1:${port}`);
   });
 
   server.on("error", (err) => {
-    console.error("[proxy] server error:", err);
+    console.error("server error:", err);
   });
 
   return server;

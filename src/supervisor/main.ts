@@ -110,17 +110,17 @@ function startServer(): Promise<void> {
   return new Promise((resolve, reject) => {
     const server = createServer((conn: Socket) => {
       handleConnection(conn).catch((err) =>
-        console.error("[supervisor] connection error:", err)
+        console.error("connection error:", err)
       );
     });
 
     server.on("error", (err) => {
-      console.error("[supervisor] server error:", err);
+      console.error("server error:", err);
       reject(err);
     });
 
     server.listen(socketPath, () => {
-      console.log(`[supervisor] listening on ${socketPath}`);
+      console.log(`listening on ${socketPath}`);
     });
   });
 }
@@ -160,7 +160,7 @@ async function handleConnection(conn: Socket): Promise<void> {
     });
 
     conn.on("error", (err) => {
-      console.error("[supervisor] connection error:", err);
+      console.error("connection error:", err);
       resolve();
     });
   });
@@ -168,18 +168,18 @@ async function handleConnection(conn: Socket): Promise<void> {
 
 // --- Boot ---
 async function main(): Promise<void> {
-  console.log("[supervisor] starting...");
-  console.log(`[supervisor] config: ${configDir}`);
-  console.log(`[supervisor] plugins: ${pluginDir}`);
-  console.log(`[supervisor] socket: ${socketPath}`);
+  console.log("starting...");
+  console.log(`config: ${configDir}`);
+  console.log(`plugins: ${pluginDir}`);
+  console.log(`socket: ${socketPath}`);
 
   // Check ASRT
   const hasAsrt = await checkAsrtAvailable();
   if (hasAsrt) {
-    console.log("[supervisor] ASRT (srt) available — kernel sandbox enabled");
+    console.log("ASRT (srt) available — kernel sandbox enabled");
   } else {
-    console.warn("[supervisor] WARNING: srt not found — running WITHOUT kernel sandbox");
-    console.warn("[supervisor] Install @anthropic-ai/sandbox-runtime for full protection");
+    console.warn("WARNING: srt not found — running WITHOUT kernel sandbox");
+    console.warn("Install @anthropic-ai/sandbox-runtime for full protection");
   }
 
   // Start SOCKS5 localhost proxy
@@ -206,7 +206,7 @@ async function main(): Promise<void> {
 
 // --- Shutdown ---
 function shutdown(): void {
-  console.log("[supervisor] shutting down...");
+  console.log("shutting down...");
   audit.close();
   try { unlinkSync(socketPath); } catch { /* already gone */ }
   process.exit(0);
@@ -216,6 +216,6 @@ process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 
 main().catch((err) => {
-  console.error("[supervisor] fatal:", err);
+  console.error("fatal:", err);
   process.exit(1);
 });

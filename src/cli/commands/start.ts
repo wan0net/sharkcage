@@ -28,40 +28,34 @@ const socketPath = `${dataDir}/supervisor.sock`;
 const pidFile = `${dataDir}/sharkcage.pid`;
 
 export default async function start() {
-  console.log(`
-╭─────────────────────────────────────╮
-│        sharkcage start               │
-╰─────────────────────────────────────╯
-`);
+  console.log("");
+  log("sc", "sharkcage starting");
+  console.log("");
 
   // --- 1. Check dependencies ---
-  console.log("Checking dependencies...");
-
   const deps = checkDependencies();
-  if (!deps.allPresent) {
-    console.log("");
-    await installMissing(deps);
-    console.log("");
-  }
+  log("sc", `node: ok`);
+  log("sc", `openclaw: ${deps.openclaw ? "ok" : "missing"}`);
+  log("sc", `srt: ${deps.srt ? "ok" : "not found (sandbox disabled)"}`);
 
-  console.log("  [ok] All dependencies present\n");
+  if (!deps.allPresent) {
+    await installMissing(deps);
+  }
 
   // --- 2. Check config ---
   if (!existsSync(`${configDir}/gateway.json`)) {
-    console.log("No config found. Running setup wizard...\n");
+    log("sc", "No config found — running setup wizard");
     const init = await import("./init.js");
     await init.default();
-    console.log("");
   }
 
   // --- 3. Generate gateway sandbox config ---
   const sandboxConfigPath = `${configDir}/gateway-sandbox.json`;
   if (!existsSync(sandboxConfigPath)) {
-    console.log("Generating gateway sandbox config...");
     generateGatewaySandboxConfig(sandboxConfigPath);
-    console.log(`  Written to ${sandboxConfigPath}\n`);
+    log("sc", `Gateway sandbox config written to ${sandboxConfigPath}`);
   } else {
-    console.log("  [ok] Gateway sandbox config exists\n");
+    log("sc", "Gateway sandbox config exists");
   }
 
   // --- 4. Ensure directories ---
@@ -77,10 +71,7 @@ export default async function start() {
     try {
       const pids = JSON.parse(readFileSync(pidFile, "utf-8"));
       if (isProcessRunning(pids.supervisor) || isProcessRunning(pids.openclaw)) {
-        console.log("Sharkcage is already running.");
-        console.log(`  Supervisor PID: ${pids.supervisor}`);
-        console.log(`  OpenClaw PID: ${pids.openclaw}`);
-        console.log("  Run 'sc stop' first.\n");
+        log("sc", "Already running — run 'sc stop' first");
         process.exit(1);
       }
     } catch { /* corrupt pid file */ }
@@ -112,15 +103,12 @@ export default async function start() {
 
   // --- 10. Running ---
   console.log("");
-  console.log("╭─────────────────────────────────────╮");
-  console.log("│          sharkcage running            │");
-  console.log("╰─────────────────────────────────────╯");
-  console.log(`  Gateway:   ws://127.0.0.1:18789`);
-  console.log(`  Token:     ${gatewayToken}`);
-  console.log(`  Dashboard: http://127.0.0.1:18790/sharkcage/`);
-  console.log(`  Supervisor PID: ${supervisorProc.pid}  OpenClaw PID: ${openclawProc.pid}`);
-  console.log("");
-  console.log("  Press Ctrl+C to stop.");
+  log("sc", "━━━ sharkcage running ━━━");
+  log("sc", `Gateway:   ws://127.0.0.1:18789`);
+  log("sc", `Token:     ${gatewayToken}`);
+  log("sc", `Dashboard: http://127.0.0.1:18790/sharkcage/`);
+  log("sc", `PIDs:      supervisor=${supervisorProc.pid} openclaw=${openclawProc.pid}`);
+  log("sc", "Press Ctrl+C to stop");
   console.log("");
 
   // --- 11. Monitor + shutdown ---
@@ -129,12 +117,12 @@ export default async function start() {
   const shutdown = () => {
     if (shuttingDown) return;
     shuttingDown = true;
-    console.log("\nShutting down...");
+    log("sc", "Shutting down...");
     safeKill(openclawProc);
     safeKill(supervisorProc);
     try { unlinkSync(pidFile); } catch { /* gone */ }
     try { unlinkSync(socketPath); } catch { /* gone */ }
-    console.log("Stopped.");
+    log("sc", "Stopped");
     process.exit(0);
   };
 
@@ -175,9 +163,7 @@ function checkDependencies(): DepStatus {
   const openclaw = commandExists("openclaw");
   const srt = commandExists("srt");
 
-  console.log(`  ${node ? "[ok]" : "[  ]"} Node.js`);
-  console.log(`  ${openclaw ? "[ok]" : "[  ]"} OpenClaw`);
-  console.log(`  ${srt ? "[ok]" : "[  ]"} srt (Anthropic Sandbox Runtime)`);
+  // Logging handled by caller
 
   return { node, openclaw, srt, allPresent: node && openclaw };
 }
@@ -249,15 +235,15 @@ function startOpenClaw(sandboxConfigPath: string): ChildProcess {
   const env = { ...process.env, NODE_OPTIONS: nodeOptions } as NodeJS.ProcessEnv;
 
   if (hasSrt) {
-    // TODO: re-enable outer srt wrap once bind issue is resolved
-    // return spawn("srt", ["--settings", sandboxConfigPath, "openclaw", ...args], {
-    //   stdio: "inherit",
-    //   env,
-    //   detached: false,
-    // });
-    console.log("  [info] Outer ASRT sandbox available (srt found)");
+    log("sc", "Outer ASRT sandbox enabled");
+    const proc = spawn("srt", ["--settings", sandboxConfigPath, "openclaw", ...args], {
+      stdio: ["pipe", "pipe", "pipe"],
+      env,
+      detached: false,
+    });
+    prefixOutput(proc, "openclaw");
+    return proc;
   }
-
   const proc = spawn("openclaw", args, {
     stdio: ["pipe", "pipe", "pipe"],
     env,
@@ -288,7 +274,7 @@ function ensureOpenClawPluginRegistered(): void {
     ]);
 
     if (!pluginPath) {
-      console.warn("  [skip] sharkcage plugin not found\n");
+      log("sc", "Plugin not found — skipping OpenClaw registration");
       return;
     }
 
@@ -296,12 +282,12 @@ function ensureOpenClawPluginRegistered(): void {
     if (!paths.includes(pluginPath)) {
       paths.push(pluginPath);
       writeFileSync(ocConfigPath, JSON.stringify(config, null, 2) + "\n");
-      console.log("  [ok] Sharkcage plugin registered with OpenClaw\n");
+      log("sc", "Plugin registered with OpenClaw");
     } else {
-      console.log("  [ok] Sharkcage plugin already registered\n");
+      log("sc", "Plugin already registered");
     }
   } catch {
-    console.warn("  [skip] Could not read OpenClaw config\n");
+    log("sc", "Could not read OpenClaw config — skipping plugin registration");
   }
 }
 
@@ -358,6 +344,7 @@ function generateGatewaySandboxConfig(outPath: string): void {
     network: {
       allowedDomains: domainList.length > 0 ? domainList : [],
       deniedDomains: [],
+      allowLocalBinding: true,
       allowUnixSockets: [`${configDir}/data/supervisor.sock`],
     },
     filesystem: {
