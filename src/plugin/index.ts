@@ -17,6 +17,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { SupervisorClient } from "./ipc.js";
 import { SkillMap } from "./skill-map.js";
 import { registerDashboardRoutes } from "./dashboard.js";
+import { registerAsrtBackend } from "./asrt-backend.js";
 
 // --- Config ---
 const home = process.env.HOME ?? ".";
@@ -37,6 +38,9 @@ const skillMap = new SkillMap();
  */
 export function register(api: OpenClawPluginApi): void {
   console.log("[sharkcage] registering plugin...");
+
+  // Register ASRT as a sandbox backend (if srt is available)
+  registerAsrtBackend(api);
 
   // Dashboard — read-only UI at /sharkcage/
   registerDashboardRoutes(api);
