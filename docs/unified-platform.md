@@ -599,151 +599,141 @@ Make the risk visible. Make the boundaries enforceable. Let the user decide once
 
 ## 12. Repo Structure
 
+### 12.1 What Stays
+
 ```
-yeet/                              # Public umbrella
+yeet/                              # Public umbrella (wan0net/yeet)
 ├── docs/                          # Design doc, architecture diagram
 │   ├── unified-platform.md
 │   └── architecture.svg
 ├── ansible/                       # Fleet provisioning
 ├── jobs/                          # Nomad job templates
+├── cli/                           # Original yeet CLI (stays until v2 is ready)
+├── gateway/                       # Original gateway (stays until v2 is ready)
 │
-├── packages/
-│   ├── sdk/                       # Capability types, scanning, trust (done)
-│   ├── supervisor/                # The ~200 line process that owns all sandboxes
-│   ├── openclaw-plugin/           # Interceptors, IPC to supervisor
-│   ├── cli/                       # yeet init, verify, sign, approve, config (partially done)
-│   ├── inference/                 # AI capability inference for existing skills
-│   └── frontend/                  # Dashboard additions
+├── packages/                      # v2 submodules
+│   ├── sdk/                       # Capability types, ASRT mapper, scanning (DONE)
+│   ├── supervisor/                # Process supervisor, ASRT spawning, audit (DONE)
+│   ├── openclaw-plugin/           # Interceptors, IPC to supervisor (DONE)
+│   ├── cli/                       # yeet CLI v2: init, verify, sign, approve (PARTIAL)
+│   ├── inference/                 # AI capability inference (NOT STARTED)
+│   └── frontend/                  # Dashboard additions to OpenClaw web UI (SCAFFOLD)
 ```
 
-Skills are separate repos:
+### 12.2 What Was Retired
+
+| Repo | Why Retired |
+|------|-----------|
+| `yeet-core` | OpenClaw is the gateway. Custom Deno gateway was a stepping stone. Archived. |
+| `yeet-sandbox` | Supervisor has ASRT integration built in. Redundant. Archived. |
+
+### 12.3 Skills (separate repos, each its own sandbox)
+
 ```
-yeet-skill-meals/
-yeet-skill-ha/
-yeet-skill-briefing/
-yeet-skill-fleet/
-yeet-skill-composio/
-yeet-skill-godot/
+yeet-skill-meals/                  # Meal planning (DONE, needs IPC refactor)
+yeet-skill-ha/                     # Home Assistant control (NOT STARTED)
+yeet-skill-briefing/               # News briefing (NOT STARTED)
+yeet-skill-fleet/                  # Fleet dispatch via Nomad (NOT STARTED)
+yeet-skill-composio/               # Multi-agent orchestration (NOT STARTED)
+yeet-skill-godot/                  # Godot game dev via MCP (NOT STARTED)
 ```
 
-Dependency graph:
+Any existing OpenClaw/ClawHub skill also works — AI infers capabilities automatically.
+MCP servers run as sandboxed skills (supervisor spawns them in ASRT, stdio transport).
+
+### 12.4 Dependency Graph
+
 ```
-yeet-sdk                    (zero deps — done)
+yeet-sdk                           (zero deps — DONE)
   |
-yeet-supervisor             (sdk + @anthropic-ai/sandbox-runtime)
+yeet-supervisor                    (sdk + srt — DONE)
   |
-yeet-openclaw-plugin        (sdk — IPC to supervisor)
-yeet-cli                    (sdk — partially done)
-yeet-inference              (sdk + LLM client)
-yeet-frontend               (sdk — talks to supervisor API)
-yeet-skill-*                (sdk for types only)
+yeet-openclaw-plugin               (sdk — DONE)
+yeet-cli                           (sdk — PARTIAL)
+yeet-inference                     (sdk + LLM client — NOT STARTED)
+yeet-frontend                      (talks to supervisor API — SCAFFOLD)
+yeet-skill-*                       (sdk for types — meals DONE, rest NOT STARTED)
 ```
+
+### 12.5 Line Counts
+
+| Component | Lines | Status |
+|-----------|------:|--------|
+| yeet-sdk | ~700 | Done |
+| yeet-supervisor | ~580 | Done |
+| yeet-openclaw-plugin | ~380 | Done |
+| yeet-cli | ~500 | Partial (~200 remaining) |
+| yeet-skill-meals | ~350 | Done (needs IPC refactor) |
+| yeet-inference | ~200 | Not started |
+| yeet-frontend | ~1500 | Not started |
+| **Trust path total** | **~1,660** | **Auditable in an afternoon** |
 
 ---
 
 ## 13. Implementation Plan
 
-### Phase 1: Supervisor + Sandbox (weeks 1-2)
+### Phase 1: Supervisor + Sandbox — DONE
 
-**Goal:** A working supervisor that can sandbox any process with per-skill ASRT configs.
+- [x] `yeet-sdk`: capability types, ASRT config mapper, scanning, testing
+- [x] `yeet-supervisor`: unix socket IPC, approval store, ASRT sandbox spawning, audit log
+- [x] `yeet-openclaw-plugin`: tool.before/after interceptors, IPC client, skill mapping
+- [x] `yeet-cli`: init wizard (persona-driven), verify scanner
+- [x] `yeet-skill-meals`: 8 tools with capability manifest
+- [ ] Test: manually create approval, supervisor spawns sandboxed process
 
-**Deliverables:**
-- `yeet-supervisor`: Node/Deno process that:
-  - Reads capability approvals from `~/.config/yeet/approvals/`
-  - Maps capabilities to ASRT configs (`capabilitiesToSandboxConfig()`)
-  - Spawns ASRT-wrapped worker processes
-  - IPC via unix socket (JSON messages over stdin/stdout)
-  - Logs all tool calls to SQLite audit DB
-- Test: manually create an approval file, supervisor spawns a sandboxed curl that can only reach one host
+### Phase 2: End-to-End Integration
 
-**Validates:** ASRT works, per-skill configs work, IPC works.
+- [ ] `yeet start` command: starts supervisor + OpenClaw in outer ASRT
+- [ ] Install OpenClaw locally, register yeet plugin
+- [ ] Test: Signal message → OpenClaw → yeet interceptor → supervisor → sandboxed skill → result
+- [ ] Test: skill tries to reach unapproved host → ASRT blocks → audit log entry
 
-### Phase 2: OpenClaw Integration (weeks 3-4)
+### Phase 3: Homelab Skills
 
-**Goal:** Yeet plugin inside OpenClaw that routes tool calls to the supervisor.
+- [ ] Refactor `yeet-skill-meals` for out-of-process IPC model (stdin/stdout JSON)
+- [ ] `yeet-skill-ha`: Home Assistant (state reading, service calls, automations)
+- [ ] `yeet-skill-briefing`: news digest from existing CF Worker
+- [ ] Test: "what's for dinner?" and "turn off the lights" via Signal
 
-**Deliverables:**
-- `yeet-openclaw-plugin`: OpenClaw plugin that:
-  - Registers `tool.before` interceptor
-  - On tool call: sends IPC request to supervisor
-  - Receives result, returns to Pi
-  - Registers `tool.after` interceptor for audit logging
-- `yeet start` command that:
-  - Starts supervisor
-  - Starts OpenClaw in outer ASRT sandbox
-  - Connects them via unix socket
-- Test: install OpenClaw + yeet plugin, send a message on Signal, tool call goes through supervisor and back
+### Phase 4: AI Capability Inference
 
-**Validates:** OpenClaw integration works end-to-end without forking.
+- [ ] `yeet-inference`: read SKILL.md, send to LLM, extract capabilities
+- [ ] `yeet plugin add`: clone → infer → scan → approve → install
+- [ ] Test with 5 popular ClawHub skills
+- [ ] Validates day-one OpenClaw ecosystem compatibility
 
-### Phase 3: First Skills (weeks 5-6)
+### Phase 5: CLI Completion
 
-**Goal:** Homelab skills working through yeet.
+- [ ] `yeet approve`: review and modify capability approvals
+- [ ] `yeet config`: add/remove services, re-sign gateway config
+- [ ] `yeet audit`: query audit log
+- [ ] `yeet sign`: Ed25519 signing
+- [ ] `yeet plugin list/remove`: plugin management
+- [ ] SSH and AWS as opt-in capabilities (controlled access, not blanket deny)
 
-**Deliverables:**
-- `yeet-skill-meals`: meal planning (ported from existing CF Worker integration)
-- `yeet-skill-ha`: Home Assistant (state reading, service calls, automations)
-- Each skill has a `plugin.json` with capability manifest
-- Test: "what's for dinner?" and "turn off the lights" via Signal through OpenClaw + yeet
+### Phase 6: Fleet Dispatch
 
-**Validates:** Skills work out-of-process with per-skill sandboxing.
+- [ ] `yeet-skill-fleet`: Nomad dispatch + status + logs
+- [ ] Fleet node provisioning via Ansible (OpenClaw + yeet + ASRT)
+- [ ] Capability propagation from dispatch to fleet node
+- [ ] Fleet nodes delegate to coding agents (Claude Code, OpenCode, Aider)
+- [ ] Coding agents use their own API keys/subs, not the gateway's
+- [ ] `yeet-skill-composio`: multi-agent orchestration
+- [ ] Test: "build feature X on project Y" → fleet node → sandboxed agents → PRs
 
-### Phase 4: AI Capability Inference (weeks 7-8)
+### Phase 7: Dashboard + Signing
 
-**Goal:** Any existing OpenClaw/ClawHub skill can be installed with AI-generated capabilities.
-
-**Deliverables:**
-- `yeet-inference`: module that:
-  - Reads SKILL.md content
-  - Sends to LLM with extraction prompt
-  - Returns structured capability manifest
-  - Integrates with `yeet plugin add` flow
-- `yeet plugin add` command: clone → infer → scan → approve → install
-- Test: install 5 popular ClawHub skills, verify AI-inferred manifests are reasonable
-
-**Validates:** Day-one compatibility with OpenClaw ecosystem.
-
-### Phase 5: CLI Polish + Scanner (weeks 9-10)
-
-**Goal:** Complete CLI for all user personas.
-
-**Deliverables:**
-- `yeet init`: persona-driven setup wizard (done, needs supervisor integration)
-- `yeet verify`: skill scanner (done, needs AI inference integration)
-- `yeet approve`: review and modify capability approvals
-- `yeet config`: add/remove services, re-sign gateway config
-- `yeet audit`: query audit log
-- `yeet sign`: Ed25519 signing
-- `yeet plugin list/remove`: plugin management
-- Test: full lifecycle from init to install to running to auditing
-
-### Phase 6: Fleet Dispatch (weeks 11-12)
-
-**Goal:** Coding tasks dispatched to fleet nodes, sandboxed.
-
-**Deliverables:**
-- `yeet-skill-fleet`: Nomad dispatch + status + logs as an OpenClaw skill
-- Fleet node provisioning via Ansible (OpenClaw + yeet + ASRT)
-- Capability propagation from dispatch to fleet node
-- `yeet-skill-composio`: multi-agent orchestration
-- Test: "build feature X on project Y" → fleet node → sandboxed agents → PRs
-
-### Phase 7: Dashboard + Signing (weeks 13-14)
-
-**Goal:** Web UI for monitoring and trust management.
-
-**Deliverables:**
-- Dashboard: agent status, fleet overview, PR review, cost tracking, audit viewer
-- Capability approval management UI
-- Trust store management (add/remove signers)
-- CI integration: `yeet verify --strict` for skill publishing pipelines
-- First-party skill signing and publishing
+- [ ] Dashboard additions to OpenClaw's web UI
+- [ ] Agent status, fleet overview, PR review, cost tracking, audit viewer
+- [ ] Capability approval management UI
+- [ ] Trust store management
+- [ ] CI integration: `yeet verify --strict`
 
 ### Phase 8: Advanced (ongoing)
 
-- Budget enforcement per skill
-- Per-skill session isolation (addresses Gap 2)
-- Runtime cost alerting
-- Godot plugin (MCP bridge to GPU node)
-- Additional channel-specific skills
-- Community skill curation tooling
+- [ ] Budget enforcement per skill
+- [ ] Per-skill session isolation
+- [ ] Godot plugin (MCP bridge to GPU node)
+- [ ] SSH/AWS controlled access capabilities
+- [ ] Runtime cost alerting
+- [ ] Community skill curation tooling
