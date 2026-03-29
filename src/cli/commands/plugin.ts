@@ -1,10 +1,11 @@
 /**
- * sharkcage plugin <subcommand>
+ * sc skill <subcommand>
  *
  * Subcommands:
  *   add <url|path>   Install a skill from git URL or local path
  *   list             List installed skills
  *   remove <name>    Remove an installed skill
+ *   infer <name>     Infer capabilities from source
  */
 
 import { execFileSync } from "node:child_process";
@@ -35,9 +36,9 @@ export default async function plugin() {
       break;
     default:
       console.log(`Usage:
-  sc plugin add <url|path>     Install a skill
-  sc plugin list               List installed skills
-  sc plugin remove <name>      Remove a skill
+  sc skill add <url|path>      Install a skill
+  sc skill list                List installed skills
+  sc skill remove <name>       Remove a skill
   sc plugin infer <name>       Infer manifest for an installed skill`);
   }
 }

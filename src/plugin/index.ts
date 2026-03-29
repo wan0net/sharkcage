@@ -171,11 +171,11 @@ export function register(api: OpenClawPluginApi): void {
   api.on("inbound_claim", async (event: InboundClaimEvent, _ctx: HookContext) => {
     const text = (event.content ?? "").trim();
 
-    // sc install <url> — install a third-party skill
-    const installMatch = text.match(/^sc\s+install\s+(.+)$/i);
+    // sc skill add <url> — install a skill (also accept sc install for convenience)
+    const installMatch = text.match(/^sc\s+(?:skill\s+add|install)\s+(.+)$/i);
     if (installMatch) {
       const source = installMatch[1].trim();
-      console.log(`[sharkcage] install request from chat: ${source}`);
+      console.log(`[sharkcage] plugin install from chat: ${source}`);
       const { execFileSync } = await import("node:child_process");
       try {
         execFileSync("npx", ["tsx", `${process.cwd()}/src/cli/main.ts`, "plugin", "add", source], {
