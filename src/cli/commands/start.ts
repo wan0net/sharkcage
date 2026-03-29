@@ -297,8 +297,11 @@ function ensureOpenClawPluginRegistered(): void {
     // Lock down: disable all bundled skills and deny dangerous tools.
     // Users approve skills through sharkcage's approval flow.
     if (!config.skills) config.skills = {};
-    if (!Array.isArray(config.skills.allowBundled) || config.skills.allowBundled.length !== 0) {
-      config.skills.allowBundled = []; // no bundled skills loaded
+    // allowBundled=[] means "allow all" in OpenClaw. Use a sentinel that matches nothing.
+    const isLocked = Array.isArray(config.skills.allowBundled) &&
+      config.skills.allowBundled.length === 1 && config.skills.allowBundled[0] === "__sharkcage_none__";
+    if (!isLocked) {
+      config.skills.allowBundled = ["__sharkcage_none__"]; // matches no real skill
       changed = true;
       log("sc", "Bundled skills disabled — approve via sharkcage");
     }
