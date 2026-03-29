@@ -144,8 +144,6 @@ export function register(api: OpenClawPluginApi): void {
             };
             try {
               writeFileSync(approvalPath, JSON.stringify(approval, null, 2) + "\n");
-              // Also enable in OpenClaw config
-              enableSkillInOpenClaw(skill);
               console.log(`[sharkcage] approval granted for ${skill} via channel`);
             } catch (err) {
               console.error(`[sharkcage] failed to write approval file for ${skill}:`, err);
@@ -191,32 +189,6 @@ export function register(api: OpenClawPluginApi): void {
       return { handled: true };
     }
 
-    // sc enable <skill> — enable a disabled bundled skill
-    const enableMatch = text.match(/^sc\s+enable\s+(.+)$/i);
-    if (enableMatch) {
-      const skillName = enableMatch[1].trim().toLowerCase();
-      console.log(`[sharkcage] enable request from chat: ${skillName}`);
-      enableSkillInOpenClaw(skillName);
-      console.log(`[sharkcage] skill "${skillName}" enabled`);
-      return { handled: true };
-    }
-
-    // sc disable <skill> — disable a bundled skill
-    const disableMatch = text.match(/^sc\s+disable\s+(.+)$/i);
-    if (disableMatch) {
-      const skillName = disableMatch[1].trim().toLowerCase();
-      console.log(`[sharkcage] disable request from chat: ${skillName}`);
-      disableSkillInOpenClaw(skillName);
-      console.log(`[sharkcage] skill "${skillName}" disabled`);
-      return { handled: true };
-    }
-
-    // sc skills — list skill status
-    const skillsMatch = text.match(/^sc\s+skills$/i);
-    if (skillsMatch) {
-      // Don't consume — let the AI handle it via sharkcage_status tool
-      return undefined;
-    }
 
     return undefined;
   }, { priority: 200 });
@@ -250,65 +222,6 @@ export function register(api: OpenClawPluginApi): void {
   });
 
   console.log("[sharkcage] plugin registered — tool calls will route through supervisor");
-}
-
-/**
- * Enable a skill in OpenClaw's config after sharkcage approval.
- * Adds to skills.allowBundled and tools.allow as needed.
- */
-function enableSkillInOpenClaw(skillName: string): void {
-  const ocConfigPath = `${home}/.openclaw/openclaw.json`;
-  try {
-    const config = JSON.parse(readFileSync(ocConfigPath, "utf-8"));
-
-    // Enable the skill in entries
-    if (!config.skills) config.skills = {};
-    if (!config.skills.entries) config.skills.entries = {};
-    config.skills.entries[skillName] = { ...(config.skills.entries[skillName] ?? {}), enabled: true };
-
-    // If the skill needs exec (coding-agent, github, tmux, etc.), add exec to tools.allow
-    const execSkills = [
-      "coding-agent", "github", "gh-issues", "tmux", "gemini",
-      "peekaboo", "camsnap", "video-frames", "sag", "spotify-player",
-    ];
-    if (execSkills.includes(skillName)) {
-      if (!config.tools) config.tools = {};
-      if (!Array.isArray(config.tools.allow)) config.tools.allow = [];
-      if (!config.tools.allow.includes("exec")) {
-        config.tools.allow.push("exec");
-      }
-    }
-
-    // If it's a messaging skill, add message tool
-    const msgSkills = ["discord", "slack", "bluebubbles", "imsg", "wacli"];
-    if (msgSkills.includes(skillName)) {
-      if (!config.tools) config.tools = {};
-      if (!Array.isArray(config.tools.allow)) config.tools.allow = [];
-      if (!config.tools.allow.includes("message")) {
-        config.tools.allow.push("message");
-      }
-    }
-
-    writeFileSync(ocConfigPath, JSON.stringify(config, null, 2) + "\n");
-  } catch {
-    // Config write failed — skill will work via sharkcage but not via OpenClaw native
-  }
-}
-
-/**
- * Disable a skill in OpenClaw's config.
- */
-function disableSkillInOpenClaw(skillName: string): void {
-  const ocConfigPath = `${home}/.openclaw/openclaw.json`;
-  try {
-    const config = JSON.parse(readFileSync(ocConfigPath, "utf-8"));
-    if (!config.skills) config.skills = {};
-    if (!config.skills.entries) config.skills.entries = {};
-    config.skills.entries[skillName] = { ...(config.skills.entries[skillName] ?? {}), enabled: false };
-    writeFileSync(ocConfigPath, JSON.stringify(config, null, 2) + "\n");
-  } catch {
-    // Config write failed
-  }
 }
 
 /**

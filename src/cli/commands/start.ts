@@ -316,64 +316,9 @@ function ensureOpenClawPluginRegistered(): void {
       log("sc", "Plugin already registered");
     }
 
-    // Lock down bundled skills: disable all except safe + channel-matched.
-    if (!config.skills) config.skills = {};
-    if (!config.skills.entries) config.skills.entries = {};
-
-    // Read-only / informational skills — always safe.
-    // Channel skills (discord, slack, wacli, imsg, etc.) let the AI message
-    // OTHER people — those need approval.
-    const autoApproved = new Set([
-      "weather", "summarize", "session-logs", "model-usage",
-      "node-connect", "healthcheck",
-    ]);
-
-    const bundledSkills = [
-      "1password", "apple-notes", "apple-reminders", "bear-notes", "blogwatcher",
-      "blucli", "bluebubbles", "camsnap", "clawhub", "coding-agent", "discord",
-      "eightctl", "gemini", "gh-issues", "gifgrep", "github", "gog", "goplaces",
-      "healthcheck", "himalaya", "imsg", "mcporter", "model-usage", "nano-pdf",
-      "node-connect", "notion", "obsidian", "openai-whisper", "openai-whisper-api",
-      "openhue", "oracle", "ordercli", "peekaboo", "sag", "session-logs",
-      "sherpa-onnx-tts", "skill-creator", "slack", "songsee", "sonoscli",
-      "spotify-player", "summarize", "things-mac", "tmux", "trello",
-      "video-frames", "voice-call", "wacli", "weather", "xurl",
-    ];
-
-    let disabledCount = 0;
-    let enabledCount = 0;
-    for (const name of bundledSkills) {
-      const shouldEnable = autoApproved.has(name);
-      const current = config.skills.entries[name];
-      if (shouldEnable) {
-        if (!current || current.enabled === false) {
-          config.skills.entries[name] = { ...(current ?? {}), enabled: true };
-          changed = true;
-          enabledCount++;
-        }
-      } else {
-        if (!current || current.enabled !== false) {
-          config.skills.entries[name] = { ...(current ?? {}), enabled: false };
-          changed = true;
-          disabledCount++;
-        }
-      }
-    }
-    if (disabledCount > 0 || enabledCount > 0) {
-      log("sc", `Skills: ${enabledCount} auto-approved, ${disabledCount} disabled`);
-    }
-
-    if (!config.tools) config.tools = {};
-    if (!config.tools.deny || !config.tools.deny.includes("*")) {
-      config.tools.deny = ["*"];
-      config.tools.allow = [
-        "read", "write", "edit", "apply_patch",   // filesystem (sandboxed by ASRT)
-        "web_search", "web_fetch",                  // web (sandboxed by ASRT network)
-        "sharkcage_status",                         // our own status tool
-      ];
-      changed = true;
-      log("sc", "Tools locked down — only safe basics allowed");
-    }
+    // Skills: --skip-skills during onboard means no bundled skills installed.
+    // Third-party skills are managed through sharkcage's plugin system.
+    // No lockdown needed — there's nothing to lock down.
 
     // Enable ASRT sandbox backend for per-session isolation
     if (!config.agents) config.agents = {};
