@@ -298,7 +298,7 @@ export async function registerAsrtBackend(api: any): Promise<void> {
   // registerSandboxBackend is a module-level export, not on the plugin API
   let registerSandboxBackend: ((id: string, registration: unknown) => void) | null = null;
   try {
-    const modulePath = "openclaw/sandbox";
+    const modulePath = "openclaw/plugin-sdk/sandbox";
     const sandboxModule = await import(/* @vite-ignore */ modulePath);
     registerSandboxBackend = sandboxModule.registerSandboxBackend ?? null;
   } catch {

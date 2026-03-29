@@ -121,6 +121,7 @@ function startServer(): Promise<void> {
 
     server.listen(socketPath, () => {
       console.log(`listening on ${socketPath}`);
+      resolve();
     });
   });
 }
