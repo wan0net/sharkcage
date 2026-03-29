@@ -1,5 +1,3 @@
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-
 export interface WebhookConfig {
   port: number;
   token?: string;
@@ -9,8 +7,8 @@ type WebhookHandler = (payload: Record<string, unknown>) => void;
 
 export class WebhookServer {
   private config: WebhookConfig;
-  private server: ReturnType<typeof createServer> | null = null;
   private handler: WebhookHandler | null = null;
+  private controller: AbortController | null = null;
 
   constructor(config: WebhookConfig) {
     this.config = config;
@@ -20,63 +18,51 @@ export class WebhookServer {
     this.handler = handler;
   }
 
-  start(): Promise<void> {
-    return new Promise((resolve) => {
-      this.server = createServer((req, res) => this.handleRequest(req, res));
-      this.server.listen(this.config.port, () => {
-        console.log(`[webhook] listening on :${this.config.port}`);
-        resolve();
-      });
-    });
+  async start(): Promise<void> {
+    this.controller = new AbortController();
+
+    Deno.serve(
+      {
+        port: this.config.port,
+        signal: this.controller.signal,
+        onListen: ({ port }) => {
+          console.log(`[webhook] listening on :${port}`);
+        },
+      },
+      (req) => this.handleRequest(req)
+    );
   }
 
   stop(): Promise<void> {
-    return new Promise((resolve) => {
-      if (this.server) {
-        this.server.close(() => resolve());
-      } else {
-        resolve();
-      }
-    });
+    this.controller?.abort();
+    this.controller = null;
+    return Promise.resolve();
   }
 
-  private handleRequest(req: IncomingMessage, res: ServerResponse): void {
-    const url = req.url ?? "/";
+  private async handleRequest(req: Request): Promise<Response> {
+    const url = new URL(req.url);
 
-    if (url === "/health" && req.method === "GET") {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ status: "ok", timestamp: new Date().toISOString() }));
-      return;
+    if (url.pathname === "/health" && req.method === "GET") {
+      return Response.json({ status: "ok", timestamp: new Date().toISOString() });
     }
 
-    if (url === "/hooks/wake" && req.method === "POST") {
-      // Token auth
+    if (url.pathname === "/hooks/wake" && req.method === "POST") {
       if (this.config.token) {
-        const auth = req.headers.authorization;
+        const auth = req.headers.get("authorization");
         if (auth !== `Bearer ${this.config.token}`) {
-          res.writeHead(401);
-          res.end("Unauthorized");
-          return;
+          return new Response("Unauthorized", { status: 401 });
         }
       }
 
-      let body = "";
-      req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
-      req.on("end", () => {
-        try {
-          const payload = JSON.parse(body) as Record<string, unknown>;
-          this.handler?.(payload);
-          res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ accepted: true }));
-        } catch {
-          res.writeHead(400);
-          res.end("Bad Request");
-        }
-      });
-      return;
+      try {
+        const payload = (await req.json()) as Record<string, unknown>;
+        this.handler?.(payload);
+        return Response.json({ accepted: true });
+      } catch {
+        return new Response("Bad Request", { status: 400 });
+      }
     }
 
-    res.writeHead(404);
-    res.end("Not Found");
+    return new Response("Not Found", { status: 404 });
   }
 }

@@ -1,4 +1,4 @@
-import * as nomad from "../nomad.js";
+import * as nomad from "../nomad.ts";
 
 export interface JobEvent {
   jobId: string;

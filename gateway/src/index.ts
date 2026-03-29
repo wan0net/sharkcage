@@ -1,15 +1,14 @@
-import { getConfig } from "./config.js";
-import { SignalChannel } from "./channels/signal.js";
-import { handleMessage, type AgentConfig } from "./agent/loop.js";
-import { Store } from "./store/sqlite.js";
-import { NomadEventPoller } from "./webhooks/nomad-events.js";
-import { WebhookServer } from "./webhooks/server.js";
-import { join } from "node:path";
+import { getConfig } from "./config.ts";
+import { SignalChannel } from "./channels/signal.ts";
+import { handleMessage, type AgentConfig } from "./agent/loop.ts";
+import { Store } from "./store/sqlite.ts";
+import { NomadEventPoller } from "./webhooks/nomad-events.ts";
+import { WebhookServer } from "./webhooks/server.ts";
 
 const config = getConfig();
 
 // --- Store ---
-const store = new Store(join(config.data_dir, "gateway.db"));
+const store = new Store(`${config.data_dir}/gateway.db`);
 
 // --- Agent config ---
 const agentConfig: AgentConfig = {
@@ -38,7 +37,6 @@ signal.onMessage(async (msg) => {
     const { reply, messages } = await handleMessage(agentConfig, history, msg.text);
 
     // Persist conversation
-    // Only save user message + final assistant reply (skip intermediate tool calls for cleaner history)
     store.saveMessages(msg.channelId, [
       { role: "user", content: msg.text },
       { role: "assistant", content: reply },
@@ -101,7 +99,7 @@ poller.onJobEvent(async (event) => {
 // --- Webhook server ---
 const webhookServer = new WebhookServer({
   port: config.webhook_port,
-  token: process.env["WEBHOOK_TOKEN"],
+  token: Deno.env.get("WEBHOOK_TOKEN"),
 });
 
 webhookServer.onWebhook((payload) => {
@@ -130,13 +128,13 @@ function shutdown() {
   signal.stop().catch(console.error);
   webhookServer.stop().catch(console.error);
   store.close();
-  process.exit(0);
+  Deno.exit(0);
 }
 
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
+Deno.addSignalListener("SIGINT", shutdown);
+Deno.addSignalListener("SIGTERM", shutdown);
 
 main().catch((err) => {
   console.error("[gateway] fatal:", err);
-  process.exit(1);
+  Deno.exit(1);
 });

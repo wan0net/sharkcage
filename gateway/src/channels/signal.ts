@@ -1,4 +1,4 @@
-import type { Channel, InboundMessage, OutboundMessage } from "./types.js";
+import type { Channel, InboundMessage, OutboundMessage } from "./types.ts";
 
 interface SignalConfig {
   cliUrl: string;

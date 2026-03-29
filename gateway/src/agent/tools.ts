@@ -1,8 +1,9 @@
-import type { ToolDef } from "./inference.js";
-import * as nomad from "../nomad.js";
-import { getProjectConfig } from "../config.js";
+import type { ToolDef } from "./inference.ts";
+import * as nomad from "../nomad.ts";
+import { getProjectConfig } from "../config.ts";
+import { mealToolDefs, executeMealTool } from "../tools/meals.ts";
 
-export const toolDefs: ToolDef[] = [
+const yeetToolDefs: ToolDef[] = [
   {
     type: "function",
     function: {
@@ -108,7 +109,15 @@ export const toolDefs: ToolDef[] = [
   },
 ];
 
+// Combined tool definitions from all domains
+export const toolDefs: ToolDef[] = [...yeetToolDefs, ...mealToolDefs];
+
 export async function executeTool(name: string, args: Record<string, unknown>): Promise<string> {
+  // Route meal tools to their executor
+  if (name.startsWith("meals_")) {
+    return executeMealTool(name, args);
+  }
+
   try {
     switch (name) {
       case "dispatch_task":

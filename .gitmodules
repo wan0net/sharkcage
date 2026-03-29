@@ -1,0 +1,15 @@
+[submodule "packages/sdk"]
+	path = packages/sdk
+	url = https://github.com/wan0net/yeet-sdk.git
+[submodule "packages/core"]
+	path = packages/core
+	url = https://github.com/wan0net/yeet-core.git
+[submodule "packages/cli"]
+	path = packages/cli
+	url = https://github.com/wan0net/yeet-cli.git
+[submodule "packages/frontend"]
+	path = packages/frontend
+	url = https://github.com/wan0net/yeet-frontend.git
+[submodule "packages/sandbox"]
+	path = packages/sandbox
+	url = https://github.com/wan0net/yeet-sandbox.git

@@ -1,4 +1,4 @@
-import { getNomadAddr, getNomadToken } from "./config.js";
+import { getNomadAddr, getNomadToken } from "./config.ts";
 
 function headers(): Record<string, string> {
   const h: Record<string, string> = { "Content-Type": "application/json" };
@@ -36,7 +36,7 @@ export async function dispatch(
   prompt: string,
   meta: Record<string, string>
 ): Promise<DispatchResponse> {
-  const payload = Buffer.from(prompt).toString("base64");
+  const payload = btoa(prompt);
   return request<DispatchResponse>("POST", "/v1/job/run-coding-agent/dispatch", {
     Payload: payload,
     Meta: { project, ...meta },

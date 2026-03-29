@@ -1,15 +1,20 @@
-import Database from "better-sqlite3";
-import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
-import type { Message } from "../agent/inference.js";
+import { Database } from "@db/sqlite";
+import type { Message } from "../agent/inference.ts";
 
 export class Store {
-  private db: Database.Database;
+  private db: Database;
 
   constructor(dbPath: string) {
-    mkdirSync(dirname(dbPath), { recursive: true });
+    const dir = dbPath.substring(0, dbPath.lastIndexOf("/"));
+    if (dir) {
+      try {
+        Deno.mkdirSync(dir, { recursive: true });
+      } catch {
+        // directory may already exist
+      }
+    }
     this.db = new Database(dbPath);
-    this.db.pragma("journal_mode = WAL");
+    this.db.exec("PRAGMA journal_mode = WAL");
     this.migrate();
   }
 
@@ -75,8 +80,9 @@ export class Store {
        VALUES (?, ?, ?, ?, ?)`
     );
 
-    const tx = this.db.transaction((msgs: Message[]) => {
-      for (const msg of msgs) {
+    this.db.exec("BEGIN");
+    try {
+      for (const msg of messages) {
         insert.run(
           channelId,
           msg.role,
@@ -85,9 +91,11 @@ export class Store {
           msg.tool_call_id ?? null
         );
       }
-    });
-
-    tx(messages);
+      this.db.exec("COMMIT");
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
+    }
   }
 
   mapDispatch(jobId: string, channelId: string, channelType: string, userId: string): void {
@@ -100,11 +108,12 @@ export class Store {
   }
 
   getDispatchChannel(jobId: string): { channelId: string; channelType: string; userId: string } | null {
-    const row = this.db
+    const rows = this.db
       .prepare(`SELECT channel_id, channel_type, user_id FROM dispatch_map WHERE job_id = ?`)
-      .get(jobId) as { channel_id: string; channel_type: string; user_id: string } | undefined;
+      .all(jobId) as Array<{ channel_id: string; channel_type: string; user_id: string }>;
 
-    if (!row) return null;
+    if (!rows.length) return null;
+    const row = rows[0];
     return { channelId: row.channel_id, channelType: row.channel_type, userId: row.user_id };
   }
 

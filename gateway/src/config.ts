@@ -1,7 +1,3 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { homedir } from "node:os";
-
 export interface ProjectConfig {
   runtime?: string;
   model?: string;
@@ -22,7 +18,7 @@ export interface GatewayConfig {
 }
 
 const DEFAULT_CONFIG: GatewayConfig = {
-  nomad_addr: "http://10.42.10.1:4646",
+  nomad_addr: "http://localhost:4646",
   defaults: { runtime: "opencode", model: "anthropic/claude-sonnet-4" },
   projects: {},
   signal_cli_url: "http://127.0.0.1:7583",
@@ -35,9 +31,10 @@ const DEFAULT_CONFIG: GatewayConfig = {
 };
 
 export function loadConfig(): GatewayConfig {
-  const configPath = join(homedir(), ".config", "yeet", "gateway.json");
+  const home = Deno.env.get("HOME") ?? Deno.env.get("USERPROFILE") ?? ".";
+  const configPath = `${home}/.config/yeet/gateway.json`;
   try {
-    const raw = readFileSync(configPath, "utf-8");
+    const raw = Deno.readTextFileSync(configPath);
     const parsed = JSON.parse(raw) as Partial<GatewayConfig>;
     return {
       ...DEFAULT_CONFIG,
@@ -51,7 +48,7 @@ export function loadConfig(): GatewayConfig {
 }
 
 function env(key: string): string | undefined {
-  return process.env[key];
+  return Deno.env.get(key);
 }
 
 export function getConfig(): GatewayConfig {

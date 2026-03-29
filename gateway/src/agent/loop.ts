@@ -1,17 +1,13 @@
-import { readFileSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-import { chatCompletion, type Message, type InferenceConfig } from "./inference.js";
-import { toolDefs, executeTool } from "./tools.js";
+import { chatCompletion, type Message, type InferenceConfig } from "./inference.ts";
+import { toolDefs, executeTool } from "./tools.ts";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const SYSTEM_PROMPT_PATH = join(__dirname, "..", "..", "SYSTEM.md");
+const SYSTEM_PROMPT_PATH = new URL("../../SYSTEM.md", import.meta.url).pathname;
 
 let systemPrompt: string;
 try {
-  systemPrompt = readFileSync(SYSTEM_PROMPT_PATH, "utf-8");
+  systemPrompt = Deno.readTextFileSync(SYSTEM_PROMPT_PATH);
 } catch {
-  systemPrompt = "You are the yeet fleet operator assistant. You manage coding agent tasks via Nomad.";
+  systemPrompt = "You are a personal assistant with tools for meals, home automation, news, and coding fleet management.";
 }
 
 const MAX_TOOL_ROUNDS = 5;
@@ -26,7 +22,7 @@ export async function handleMessage(
   userText: string
 ): Promise<{ reply: string; messages: Message[] }> {
   const messages: Message[] = [
-    { role: "system", content: systemPrompt },
+    { role: "system", content: systemPrompt.replace("{time}", new Date().toISOString()) },
     ...history,
     { role: "user", content: userText },
   ];
