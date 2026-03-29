@@ -375,6 +375,17 @@ function ensureOpenClawPluginRegistered(): void {
       log("sc", "Tools locked down — only safe basics allowed");
     }
 
+    // Enable ASRT sandbox backend for per-session isolation
+    if (!config.agents) config.agents = {};
+    if (!config.agents.defaults) config.agents.defaults = {};
+    if (!config.agents.defaults.sandbox) config.agents.defaults.sandbox = {};
+    if (config.agents.defaults.sandbox.backend !== "asrt" || config.agents.defaults.sandbox.mode !== "all") {
+      config.agents.defaults.sandbox.mode = "all";
+      config.agents.defaults.sandbox.backend = "asrt";
+      changed = true;
+      log("sc", "Per-session ASRT sandboxing enabled");
+    }
+
     if (changed) {
       writeFileSync(ocConfigPath, JSON.stringify(config, null, 2) + "\n");
     }

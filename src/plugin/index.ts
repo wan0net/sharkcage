@@ -169,28 +169,56 @@ export function register(api: OpenClawPluginApi): void {
     console.log(`[sharkcage-audit] tool: ${event.toolName}, duration: ${event.durationMs}ms`);
   }, { priority: 50 });
 
-  // --- Hook 3: inbound_claim (priority 200) — handle `sc install` commands ---
+  // --- Hook 3: inbound_claim (priority 200) — handle sc commands from chat ---
   api.on("inbound_claim", async (event: InboundClaimEvent, _ctx: HookContext) => {
     const text = (event.content ?? "").trim();
+
+    // sc install <url> — install a third-party skill
     const installMatch = text.match(/^sc\s+install\s+(.+)$/i);
-    if (!installMatch) return undefined;
-
-    const source = installMatch[1].trim();
-    console.log(`[sharkcage] install request from chat: ${source}`);
-
-    const { execFileSync } = await import("node:child_process");
-    try {
-      execFileSync("npx", ["tsx", `${process.cwd()}/src/cli/main.ts`, "plugin", "add", source], {
-        stdio: "pipe",
-        timeout: 60_000,
-      });
-      // Reload skill map to pick up new tools
-      skillMap.load(pluginDir);
-    } catch (err) {
-      console.error(`[sharkcage] install failed:`, err);
+    if (installMatch) {
+      const source = installMatch[1].trim();
+      console.log(`[sharkcage] install request from chat: ${source}`);
+      const { execFileSync } = await import("node:child_process");
+      try {
+        execFileSync("npx", ["tsx", `${process.cwd()}/src/cli/main.ts`, "plugin", "add", source], {
+          stdio: "pipe",
+          timeout: 60_000,
+        });
+        skillMap.load(pluginDir);
+      } catch (err) {
+        console.error(`[sharkcage] install failed:`, err);
+      }
+      return { handled: true };
     }
 
-    return { handled: true }; // consume message, AI never sees it
+    // sc enable <skill> — enable a disabled bundled skill
+    const enableMatch = text.match(/^sc\s+enable\s+(.+)$/i);
+    if (enableMatch) {
+      const skillName = enableMatch[1].trim().toLowerCase();
+      console.log(`[sharkcage] enable request from chat: ${skillName}`);
+      enableSkillInOpenClaw(skillName);
+      console.log(`[sharkcage] skill "${skillName}" enabled`);
+      return { handled: true };
+    }
+
+    // sc disable <skill> — disable a bundled skill
+    const disableMatch = text.match(/^sc\s+disable\s+(.+)$/i);
+    if (disableMatch) {
+      const skillName = disableMatch[1].trim().toLowerCase();
+      console.log(`[sharkcage] disable request from chat: ${skillName}`);
+      disableSkillInOpenClaw(skillName);
+      console.log(`[sharkcage] skill "${skillName}" disabled`);
+      return { handled: true };
+    }
+
+    // sc skills — list skill status
+    const skillsMatch = text.match(/^sc\s+skills$/i);
+    if (skillsMatch) {
+      // Don't consume — let the AI handle it via sharkcage_status tool
+      return undefined;
+    }
+
+    return undefined;
   }, { priority: 200 });
 
   // --- Hook 4: before_message_write (priority 100) — scrub sharkcage internals ---
@@ -264,6 +292,22 @@ function enableSkillInOpenClaw(skillName: string): void {
     writeFileSync(ocConfigPath, JSON.stringify(config, null, 2) + "\n");
   } catch {
     // Config write failed — skill will work via sharkcage but not via OpenClaw native
+  }
+}
+
+/**
+ * Disable a skill in OpenClaw's config.
+ */
+function disableSkillInOpenClaw(skillName: string): void {
+  const ocConfigPath = `${home}/.openclaw/openclaw.json`;
+  try {
+    const config = JSON.parse(readFileSync(ocConfigPath, "utf-8"));
+    if (!config.skills) config.skills = {};
+    if (!config.skills.entries) config.skills.entries = {};
+    config.skills.entries[skillName] = { ...(config.skills.entries[skillName] ?? {}), enabled: false };
+    writeFileSync(ocConfigPath, JSON.stringify(config, null, 2) + "\n");
+  } catch {
+    // Config write failed
   }
 }
 
