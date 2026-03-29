@@ -53,7 +53,14 @@ export default async function init() {
     }
 
     // Run openclaw onboard interactively
-    p.log.info("Starting OpenClaw setup wizard...\n");
+    console.log("");
+    console.log("┌──────────────────────────────────────────────┐");
+    console.log("│  🦞 OpenClaw Setup (not sharkcage)           │");
+    console.log("│  Everything below is OpenClaw's own wizard.  │");
+    console.log("│  Sharkcage setup continues after.            │");
+    console.log("└──────────────────────────────────────────────┘");
+    console.log("");
+
     const result = spawnSync("openclaw", ["onboard", "--no-install-daemon", "--skip-skills"], {
       stdio: "inherit",
     });
@@ -63,7 +70,11 @@ export default async function init() {
       process.exit(1);
     }
 
-    p.log.success("OpenClaw configured.\n");
+    console.log("");
+    console.log("┌──────────────────────────────────────────────┐");
+    console.log("│  🦈 Back to Sharkcage                        │");
+    console.log("└──────────────────────────────────────────────┘");
+    console.log("");
   } else {
     p.log.success("OpenClaw already configured.");
   }
