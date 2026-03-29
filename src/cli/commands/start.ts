@@ -298,37 +298,13 @@ function ensureOpenClawPluginRegistered(): void {
     if (!config.skills) config.skills = {};
     if (!config.skills.entries) config.skills.entries = {};
 
-    // Read-only / informational skills — always safe
-    const safeSkills = new Set([
+    // Read-only / informational skills — always safe.
+    // Channel skills (discord, slack, wacli, imsg, etc.) let the AI message
+    // OTHER people — those need approval.
+    const autoApproved = new Set([
       "weather", "summarize", "session-logs", "model-usage",
       "node-connect", "healthcheck",
     ]);
-
-    // Channel → skill mapping
-    const channelSkills: Record<string, string[]> = {
-      discord: ["discord"],
-      slack: ["slack"],
-      whatsapp: ["wacli"],
-      imessage: ["bluebubbles", "imsg"],
-      signal: [],  // signal doesn't have a separate skill
-      telegram: [],
-      webchat: [],
-      matrix: [],
-    };
-
-    // Read chosen channels from gateway config
-    let chosenChannels: string[] = [];
-    try {
-      const gwConfig = JSON.parse(readFileSync(`${configDir}/gateway.json`, "utf-8"));
-      chosenChannels = gwConfig.channels ?? [];
-    } catch { /* no config */ }
-
-    // Build set of auto-approved skills
-    const autoApproved = new Set(safeSkills);
-    for (const ch of chosenChannels) {
-      const skills = channelSkills[ch.toLowerCase()];
-      if (skills) skills.forEach((s) => autoApproved.add(s));
-    }
 
     const bundledSkills = [
       "1password", "apple-notes", "apple-reminders", "bear-notes", "blogwatcher",
