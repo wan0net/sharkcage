@@ -1,21 +1,21 @@
 /**
- * sharkcage init
+ * sc init
  *
  * 1. Run openclaw onboard (if not already configured) — handles model, API keys, channels
- * 2. Choose sharkcage sandbox mode
- * 3. Write sharkcage config
+ * 2. Verify the model actually works
+ * 3. Choose sharkcage sandbox mode
+ * 4. Write sharkcage config
  */
 
 import { mkdirSync, existsSync, writeFileSync, readFileSync } from "node:fs";
-import { spawnSync } from "node:child_process";
+import { spawnSync, execFileSync } from "node:child_process";
 import * as p from "@clack/prompts";
 
-type Mode = "new" | "existing" | "skills-only";
+type Mode = "full" | "skills-only";
 
 interface SharkcageConfig {
   mode: Mode;
   outerSandbox: boolean;
-  openclawManaged: boolean;
 }
 
 const home = process.env.HOME ?? ".";
@@ -31,7 +31,6 @@ export default async function init() {
   if (existsSync(ocConfigPath)) {
     try {
       const ocConfig = JSON.parse(readFileSync(ocConfigPath, "utf-8"));
-      // If there's a gateway config with mode set, assume onboard has been run
       if (ocConfig.gateway?.mode) {
         needsOnboard = false;
       }
@@ -52,7 +51,6 @@ export default async function init() {
       process.exit(0);
     }
 
-    // Run openclaw onboard interactively
     console.log("");
     console.log("┌──────────────────────────────────────────────┐");
     console.log("│  🦞 OpenClaw Setup (not sharkcage)           │");
@@ -79,44 +77,49 @@ export default async function init() {
     p.log.success("OpenClaw already configured.");
   }
 
-  // --- 2. Sandbox mode ---
+  // --- 2. Verify model ---
+  try {
+    const ocConfig = JSON.parse(readFileSync(ocConfigPath, "utf-8"));
+    const model = ocConfig.agents?.defaults?.model;
+    const modelStr = typeof model === "string" ? model : model?.primary ?? "unknown";
+    p.log.info(`Model: ${modelStr}`);
+
+    // Quick check: is the model available?
+    try {
+      const listOutput = execFileSync("openclaw", ["models", "list"], {
+        encoding: "utf-8", timeout: 15_000, stdio: "pipe",
+      });
+      if (listOutput.includes(modelStr) && listOutput.includes("missing")) {
+        p.log.warning(`Model "${modelStr}" shows as missing. It may not work.`);
+        p.log.warning("Run 'openclaw models auth login' to set up auth, or change the model.");
+      }
+    } catch {
+      // models list failed — not critical
+    }
+  } catch {
+    p.log.warning("Could not read OpenClaw config to verify model.");
+  }
+
+  // --- 3. Sandbox mode ---
   const mode = await p.select({
     message: "How should sharkcage sandbox OpenClaw?",
     options: [
       {
-        value: "new" as Mode,
-        label: "Full sandbox",
-        hint: "Outer ASRT sandbox around OpenClaw + per-skill sandboxing. Recommended.",
-      },
-      {
-        value: "existing" as Mode,
-        label: "Wrap existing",
-        hint: "Outer sandbox + skill lockdown. Existing skills need re-approval.",
+        value: "full" as Mode,
+        label: "Full sandbox (recommended)",
+        hint: "Outer ASRT sandbox + per-session + per-skill sandboxing",
       },
       {
         value: "skills-only" as Mode,
         label: "Skills only",
-        hint: "No outer sandbox. Just sandbox new skills you install.",
+        hint: "No outer sandbox. Just sandbox skills you install.",
       },
     ],
   });
 
   if (p.isCancel(mode)) { p.cancel("Cancelled."); process.exit(0); }
 
-  // --- Warning for existing installs ---
-  if (mode === "existing") {
-    p.note(
-      "Your existing skills have been running without a sandbox.\n" +
-      "Sharkcage can't undo anything they've already done.\n" +
-      "We recommend reviewing your installed skills before proceeding.",
-      "Warning"
-    );
-
-    const proceed = await p.confirm({ message: "Continue?" });
-    if (p.isCancel(proceed) || !proceed) { p.cancel("Cancelled."); process.exit(0); }
-  }
-
-  // --- 3. Write sharkcage config ---
+  // --- 4. Write config ---
   mkdirSync(configDir, { recursive: true });
   const configPath = `${configDir}/gateway.json`;
 
@@ -130,21 +133,20 @@ export default async function init() {
 
   const config: SharkcageConfig = {
     mode,
-    outerSandbox: mode !== "skills-only",
-    openclawManaged: mode === "new",
+    outerSandbox: mode === "full",
   };
 
   writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
 
   // Create directories
-  for (const dir of [`${configDir}/data`, `${configDir}/plugins`, `${configDir}/approvals`]) {
+  for (const dir of [`${configDir}/data`, `${configDir}/plugins`, `${configDir}/approvals`, `${configDir}/denied`]) {
     mkdirSync(dir, { recursive: true });
   }
 
-  // --- 4. Next steps ---
+  // --- 5. Next steps ---
   p.note(
     `Start sharkcage:\n  sc start\n\n` +
-    `Install skills:\n  sc plugin add <url>\n\n` +
+    `Install skills:\n  sc skill add <url>\n\n` +
     `Dashboard will be available after start.`,
     "Next steps"
   );
