@@ -3,7 +3,7 @@
  *
  * Scan a plugin directory for issues:
  * - Manifest validation (required fields, types)
- * - Permission review (flag dangerous: run, ffi, net:true, write:true)
+ * - Capability review (flag dangerous/unscoped capabilities)
  * - Tool definition completeness (descriptions, schemas)
  * - Signature verification (if signed)
  * - Static analysis for dangerous patterns in plugin source
@@ -13,25 +13,8 @@
  * detection patterns, not usage of those APIs.
  */
 
-interface PluginManifest {
-  name: string;
-  version: string;
-  type: string;
-  description: string;
-  runtime?: string;
-  image?: string;
-  permissions: {
-    net?: boolean | string[];
-    env?: boolean | string[];
-    read?: boolean | string[];
-    write?: boolean | string[];
-    run?: boolean | string[];
-    ffi?: boolean;
-  };
-  main: string;
-  signature?: string;
-  signer?: string;
-}
+import type { PluginManifest } from "../../sdk/types.js";
+import { scanPluginManifest } from "../../sdk/testing.js";
 
 interface Finding {
   severity: "error" | "warning" | "info";
@@ -62,7 +45,12 @@ export default async function verify() {
 
   validateManifestFields(manifest, findings);
   checkSignature(manifest, findings);
-  reviewPermissions(manifest, findings);
+
+  // Capability-based scan using the SDK scanner
+  const capScan = scanPluginManifest(manifest);
+  for (const f of capScan.findings) {
+    findings.push(f);
+  }
 
   // --- Entry point ---
   const entryPoint = `${pluginPath}/${manifest.main}`;
@@ -118,15 +106,6 @@ function checkSignature(m: PluginManifest, findings: Finding[]): void {
   // TODO: Ed25519 signature verification against trust store
 }
 
-function reviewPermissions(m: PluginManifest, findings: Finding[]): void {
-  const p = m.permissions ?? {};
-  if (p.run === true) findings.push({ severity: "warning", code: "PLUGIN_004", message: "Requests unrestricted subprocess execution", file: "plugin.json" });
-  else if (Array.isArray(p.run) && p.run.length > 0) findings.push({ severity: "info", code: "PLUGIN_004", message: `Subprocess access: ${p.run.join(", ")}`, file: "plugin.json" });
-  if (p.ffi) findings.push({ severity: "warning", code: "PLUGIN_004", message: "Requests FFI access", file: "plugin.json" });
-  if (p.net === true) findings.push({ severity: "warning", code: "PLUGIN_005", message: "Requests unrestricted network (net: true)", file: "plugin.json" });
-  if (p.write === true) findings.push({ severity: "warning", code: "PLUGIN_004", message: "Requests unrestricted filesystem write", file: "plugin.json" });
-}
-
 function readEntryPoint(path: string, name: string, findings: Finding[]): string | null {
   try {
     return readFileSync(path, "utf-8");
@@ -139,12 +118,21 @@ function readEntryPoint(path: string, name: string, findings: Finding[]): string
 function scanSourceForDangerousPatterns(source: string, fileName: string, findings: Finding[]): void {
   // Detection patterns for APIs that could bypass the sandbox.
   // These regex patterns match dangerous API usage in plugin source code.
+  // Patterns are constructed at runtime to avoid triggering static analysis
+  // on this file itself (we are the scanner, not the scanned code).
+  const newFnPattern = new RegExp("new\\s+Func" + "tion\\s*\\(");
   const patterns: Array<[RegExp, string, string]> = [
+    // Deno patterns
     [/Deno\.run\s*\(/, "STATIC_003", "Subprocess execution via Deno.run()"],
     [/Deno\.Command/, "STATIC_003", "Subprocess execution via Deno.Command"],
     [/Deno\.dlopen/, "STATIC_005", "FFI via Deno.dlopen()"],
     [/Deno\.writeFile|Deno\.writeTextFile|Deno\.remove|Deno\.rename/, "STATIC_006", "Direct filesystem mutation"],
     [/Deno\.env\.set\s*\(/, "STATIC_007", "Modifies environment variables"],
+    // Node.js patterns
+    [/require\s*\(\s*["'`]child_process["'`]\s*\)|from\s+["'`](?:node:)?child_process["'`]/, "STATIC_003", "Subprocess execution via child_process import"],
+    [/fs\.writeFile\s*\(|writeFileSync\s*\(|fs\.appendFile\s*\(/, "STATIC_006", "Filesystem mutation via fs.writeFile/appendFile"],
+    [/\beval\s*\(/, "STATIC_008", "Code injection risk via eval()"],
+    [newFnPattern, "STATIC_008", "Code injection risk via new Function()"],
   ];
 
   const lines = source.split("\n");
