@@ -76,6 +76,24 @@ export default async function start() {
     try { unlinkSync(pidFile); } catch { /* gone */ }
   }
 
+  // --- 6b. Pre-export Claude CLI credentials for sandbox ---
+  // The sandbox blocks keychain access, so read the credential now (unsandboxed)
+  // and write to ~/.claude/.credentials.json which OpenClaw uses as fallback.
+  const credFile = `${home}/.claude/.credentials.json`;
+  if (!existsSync(credFile)) {
+    try {
+      const raw = execFileSync("security", [
+        "find-generic-password", "-s", "Claude Code-credentials", "-w"
+      ], { encoding: "utf-8", timeout: 10_000 }).trim();
+      if (raw) {
+        writeFileSync(credFile, raw);
+        log("sc", "Claude CLI credentials exported for sandbox");
+      }
+    } catch {
+      // No Claude CLI credentials or user cancelled — that's fine
+    }
+  }
+
   // --- 7. Start supervisor ---
   log("sc", "Starting supervisor...");
   const supervisorProc = startSupervisor();
@@ -371,8 +389,32 @@ function generateGatewaySandboxConfig(outPath: string): void {
 
   const allowedDomains = new Set<string>();
 
-  // LLM provider
-  if (config.openrouter_model) allowedDomains.add("openrouter.ai");
+  // LLM provider — detect from OpenClaw's configured model
+  const providerDomains: Record<string, string[]> = {
+    anthropic: ["api.anthropic.com"],
+    openai: ["api.openai.com"],
+    openrouter: ["openrouter.ai"],
+    google: ["generativelanguage.googleapis.com"],
+    xai: ["api.x.ai"],
+    deepseek: ["api.deepseek.com"],
+    mistral: ["api.mistral.ai"],
+    together: ["api.together.xyz"],
+    ollama: ["127.0.0.1"],
+  };
+
+  // Read model config to determine provider
+  try {
+    const ocCfg = JSON.parse(readFileSync(`${home}/.openclaw/openclaw.json`, "utf-8"));
+    const model = ocCfg.agents?.defaults?.model;
+    const modelStr = typeof model === "string" ? model : model?.primary ?? "";
+    const provider = modelStr.split("/")[0]; // e.g. "anthropic" from "anthropic/claude-3-haiku"
+    const domains = providerDomains[provider];
+    if (domains) domains.forEach((d) => allowedDomains.add(d));
+    // Also check for claude-cli which uses anthropic API
+    if (modelStr.includes("claude-cli") || modelStr.includes("claude")) {
+      allowedDomains.add("api.anthropic.com");
+    }
+  } catch { /* can't read */ }
 
   // Read OpenClaw channel config to determine which API hosts are needed
   const ocConfigPath = `${home}/.openclaw/openclaw.json`;
