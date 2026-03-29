@@ -1,20 +1,19 @@
 /**
  * sharkcage init
  *
- * Three modes:
- * 1. New install — install OpenClaw + sharkcage together, sandboxed from the start
- * 2. Existing install — wrap a running OpenClaw with sharkcage (with warnings)
- * 3. Skills only — just the capability model for new skills, no outer sandbox
+ * 1. Run openclaw onboard (if not already configured) — handles model, API keys, channels
+ * 2. Choose sharkcage sandbox mode
+ * 3. Write sharkcage config
  */
 
-import { mkdirSync, existsSync, writeFileSync } from "node:fs";
+import { mkdirSync, existsSync, writeFileSync, readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import * as p from "@clack/prompts";
 
 type Mode = "new" | "existing" | "skills-only";
 
 interface SharkcageConfig {
   mode: Mode;
-  channels: string[];
   outerSandbox: boolean;
   openclawManaged: boolean;
 }
@@ -25,24 +24,68 @@ const configDir = `${home}/.config/sharkcage`;
 export default async function init() {
   p.intro("sharkcage — OpenClaw, but you trust it.");
 
-  // --- Mode ---
+  // --- 1. Check if OpenClaw is configured ---
+  const ocConfigPath = `${home}/.openclaw/openclaw.json`;
+  let needsOnboard = true;
+
+  if (existsSync(ocConfigPath)) {
+    try {
+      const ocConfig = JSON.parse(readFileSync(ocConfigPath, "utf-8"));
+      // If there's a gateway config with mode set, assume onboard has been run
+      if (ocConfig.gateway?.mode) {
+        needsOnboard = false;
+      }
+    } catch { /* can't read */ }
+  }
+
+  if (needsOnboard) {
+    p.note(
+      "OpenClaw needs to be set up first.\n" +
+      "This wizard will configure your model, API key, channels, and gateway.\n" +
+      "After that, sharkcage will wrap it in a sandbox.",
+      "OpenClaw Setup"
+    );
+
+    const runOnboard = await p.confirm({ message: "Run OpenClaw setup wizard now?" });
+    if (p.isCancel(runOnboard) || !runOnboard) {
+      p.cancel("Run 'openclaw onboard' manually, then re-run 'sc init'.");
+      process.exit(0);
+    }
+
+    // Run openclaw onboard interactively
+    p.log.info("Starting OpenClaw setup wizard...\n");
+    const result = spawnSync("openclaw", ["onboard", "--no-install-daemon"], {
+      stdio: "inherit",
+    });
+
+    if (result.status !== 0) {
+      p.log.error("OpenClaw setup failed. Fix the issue and re-run 'sc init'.");
+      process.exit(1);
+    }
+
+    p.log.success("OpenClaw configured.\n");
+  } else {
+    p.log.success("OpenClaw already configured.");
+  }
+
+  // --- 2. Sandbox mode ---
   const mode = await p.select({
-    message: "How would you like to set up sharkcage?",
+    message: "How should sharkcage sandbox OpenClaw?",
     options: [
       {
         value: "new" as Mode,
-        label: "New install",
-        hint: "Install OpenClaw + sharkcage together. Everything sandboxed from the start.",
+        label: "Full sandbox",
+        hint: "Outer ASRT sandbox around OpenClaw + per-skill sandboxing. Recommended.",
       },
       {
         value: "existing" as Mode,
-        label: "Existing OpenClaw install",
-        hint: "Wrap your running OpenClaw with the outer sandbox. Existing skills need approval.",
+        label: "Wrap existing",
+        hint: "Outer sandbox + skill lockdown. Existing skills need re-approval.",
       },
       {
         value: "skills-only" as Mode,
         label: "Skills only",
-        hint: "Don't touch OpenClaw. Just sandbox new skills you install.",
+        hint: "No outer sandbox. Just sandbox new skills you install.",
       },
     ],
   });
@@ -62,91 +105,38 @@ export default async function init() {
     if (p.isCancel(proceed) || !proceed) { p.cancel("Cancelled."); process.exit(0); }
   }
 
-  // --- Channels (new + existing only) ---
-  let channels: string[] = ["webchat"];
-
-  if (mode !== "skills-only") {
-    const selected = await p.multiselect({
-      message: "Which chat platforms?",
-      options: [
-        { value: "webchat", label: "Web Chat", hint: "built-in to OpenClaw" },
-        { value: "signal", label: "Signal" },
-        { value: "telegram", label: "Telegram" },
-        { value: "whatsapp", label: "WhatsApp" },
-        { value: "discord", label: "Discord" },
-        { value: "slack", label: "Slack" },
-        { value: "imessage", label: "iMessage" },
-        { value: "matrix", label: "Matrix" },
-      ],
-      initialValues: ["webchat"],
-      required: true,
-    });
-
-    if (p.isCancel(selected)) { p.cancel("Cancelled."); process.exit(0); }
-    channels = selected;
-  }
-
-  // --- Config check ---
+  // --- 3. Write sharkcage config ---
   mkdirSync(configDir, { recursive: true });
   const configPath = `${configDir}/gateway.json`;
 
   if (existsSync(configPath)) {
-    const overwrite = await p.confirm({ message: "Config already exists. Overwrite?" });
+    const overwrite = await p.confirm({ message: "Sharkcage config already exists. Overwrite?" });
     if (p.isCancel(overwrite) || !overwrite) {
       p.outro("Keeping existing config.");
       return;
     }
   }
 
-  // --- Write config ---
   const config: SharkcageConfig = {
     mode,
-    channels,
     outerSandbox: mode !== "skills-only",
     openclawManaged: mode === "new",
   };
 
   writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
 
-  // --- Create directories ---
+  // Create directories
   for (const dir of [`${configDir}/data`, `${configDir}/plugins`, `${configDir}/approvals`]) {
     mkdirSync(dir, { recursive: true });
   }
 
-  // --- Next steps ---
-  const steps: Record<Mode, string> = {
-    "new": `1. Start sharkcage (installs OpenClaw if needed):
-   sc start
+  // --- 4. Next steps ---
+  p.note(
+    `Start sharkcage:\n  sc start\n\n` +
+    `Install skills:\n  sc plugin add <url>\n\n` +
+    `Dashboard will be available after start.`,
+    "Next steps"
+  );
 
-2. Install skills:
-   sc plugin add <url>
-
-3. Open the dashboard:
-   http://127.0.0.1:18789/sharkcage/`,
-
-    "existing": `1. Stop your current OpenClaw:
-   openclaw stop
-
-2. Start through sharkcage:
-   sc start
-
-3. Review and approve existing skills:
-   sc plugin list
-   sc approve <skill-name>
-
-4. Open the dashboard:
-   http://127.0.0.1:18789/sharkcage/`,
-
-    "skills-only": `1. Start the supervisor (OpenClaw stays as-is):
-   sc start
-
-2. Install skills through sharkcage:
-   sc plugin add <url>
-
-3. Skills run sandboxed. OpenClaw itself is not sandboxed.
-   To add the outer sandbox later, re-run: sc init`,
-  };
-
-  p.note(steps[mode], "Next steps");
   p.outro("Setup complete.");
 }
