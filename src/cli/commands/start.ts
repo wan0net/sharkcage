@@ -294,10 +294,42 @@ function ensureOpenClawPluginRegistered(): void {
       log("sc", "Plugin already registered");
     }
 
-    // Lock down: disable all bundled skills via entries.*.enabled=false.
-    // allowBundled is unreliable (empty=allow-all). Per-entry disable is definitive.
+    // Lock down bundled skills: disable all except safe + channel-matched.
     if (!config.skills) config.skills = {};
     if (!config.skills.entries) config.skills.entries = {};
+
+    // Read-only / informational skills — always safe
+    const safeSkills = new Set([
+      "weather", "summarize", "session-logs", "model-usage",
+      "node-connect", "healthcheck",
+    ]);
+
+    // Channel → skill mapping
+    const channelSkills: Record<string, string[]> = {
+      discord: ["discord"],
+      slack: ["slack"],
+      whatsapp: ["wacli"],
+      imessage: ["bluebubbles", "imsg"],
+      signal: [],  // signal doesn't have a separate skill
+      telegram: [],
+      webchat: [],
+      matrix: [],
+    };
+
+    // Read chosen channels from gateway config
+    let chosenChannels: string[] = [];
+    try {
+      const gwConfig = JSON.parse(readFileSync(`${configDir}/gateway.json`, "utf-8"));
+      chosenChannels = gwConfig.channels ?? [];
+    } catch { /* no config */ }
+
+    // Build set of auto-approved skills
+    const autoApproved = new Set(safeSkills);
+    for (const ch of chosenChannels) {
+      const skills = channelSkills[ch.toLowerCase()];
+      if (skills) skills.forEach((s) => autoApproved.add(s));
+    }
+
     const bundledSkills = [
       "1password", "apple-notes", "apple-reminders", "bear-notes", "blogwatcher",
       "blucli", "bluebubbles", "camsnap", "clawhub", "coding-agent", "discord",
@@ -309,16 +341,28 @@ function ensureOpenClawPluginRegistered(): void {
       "spotify-player", "summarize", "things-mac", "tmux", "trello",
       "video-frames", "voice-call", "wacli", "weather", "xurl",
     ];
-    let skillsLocked = true;
+
+    let disabledCount = 0;
+    let enabledCount = 0;
     for (const name of bundledSkills) {
-      if (!config.skills.entries[name] || config.skills.entries[name].enabled !== false) {
-        config.skills.entries[name] = { ...(config.skills.entries[name] ?? {}), enabled: false };
-        skillsLocked = false;
+      const shouldEnable = autoApproved.has(name);
+      const current = config.skills.entries[name];
+      if (shouldEnable) {
+        if (!current || current.enabled === false) {
+          config.skills.entries[name] = { ...(current ?? {}), enabled: true };
+          changed = true;
+          enabledCount++;
+        }
+      } else {
+        if (!current || current.enabled !== false) {
+          config.skills.entries[name] = { ...(current ?? {}), enabled: false };
+          changed = true;
+          disabledCount++;
+        }
       }
     }
-    if (!skillsLocked) {
-      changed = true;
-      log("sc", `${bundledSkills.length} bundled skills disabled — approve via sharkcage`);
+    if (disabledCount > 0 || enabledCount > 0) {
+      log("sc", `Skills: ${enabledCount} auto-approved, ${disabledCount} disabled`);
     }
 
     if (!config.tools) config.tools = {};
