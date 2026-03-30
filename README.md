@@ -38,16 +38,12 @@ OpenClaw + sharkcage plugin
 ## Quick Start
 
 ```bash
-# 1. Clone
 # One-line install
 curl -fsSL https://raw.githubusercontent.com/wan0net/sharkcage/main/install.sh | bash
 
 # Then
 sc init       # setup wizard (configures OpenClaw + sandbox mode)
 sc start      # start everything
-
-# 6. Start
-sc start
 ```
 
 See [INSTALL.md](INSTALL.md) for full installation instructions.
@@ -55,7 +51,7 @@ See [INSTALL.md](INSTALL.md) for full installation instructions.
 ## CLI
 
 ```
-sc start                            Start supervisor + sandboxed OpenClaw
+sc start                            Start supervisor + OpenClaw
 sc stop                             Stop everything
 sc init                             First-time setup wizard
 sc status                           Show sandbox state, uptime, skill stats
@@ -68,9 +64,9 @@ sc approve <name>                   Review and approve skill capabilities
 sc verify <path>                    Scan a skill for issues
 sc sign <path>                      Sign a skill with your key
 
-sc config show                      Show gateway sandbox config
-sc config add-service <host>        Add a host to the outer sandbox
-sc config remove-service <host>     Remove a host from the outer sandbox
+sc config show                      Show sharkcage config
+sc config add-service <host>        Add a host to the allowed services
+sc config remove-service <host>     Remove a host from allowed services
 
 sc audit                            Show recent audit log entries
 sc audit --skill <name>             Filter by skill

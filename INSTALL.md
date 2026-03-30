@@ -136,7 +136,7 @@ Open `http://127.0.0.1:18789/sharkcage/` in your browser. Shows:
 - **Status** — ASRT state, uptime, skill counts, tool call stats
 - **Skills** — installed skills with approval status
 - **Audit Log** — every tool call with timestamps, blocks, durations
-- **Config** — gateway sandbox config (read-only)
+- **Config** — sharkcage configuration (read-only)
 
 ## Audit log
 
@@ -160,7 +160,7 @@ sc audit --all
 # Show current config
 sc config show
 
-# Add a service host to the outer sandbox allowlist
+# Add a service host to the allowed services
 sc config add-service api.telegram.org
 
 # Remove a service
@@ -189,7 +189,6 @@ is not. The supervisor is the only unsandboxed process (~200 lines, auditable in
 - **Per-tool sandboxing** — every individual tool call runs in its own ASRT sandbox; the gateway process itself is not sandboxed
 - **Fail closed** — if the supervisor is unreachable, all tool calls are blocked
 - **Per-skill sandboxing** — each skill gets its own ASRT config (kernel-enforced)
-- **Init-locked gateway** — outer sandbox only allows init-configured services
 - **No runtime prompts** — approve once at install, enforce always
 - **Audit trail** — every tool call logged with full provenance
 - **Mandatory denies** — ~/.ssh, ~/.aws, ~/.gnupg always blocked regardless of capabilities

