@@ -1,16 +1,46 @@
 {
   "name": "sharkcage",
-  "version": "0.1.0",
-  "description": "Trust layer for OpenClaw — runs the entire binary in a kernel-level sandbox with per-skill capability enforcement",
+  "version": "1.0.0",
+  "description": "Per-tool kernel sandboxing for OpenClaw — every AI command runs through srt with approve-once capability enforcement",
   "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wan0net/sharkcage.git"
+  },
+  "homepage": "https://github.com/wan0net/sharkcage",
+  "keywords": [
+    "openclaw",
+    "sandbox",
+    "security",
+    "srt",
+    "bubblewrap",
+    "asrt",
+    "ai-agent",
+    "kernel-sandbox",
+    "capability-model"
+  ],
   "bin": {
     "sc": "dist/cli/main.js"
   },
+  "files": [
+    "dist/",
+    "bin/",
+    "src/",
+    "bootstrap.sh",
+    "install.sh",
+    "policies/",
+    "tsconfig.build.json",
+    "tsconfig.plugin.json",
+    "README.md",
+    "INSTALL.md"
+  ],
   "scripts": {
     "dev": "npx tsx src/cli/main.ts",
     "build": "tsc -p tsconfig.build.json",
     "check": "tsc --noEmit",
-    "supervisor": "npx tsx src/supervisor/main.ts"
+    "supervisor": "npx tsx src/supervisor/main.ts",
+    "prepublishOnly": "npm run check"
   },
   "dependencies": {
     "@clack/prompts": "^1.1.0",
