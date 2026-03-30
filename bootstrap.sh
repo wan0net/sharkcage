@@ -29,16 +29,39 @@ check_cmd() {
   fi
 }
 
-MISSING=0
-check_cmd node "Install: https://nodejs.org/ or brew install node" || MISSING=1
-check_cmd npm "Comes with Node.js" || MISSING=1
-check_cmd git "Install: brew install git" || MISSING=1
+# Check Node.js — install via nvm if missing or too old
+NODE_MIN=22
+NEED_NODE=0
 
-if [ "$MISSING" -eq 1 ]; then
-  echo ""
-  echo "Install missing prerequisites and re-run."
-  exit 1
+if command -v node &>/dev/null; then
+  NODE_VER=$(node -v | sed 's/v//' | cut -d. -f1)
+  if [ "$NODE_VER" -lt "$NODE_MIN" ]; then
+    echo "  [!!] node v$(node -v | sed 's/v//') — need v${NODE_MIN}+"
+    NEED_NODE=1
+  else
+    echo "  [ok] node $(node -v)"
+  fi
+else
+  echo "  [  ] node — not found"
+  NEED_NODE=1
 fi
+
+if [ "$NEED_NODE" -eq 1 ]; then
+  echo ""
+  echo "  Installing Node.js $NODE_MIN via nvm (no sudo required)..."
+  export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+  if [ ! -s "$NVM_DIR/nvm.sh" ]; then
+    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+  fi
+  # shellcheck source=/dev/null
+  . "$NVM_DIR/nvm.sh"
+  nvm install "$NODE_MIN"
+  nvm use "$NODE_MIN"
+  echo "  [ok] node $(node -v) (via nvm)"
+fi
+
+check_cmd npm "Comes with Node.js" || { echo ""; echo "npm not found — something went wrong with Node install."; exit 1; }
+check_cmd git "Install: brew install git or apt install git" || { echo ""; echo "Install git and re-run."; exit 1; }
 
 echo ""
 
@@ -48,38 +71,24 @@ npm install --silent 2>/dev/null || npm install
 echo "  [ok] Dependencies installed"
 echo ""
 
-# --- Optional: install srt (ASRT) ---
-echo "Checking optional dependencies..."
-
-if command -v srt &>/dev/null; then
+# --- Install srt locally ---
+if [ -x "$SCRIPT_DIR/node_modules/.bin/srt" ]; then
   echo "  [ok] srt (Anthropic Sandbox Runtime)"
 else
   echo "  [  ] srt not found"
-  read -p "  Install srt? (recommended for sandboxing) [Y/n] " -r REPLY
-  REPLY=${REPLY:-Y}
-  if [[ "$REPLY" =~ ^[Yy]$ ]]; then
-    echo "  Installing srt..."
-    npm install -g @anthropic-ai/sandbox-runtime
-    echo "  [ok] srt installed"
-  else
-    echo "  [skip] Running without kernel sandbox"
-  fi
+  echo "  Installing srt..."
+  npm install --save @anthropic-ai/sandbox-runtime --silent 2>/dev/null || npm install --save @anthropic-ai/sandbox-runtime
+  echo "  [ok] srt installed (local)"
 fi
 
-# --- Optional: install OpenClaw ---
-if command -v openclaw &>/dev/null; then
+# --- Install OpenClaw locally ---
+if [ -x "$SCRIPT_DIR/node_modules/.bin/openclaw" ]; then
   echo "  [ok] OpenClaw"
 else
   echo "  [  ] OpenClaw not found"
-  read -p "  Install OpenClaw? [Y/n] " -r REPLY
-  REPLY=${REPLY:-Y}
-  if [[ "$REPLY" =~ ^[Yy]$ ]]; then
-    echo "  Installing OpenClaw..."
-    npm install -g openclaw
-    echo "  [ok] OpenClaw installed"
-  else
-    echo "  [skip] Install later with: npm install -g openclaw"
-  fi
+  echo "  Installing OpenClaw..."
+  npm install --save openclaw --silent 2>/dev/null || npm install --save openclaw
+  echo "  [ok] OpenClaw installed (local)"
 fi
 
 echo ""
@@ -87,8 +96,10 @@ echo ""
 # --- Build plugin for OpenClaw ---
 echo "Building plugin..."
 npx tsc -p tsconfig.plugin.json --outDir dist/sharkcage-build 2>/dev/null
-mkdir -p dist/sharkcage
+mkdir -p dist/sharkcage dist/supervisor
 cp dist/sharkcage-build/plugin/* dist/sharkcage/ 2>/dev/null || true
+cp dist/sharkcage-build/supervisor/types.js dist/supervisor/ 2>/dev/null || true
+cp dist/sharkcage-build/supervisor/types.d.ts dist/supervisor/ 2>/dev/null || true
 cp src/plugin/openclaw.plugin.json dist/sharkcage/
 cp src/plugin/security-patterns.json dist/sharkcage/
 echo "  [ok] Plugin built to dist/sharkcage/"
@@ -109,6 +120,11 @@ if command -v npx &>/dev/null; then
   mkdir -p "$SCRIPT_DIR/bin"
   cat > "$WRAPPER" << WRAPPER_EOF
 #!/usr/bin/env bash
+# Source nvm if available (for nvm-managed Node)
+export NVM_DIR="\${NVM_DIR:-\$HOME/.nvm}"
+[ -s "\$NVM_DIR/nvm.sh" ] && . "\$NVM_DIR/nvm.sh"
+# Add local binaries to PATH
+export PATH="$SCRIPT_DIR/node_modules/.bin:\$PATH"
 exec npx tsx "$SCRIPT_DIR/src/cli/main.ts" "\$@"
 WRAPPER_EOF
   chmod +x "$WRAPPER"
