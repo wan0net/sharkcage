@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import type { ToolCallRequest, ToolCallResponse, SandboxViolation } from "./types.js";
 import { buildAsrtConfig, writeAsrtConfig } from "./sandbox.js";
 import type { SkillApproval } from "./types.js";
-import type { TokenRegistry } from "./token-registry.js";
+import type { TokenRegistry } from "./proxy.js";
 
 /**
  * Parse sandbox violation details from subprocess stderr.

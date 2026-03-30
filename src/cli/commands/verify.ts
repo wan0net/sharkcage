@@ -14,7 +14,7 @@
  */
 
 import type { PluginManifest } from "../../sdk/types.js";
-import { scanPluginManifest } from "../../sdk/testing.js";
+import { CAPABILITY_REGISTRY } from "../../sdk/types.js";
 
 interface Finding {
   severity: "error" | "warning" | "info";
@@ -49,10 +49,18 @@ export default async function verify() {
   validateManifestFields(manifest, findings);
   checkSignature(manifest, findings, pluginPath as string);
 
-  // Capability-based scan using the SDK scanner
-  const capScan = scanPluginManifest(manifest);
-  for (const f of capScan.findings) {
-    findings.push(f);
+  // Capability scan
+  const caps = manifest.capabilities ?? [];
+  if (caps.length === 0) {
+    findings.push({ severity: "warning", code: "PLUGIN_004", message: "No capabilities declared" });
+  }
+  for (const cap of caps) {
+    const info = CAPABILITY_REGISTRY.find((c) => c.name === cap.capability);
+    if (!info) {
+      findings.push({ severity: "error", code: "PLUGIN_004", message: `Unknown capability: ${cap.capability}` });
+    } else if ((info.risk === "high" || info.risk === "dangerous") && (!cap.scope || cap.scope.length === 0)) {
+      findings.push({ severity: "warning", code: "PLUGIN_005", message: `${info.label} (${info.risk}) without scope` });
+    }
   }
 
   // --- Entry point ---

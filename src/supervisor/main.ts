@@ -15,8 +15,7 @@ import { ApprovalStore } from "./approvals.js";
 import { AuditLog } from "./audit.js";
 import { executeInSandbox, checkAsrtAvailable } from "./worker.js";
 import { startDashboardApi } from "./api.js";
-import { TokenRegistry } from "./token-registry.js";
-import { startLocalhostProxy } from "./proxy.js";
+import { TokenRegistry, startLocalhostProxy } from "./proxy.js";
 
 // --- Config ---
 const home = process.env.HOME ?? ".";
