@@ -33,6 +33,7 @@ export class SupervisorClient {
   private pending = new Map<string, {
     resolve: (r: ToolCallResponse) => void;
     reject: (e: Error) => void;
+    timer: ReturnType<typeof setTimeout>;
   }>();
   private nextId = 0;
 
@@ -62,6 +63,7 @@ export class SupervisorClient {
             const response = JSON.parse(line) as ToolCallResponse;
             const p = this.pending.get(response.id);
             if (p) {
+              clearTimeout(p.timer);
               this.pending.delete(response.id);
               p.resolve(response);
             }
@@ -72,7 +74,8 @@ export class SupervisorClient {
       });
 
       this.conn.on("end", () => {
-        for (const { reject: rej } of this.pending.values()) {
+        for (const { reject: rej, timer } of this.pending.values()) {
+          clearTimeout(timer);
           rej(new Error("Connection closed"));
         }
         this.pending.clear();
@@ -87,29 +90,34 @@ export class SupervisorClient {
     const request: ToolCallRequest = { id, skill, tool, args };
 
     return new Promise<ToolCallResponse>((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-
-      const line = JSON.stringify(request) + "\n";
-      this.conn!.write(line, (err) => {
-        if (err) {
-          this.pending.delete(id);
-          reject(err);
-        }
-      });
-
-      setTimeout(() => {
+      const timer = setTimeout(() => {
         if (this.pending.has(id)) {
           this.pending.delete(id);
           reject(new Error(`Tool call timed out: ${skill}/${tool}`));
         }
       }, 300_000);
+
+      this.pending.set(id, { resolve, reject, timer });
+
+      const line = JSON.stringify(request) + "\n";
+      this.conn!.write(line, (err) => {
+        if (err) {
+          const entry = this.pending.get(id);
+          if (entry) {
+            clearTimeout(entry.timer);
+            this.pending.delete(id);
+          }
+          reject(err);
+        }
+      });
     });
   }
 
   close(): void {
     this.conn?.destroy();
     this.conn = null;
-    for (const { reject } of this.pending.values()) {
+    for (const { reject, timer } of this.pending.values()) {
+      clearTimeout(timer);
       reject(new Error("Connection closed"));
     }
     this.pending.clear();

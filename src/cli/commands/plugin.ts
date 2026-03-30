@@ -16,7 +16,7 @@ import { createInterface } from "node:readline";
 const home = process.env.HOME ?? ".";
 const configDir = process.env.SHARKCAGE_CONFIG_DIR ?? `${home}/.config/sharkcage`;
 const pluginDir = `${configDir}/plugins`;
-const dataDir = process.env.SHARKCAGE_DATA_DIR ?? `${home}/.local/share/sharkcage`;
+const dataDir = process.env.SHARKCAGE_DATA_DIR ?? `${configDir}/data`;
 
 export default async function plugin() {
   const sub = process.argv[3];
@@ -39,14 +39,14 @@ export default async function plugin() {
   sc skill add <url|path>      Install a skill
   sc skill list                List installed skills
   sc skill remove <name>       Remove a skill
-  sc plugin infer <name>       Infer manifest for an installed skill`);
+  sc skill infer <name>       Infer manifest for an installed skill`);
   }
 }
 
 async function pluginAdd(): Promise<void> {
   const source = process.argv[4];
   if (!source) {
-    console.error("Usage: sc plugin add <git-url|local-path>");
+    console.error("Usage: sc skill add <git-url|local-path>");
     process.exit(1);
   }
 
@@ -62,7 +62,7 @@ async function pluginAdd(): Promise<void> {
 
     if (existsSync(skillDir)) {
       console.error(`Skill "${skillName}" already installed at ${skillDir}`);
-      console.error("Run 'sc plugin remove " + skillName + "' first.");
+      console.error("Run 'sc skill remove " + skillName + "' first.");
       process.exit(1);
     }
 
@@ -193,7 +193,7 @@ async function pluginAdd(): Promise<void> {
 async function pluginInfer(): Promise<void> {
   const skillName = process.argv[4];
   if (!skillName) {
-    console.error("Usage: sc plugin infer <skill-name>");
+    console.error("Usage: sc skill infer <skill-name>");
     process.exit(1);
   }
 
@@ -297,7 +297,7 @@ function pluginList(): void {
 async function pluginRemove(): Promise<void> {
   const name = process.argv[4];
   if (!name) {
-    console.error("Usage: sc plugin remove <skill-name>");
+    console.error("Usage: sc skill remove <skill-name>");
     process.exit(1);
   }
 

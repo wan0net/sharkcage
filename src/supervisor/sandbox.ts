@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import type { AsrtConfig, SkillCapability } from "./types.js";
+import { MANDATORY_DENY_READ } from "./types.js";
 
 /** Resolved home directory — used instead of `~` so srt doesn't have to expand it */
 const HOME = homedir();
@@ -30,19 +31,7 @@ function isDangerousHost(host: string): boolean {
   return BLOCKED_PREFIXES.some((prefix) => h.startsWith(prefix));
 }
 
-/** Paths that are ALWAYS denied regardless of capabilities */
-const MANDATORY_DENY_READ = [
-  `${HOME}/.ssh`,
-  `${HOME}/.aws`,
-  `${HOME}/.gnupg`,
-  `${HOME}/.config/sharkcage/approvals`,
-  `${HOME}/.config/sharkcage/gateway-sandbox.json`,
-  `${HOME}/.bashrc`,
-  `${HOME}/.zshrc`,
-  `${HOME}/.gitconfig`,
-  `${HOME}/.netrc`,
-  `${HOME}/.npmrc`,
-];
+// MANDATORY_DENY_READ is imported from ./types.js — canonical list lives there.
 
 /**
  * Generate an ASRT config from a skill's approved capabilities.

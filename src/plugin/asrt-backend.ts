@@ -9,6 +9,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import { writeFileSync, mkdirSync, unlinkSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { MANDATORY_DENY_READ } from "../supervisor/types.js";
 
 // --- Types ---
 
@@ -118,19 +119,7 @@ function writeSessionPolicy(scopeKey: string, policy: AsrtSessionPolicy): string
 
 // --- Policy generation ---
 
-/** Paths that are always denied regardless of session config */
-const MANDATORY_DENY_READ = [
-  `${home}/.ssh`,
-  `${home}/.aws`,
-  `${home}/.gnupg`,
-  `${home}/.config/sharkcage/approvals`,
-  `${home}/.config/sharkcage/gateway-sandbox.json`,
-  `${home}/.bashrc`,
-  `${home}/.zshrc`,
-  `${home}/.gitconfig`,
-  `${home}/.netrc`,
-  `${home}/.npmrc`,
-];
+// MANDATORY_DENY_READ is imported from ../supervisor/types.js — canonical list lives there.
 
 function buildSessionPolicy(
   workspaceDir: string,

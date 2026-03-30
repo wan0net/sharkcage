@@ -6,10 +6,11 @@
  *
  * Integration points (no OpenClaw fork needed):
  * - registerTool: shadow tools for each skill tool, execute routes to supervisor
- * - before_tool_call hook (priority 150): approval gate via native UX
- * - after_tool_call hook (priority 50): audit logging
- * - inbound_claim hook (priority 200): handles `sc install` commands
- * - before_message_write hook (priority 100): scrubs sharkcage internal messages
+ * - Hook 1: before_tool_call hook (priority 150): approval gate via native UX
+ * - Hook 2: before_tool_call hook (priority 200): security scanner
+ * - Hook 3: after_tool_call hook (priority 50): audit logging
+ * - Hook 4: inbound_claim hook (priority 200): handles `sc install` commands
+ * - Hook 5: before_message_write hook (priority 100): scrubs sharkcage internal messages
  * - registerHttpRoute: webhook for fleet dispatch results
  */
 
@@ -32,7 +33,7 @@ const socketPath = process.env.SHARKCAGE_SOCKET ?? `${dataDir}/supervisor.sock`;
 const supervisor = new SupervisorClient(socketPath);
 const skillMap = new SkillMap();
 
-/** Violations awaiting user approval, keyed by `${skill}:${toolName}` to reduce collision between concurrent calls */
+/** Violations awaiting user approval, keyed by unique tool call ID */
 const pendingViolations = new Map<string, SandboxViolation>();
 
 // --- Violation helpers ---
@@ -184,9 +185,11 @@ export function register(api: OpenClawPluginApi): void {
         try {
           const response = await supervisor.call(skillName, toolName, params);
           if (response.violation) {
-            // Store the violation for the before_tool_call hook to surface to the user
-            pendingViolations.set(`${skillName}:${toolName}`, response.violation);
-            return `This action requires additional permissions. Requesting approval...`;
+            // Store the violation for the before_tool_call hook to surface to the user.
+            // Use a unique ID to avoid collision between concurrent calls to the same tool.
+            const violationId = Math.random().toString(36).slice(2);
+            pendingViolations.set(`${skillName}:${toolName}:${violationId}`, response.violation);
+            return `This action requires additional permissions. Requesting approval... [sc-violation-id:${violationId}]`;
           }
           if (response.error) return response.error;
           return response.result;
@@ -206,9 +209,17 @@ export function register(api: OpenClawPluginApi): void {
     if (!skill) return undefined; // not a sharkcage-managed skill, pass through
 
     // --- Check for a pending sandbox violation from the previous call ---
-    const pendingViolation = pendingViolations.get(`${skill}:${toolName}`);
-    if (pendingViolation) {
-      pendingViolations.delete(`${skill}:${toolName}`);
+    // Key includes a unique violation ID (suffix) to avoid collision between concurrent calls.
+    // Extract the ID from the last tool result if present, else find oldest matching key.
+    const lastResult = typeof event.params?._lastResult === "string" ? event.params._lastResult : "";
+    const violationIdMatch = lastResult.match(/\[sc-violation-id:([a-z0-9]+)\]/);
+    const violationId = violationIdMatch?.[1];
+    const violationKey = violationId
+      ? `${skill}:${toolName}:${violationId}`
+      : [...pendingViolations.keys()].find((k) => k.startsWith(`${skill}:${toolName}:`));
+    const pendingViolation = violationKey ? pendingViolations.get(violationKey) : undefined;
+    if (pendingViolation && violationKey) {
+      pendingViolations.delete(violationKey);
 
       // If already on the deny list, silently block without prompting
       if (isDenied(skill, pendingViolation)) {
@@ -374,7 +385,7 @@ export function register(api: OpenClawPluginApi): void {
     console.log(`[sharkcage-audit] tool: ${event.toolName}, duration: ${event.durationMs}ms`);
   }, { priority: 50 });
 
-  // --- Hook 3: inbound_claim (priority 200) — handle sc commands from chat ---
+  // --- Hook 4: inbound_claim (priority 200) — handle sc commands from chat ---
   api.on("inbound_claim", async (event: InboundClaimEvent, _ctx: HookContext) => {
     const text = (event.content ?? "").trim();
 
@@ -404,7 +415,7 @@ export function register(api: OpenClawPluginApi): void {
     return undefined;
   }, { priority: 200 });
 
-  // --- Hook 6: before_message_write (priority 100) — scrub internals + redact secrets ---
+  // --- Hook 5: before_message_write (priority 100) — scrub internals + redact secrets ---
   api.on("before_message_write", (event: BeforeMessageWriteEvent, _ctx: HookContext) => {
     const msg = event.message;
     if (!msg) return undefined;
@@ -432,19 +443,12 @@ export function register(api: OpenClawPluginApi): void {
       const redacted = redact(content);
       console.log(`[sharkcage-security] redacted ${secrets.length} secret(s), ${pii.length} PII from message`);
       if (isArray) {
-        // Rebuild array preserving non-text parts, replacing text parts with redacted content
+        // Rebuild array preserving non-text parts, redacting each text part independently
         const parts = msg.content as unknown[];
-        let redactedRemaining = redacted;
         const newParts = parts.map((p: unknown) => {
-          if (typeof p === "string") {
-            const chunk = redactedRemaining.slice(0, p.length);
-            redactedRemaining = redactedRemaining.slice(p.length + 1); // +1 for the join "\n"
-            return chunk;
-          } else if (p != null && typeof (p as any).text === "string") {
-            const chunk = redactedRemaining.slice(0, (p as any).text.length);
-            redactedRemaining = redactedRemaining.slice((p as any).text.length + 1);
-            return { ...(p as object), text: chunk };
-          }
+          if (typeof p === "string") return redact(p);
+          if (p != null && typeof (p as any).text === "string")
+            return { ...(p as object), text: redact((p as any).text) };
           return p;
         });
         return { message: { ...msg, content: newParts } };

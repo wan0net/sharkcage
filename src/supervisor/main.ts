@@ -131,7 +131,7 @@ async function handleConnection(conn: Socket): Promise<void> {
   let buffer = "";
 
   return new Promise((resolve) => {
-    conn.on("data", async (chunk: Buffer) => {
+    conn.on("data", (chunk: Buffer) => {
       buffer += chunk.toString();
 
       // Process complete JSON messages (newline-delimited)
@@ -144,8 +144,9 @@ async function handleConnection(conn: Socket): Promise<void> {
 
         try {
           const request = JSON.parse(line) as ToolCallRequest;
-          const response = await handleRequest(request);
-          conn.write(JSON.stringify(response) + "\n");
+          handleRequest(request).then((response) => {
+            conn.write(JSON.stringify(response) + "\n");
+          }).catch((err) => console.error("request error:", err));
         } catch (err) {
           conn.write(JSON.stringify({
             id: "unknown",

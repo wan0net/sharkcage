@@ -1,3 +1,39 @@
+import { homedir } from "node:os";
+
+const HOME = homedir();
+const CONFIG_DIR = process.env.SHARKCAGE_CONFIG_DIR ?? `${HOME}/.config/sharkcage`;
+
+/**
+ * Paths that are ALWAYS denied regardless of capabilities or session config.
+ * Canonical list — imported by sandbox.ts and asrt-backend.ts.
+ */
+export const MANDATORY_DENY_READ: string[] = [
+  // Credentials & keys
+  `${HOME}/.ssh`,
+  `${HOME}/.aws`,
+  `${HOME}/.gnupg`,
+  `${HOME}/.netrc`,
+  `${HOME}/.npmrc`,
+  `${HOME}/.docker`,
+  `${HOME}/.kube`,
+  `${HOME}/.config/gh`,
+  `${HOME}/.config/gcloud`,
+  `${HOME}/.config/op`,
+  `${HOME}/.password-store`,
+  // Shell configs (can leak env vars / secrets)
+  `${HOME}/.bashrc`,
+  `${HOME}/.zshrc`,
+  `${HOME}/.bash_profile`,
+  `${HOME}/.zprofile`,
+  `${HOME}/.profile`,
+  `${HOME}/.bash_history`,
+  `${HOME}/.zsh_history`,
+  `${HOME}/.gitconfig`,
+  // Sharkcage internals
+  `${CONFIG_DIR}/approvals`,
+  `${CONFIG_DIR}/gateway-sandbox.json`,
+];
+
 /** IPC request from OpenClaw plugin to supervisor */
 export interface ToolCallRequest {
   id: string;

@@ -250,9 +250,15 @@ async function handleSocks5(
     }
     const nmethods = buf[1];
     await waitForBytes(2 + nmethods);
+    const methods = buf.slice(2, 2 + nmethods);
     buf = buf.slice(2 + nmethods); // consume greeting
 
-    // We only accept username/password auth
+    // We only accept username/password auth — reject if client doesn't offer it
+    if (!methods.includes(AUTH_METHOD_USERPASS)) {
+      conn.write(Buffer.from([SOCKS5_VERSION, AUTH_METHOD_NO_ACCEPTABLE]));
+      conn.destroy();
+      return;
+    }
     conn.write(Buffer.from([SOCKS5_VERSION, AUTH_METHOD_USERPASS]));
 
     // --- Phase 2: Username/Password Auth (RFC 1929) ---

@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, unlinkSync } from "node:fs";
 import type { ToolCallRequest, ToolCallResponse, SandboxViolation } from "./types.js";
 import { buildAsrtConfig, writeAsrtConfig } from "./sandbox.js";
 import type { SkillApproval } from "./types.js";
@@ -171,6 +171,7 @@ export async function executeInSandbox(
         if (proxyToken && tokenRegistry) {
           tokenRegistry.revoke(proxyToken);
         }
+        try { unlinkSync(configPath); } catch { /* already gone */ }
         resolve(code ?? 1);
       });
     });
