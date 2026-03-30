@@ -438,7 +438,7 @@ function generateGatewaySandboxConfig(outPath: string): void {
       allowedDomains: domainList.length > 0 ? domainList : [],
       deniedDomains: [],
       allowLocalBinding: true,
-      allowUnixSockets: [`${configDir}/data/supervisor.sock`],
+      allowAllUnixSockets: true,
     },
     filesystem: {
       allowRead: ["/usr", "/lib", "/bin", "/sbin", "/etc", "/opt/homebrew", "/tmp", `${home}/.openclaw`, `${configDir}`],
