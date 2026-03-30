@@ -3,403 +3,1299 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>sharkcage - OpenClaw inside a kernel-level sandbox</title>
-<meta name="description" content="Runs the entire OpenClaw binary inside a kernel-level ASRT sandbox. Per-skill sandboxing, capability model, approve once enforce always.">
+<title>sharkcage — Kernel-level sandboxing for AI agents</title>
+<meta name="description" content="OpenClaw, but you trust it. Kernel-level sandboxing for AI agents. Every command, file access, and network call enforced at the OS level.">
 <script>(function(){var t=localStorage.getItem('theme')||'dark';document.documentElement.setAttribute('data-theme',t)})();</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700;800;900&family=Geist+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
+  /* ── Theme Variables ── */
   [data-theme="dark"] {
-    --bg: #111110;
-    --bg-subtle: #1a1a19;
-    --bg-card: #1c1c1b;
-    --bg-hover: #242423;
-    --border: #282826;
-    --border-strong: #343432;
-    --text: #ededed;
-    --text-mid: #a09f9b;
-    --text-dim: #5c5b57;
+    --bg: #0a0a0f;
+    --bg-subtle: #0e0e14;
+    --bg-card: #111118;
+    --bg-card-hover: #16161f;
+    --bg-hover: #1a1a24;
+    --bg-code: #0c0c12;
+    --border: #1e1e2a;
+    --border-strong: #2a2a3a;
+    --border-accent: #3b82f620;
+    --text: #e8e8ed;
+    --text-mid: #8a8a9a;
+    --text-dim: #4a4a5a;
     --accent: #3b82f6;
-    --accent-bg: #1e2e4a;
+    --accent-dim: #2563eb;
+    --accent-glow: #3b82f630;
+    --accent-bg: #3b82f608;
     --green: #22c55e;
-    --green-bg: #14291e;
-    --shadow-md: 0 4px 12px rgba(0,0,0,0.3);
+    --green-dim: #16a34a;
+    --red: #ef4444;
+    --red-dim: #dc2626;
+    --yellow: #eab308;
+    --scanline: #ffffff03;
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.4);
+    --shadow-md: 0 4px 16px rgba(0,0,0,0.5);
+    --shadow-lg: 0 8px 32px rgba(0,0,0,0.6);
+    --shadow-glow: 0 0 40px rgba(59,130,246,0.08);
+    --nav-bg: #0a0a0fea;
+    --badge-bg: #3b82f615;
+    --table-header-bg: #0e0e14;
+    --table-row-hover: #111118;
+    --diagram-bg: #0c0c11;
+    --diagram-border: #1a1a28;
+    --check: #22c55e;
+    --cross: #ef4444;
+    --partial: #eab308;
   }
   [data-theme="light"] {
-    --bg: #ffffff;
-    --bg-subtle: #f8f8f7;
+    --bg: #f6f6f8;
+    --bg-subtle: #eeeef2;
     --bg-card: #ffffff;
-    --bg-hover: #f3f3f2;
-    --border: #e8e8e6;
-    --border-strong: #d4d4d0;
-    --text: #1a1a1a;
-    --text-mid: #57534e;
-    --text-dim: #a8a29e;
+    --bg-card-hover: #fafafe;
+    --bg-hover: #f0f0f4;
+    --bg-code: #f0f0f5;
+    --border: #dddde4;
+    --border-strong: #c8c8d2;
+    --border-accent: #3b82f625;
+    --text: #1a1a24;
+    --text-mid: #5a5a6a;
+    --text-dim: #9a9aa8;
     --accent: #2563eb;
-    --accent-bg: #eff6ff;
+    --accent-dim: #1d4ed8;
+    --accent-glow: #2563eb20;
+    --accent-bg: #2563eb06;
     --green: #16a34a;
-    --green-bg: #f0fdf4;
-    --shadow-md: 0 4px 12px rgba(0,0,0,0.06), 0 2px 4px rgba(0,0,0,0.04);
+    --green-dim: #15803d;
+    --red: #dc2626;
+    --red-dim: #b91c1c;
+    --yellow: #ca8a04;
+    --scanline: #00000003;
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.06);
+    --shadow-md: 0 4px 16px rgba(0,0,0,0.08);
+    --shadow-lg: 0 8px 32px rgba(0,0,0,0.1);
+    --shadow-glow: 0 0 40px rgba(37,99,235,0.06);
+    --nav-bg: #f6f6f8ea;
+    --badge-bg: #2563eb10;
+    --table-header-bg: #f0f0f5;
+    --table-row-hover: #f8f8fc;
+    --diagram-bg: #f2f2f7;
+    --diagram-border: #dddde4;
+    --check: #16a34a;
+    --cross: #dc2626;
+    --partial: #ca8a04;
   }
 
-  * { margin: 0; padding: 0; box-sizing: border-box; }
+  /* ── Reset ── */
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 72px; }
 
   body {
     background: var(--bg);
     color: var(--text);
-    font-family: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    font-family: 'Geist', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
     font-size: 15px;
     line-height: 1.7;
     -webkit-font-smoothing: antialiased;
-    transition: background 0.2s, color 0.2s;
+    -moz-osx-font-smoothing: grayscale;
+    transition: background 0.3s ease, color 0.3s ease;
   }
 
-  code, pre {
-    font-family: 'Geist Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  /* Scanline texture overlay */
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 9999;
+    background: repeating-linear-gradient(
+      0deg,
+      var(--scanline) 0px,
+      var(--scanline) 1px,
+      transparent 1px,
+      transparent 3px
+    );
+    opacity: 0.5;
   }
 
-  .container { max-width: 740px; margin: 0 auto; padding: 0 24px; }
+  code, pre, .mono {
+    font-family: 'Geist Mono', ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, monospace;
+  }
 
-  /* Nav */
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+  .container { max-width: 960px; margin: 0 auto; padding: 0 28px; }
+
+  /* ── Navigation ── */
   .nav {
-    position: sticky; top: 0; z-index: 100;
-    height: 50px; display: flex; align-items: center; justify-content: space-between;
-    background: var(--bg); border-bottom: 1px solid var(--border);
-    padding: 0 24px;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 1000;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--nav-bg);
+    backdrop-filter: blur(16px) saturate(180%);
+    -webkit-backdrop-filter: blur(16px) saturate(180%);
+    border-bottom: 1px solid var(--border);
   }
-  .nav-logo { color: var(--accent); font-weight: 700; font-size: 1.1rem; text-decoration: none; letter-spacing: -0.02em; }
+  .nav-inner {
+    max-width: 960px;
+    width: 100%;
+    padding: 0 28px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .nav-logo {
+    color: var(--accent);
+    font-family: 'Geist Mono', monospace;
+    font-weight: 700;
+    font-size: 1rem;
+    text-decoration: none;
+    letter-spacing: -0.03em;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .nav-logo::before {
+    content: '>';
+    color: var(--text-dim);
+    font-weight: 400;
+  }
+  .nav-links {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    list-style: none;
+  }
+  .nav-links a {
+    color: var(--text-dim);
+    font-size: 0.78rem;
+    font-weight: 500;
+    padding: 6px 10px;
+    border-radius: 6px;
+    text-decoration: none;
+    transition: color 0.2s, background 0.2s;
+    letter-spacing: 0.01em;
+  }
+  .nav-links a:hover {
+    color: var(--text);
+    background: var(--bg-hover);
+    text-decoration: none;
+  }
   .theme-toggle {
-    background: none; border: 1px solid var(--border); color: var(--text-mid);
-    width: 32px; height: 32px; border-radius: 8px; cursor: pointer; font-size: 16px;
-    display: flex; align-items: center; justify-content: center;
-    transition: border-color 0.2s, color 0.2s;
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 15px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: border-color 0.2s, color 0.2s, background 0.2s;
+    margin-left: 8px;
+    flex-shrink: 0;
   }
-  .theme-toggle:hover { border-color: var(--border-strong); color: var(--text); }
+  .theme-toggle:hover {
+    border-color: var(--border-strong);
+    color: var(--text);
+    background: var(--bg-hover);
+  }
 
-  /* Hero */
-  .hero { padding: 100px 0 72px; text-align: center; }
+  /* ── Hero ── */
+  .hero {
+    padding: 140px 0 100px;
+    text-align: center;
+    position: relative;
+  }
+  .hero::before {
+    content: '';
+    position: absolute;
+    top: 60px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 600px;
+    height: 600px;
+    background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%);
+    pointer-events: none;
+    z-index: 0;
+  }
+  .hero > * { position: relative; z-index: 1; }
+  .hero-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: 'Geist Mono', monospace;
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: var(--accent);
+    background: var(--badge-bg);
+    border: 1px solid var(--border-accent);
+    padding: 5px 14px;
+    border-radius: 100px;
+    margin-bottom: 28px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .hero-label .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--green);
+    animation: pulse-dot 2s ease-in-out infinite;
+  }
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
   .hero h1 {
-    font-size: clamp(4rem, 12vw, 7rem); font-weight: 700;
-    letter-spacing: -0.04em; color: var(--accent); line-height: 1;
+    font-family: 'Geist Mono', monospace;
+    font-size: clamp(3.5rem, 10vw, 6.5rem);
+    font-weight: 800;
+    letter-spacing: -0.06em;
+    color: var(--text);
+    line-height: 1;
+    margin-bottom: 20px;
   }
+  .hero h1 .accent { color: var(--accent); }
   .hero .tagline {
-    margin-top: 20px; font-size: clamp(1rem, 2.5vw, 1.15rem);
-    color: var(--text-mid); max-width: 480px; margin-left: auto; margin-right: auto;
+    font-size: clamp(1.1rem, 2.5vw, 1.35rem);
+    color: var(--text-mid);
+    font-weight: 400;
+    margin-bottom: 8px;
+    font-style: italic;
   }
-  .hero-links { margin-top: 28px; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
-  .hero-links a {
-    font-size: 0.875rem; padding: 8px 20px; border-radius: 8px;
-    text-decoration: none; font-weight: 500; transition: all 0.2s;
+  .hero .oneliner {
+    font-size: 0.9rem;
+    color: var(--text-dim);
+    max-width: 560px;
+    margin: 0 auto 36px;
+    line-height: 1.6;
   }
-  .hero-links .primary {
-    background: var(--accent); color: #fff; border: 1px solid var(--accent);
+  .hero-buttons {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    flex-wrap: wrap;
   }
-  .hero-links .primary:hover { opacity: 0.9; }
-  .hero-links .secondary {
-    color: var(--text-mid); border: 1px solid var(--border); background: var(--bg-card);
+  .btn {
+    font-family: 'Geist', sans-serif;
+    font-size: 0.85rem;
+    font-weight: 600;
+    padding: 10px 24px;
+    border-radius: 8px;
+    text-decoration: none;
+    transition: all 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid transparent;
+    cursor: pointer;
   }
-  .hero-links .secondary:hover { border-color: var(--border-strong); color: var(--text); }
+  .btn:hover { text-decoration: none; }
+  .btn-primary {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }
+  .btn-primary:hover { background: var(--accent-dim); box-shadow: var(--shadow-glow); }
+  .btn-secondary {
+    background: var(--bg-card);
+    color: var(--text-mid);
+    border-color: var(--border);
+  }
+  .btn-secondary:hover { border-color: var(--border-strong); color: var(--text); }
 
-  /* Sections */
-  section { padding: 56px 0; }
-  section + section { border-top: 1px solid var(--border); }
-  .section-title {
-    font-size: 11px; font-weight: 600; text-transform: uppercase;
-    letter-spacing: 0.08em; color: var(--text-dim); margin-bottom: 20px;
+  /* ── Sections ── */
+  section {
+    padding: 80px 0;
+    position: relative;
   }
-  h3 { font-size: 0.95rem; font-weight: 600; margin-bottom: 6px; color: var(--text); }
-  p { margin-bottom: 14px; color: var(--text-mid); }
-  p strong { color: var(--text); }
-  a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+  .section-label {
+    font-family: 'Geist Mono', monospace;
+    font-size: 0.68rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--accent);
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .section-label::before {
+    content: '';
+    width: 20px;
+    height: 1px;
+    background: var(--accent);
+    opacity: 0.5;
+  }
+  .section-heading {
+    font-size: clamp(1.6rem, 4vw, 2.2rem);
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    line-height: 1.2;
+    margin-bottom: 16px;
+    color: var(--text);
+  }
+  .section-desc {
+    font-size: 0.95rem;
+    color: var(--text-mid);
+    max-width: 600px;
+    margin-bottom: 40px;
+    line-height: 1.7;
+  }
 
-  /* Code blocks */
+  /* ── Problem Section ── */
+  .problem-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin-top: 32px;
+  }
+  .problem-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 22px 24px;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    position: relative;
+    overflow: hidden;
+  }
+  .problem-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 3px;
+    height: 100%;
+    background: var(--red);
+    opacity: 0.6;
+    border-radius: 3px 0 0 3px;
+  }
+  .problem-card:hover {
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow-md);
+  }
+  .problem-card h4 {
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin-bottom: 6px;
+    color: var(--text);
+  }
+  .problem-card p {
+    font-size: 0.82rem;
+    color: var(--text-mid);
+    margin: 0;
+    line-height: 1.55;
+  }
+
+  /* ── Layer Cards ── */
+  .layers-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    margin-top: 32px;
+  }
+  .layer-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px 28px;
+    display: flex;
+    gap: 20px;
+    align-items: flex-start;
+    transition: border-color 0.25s, box-shadow 0.25s, transform 0.25s;
+    position: relative;
+  }
+  .layer-card:hover {
+    border-color: var(--accent);
+    box-shadow: var(--shadow-glow);
+    transform: translateX(4px);
+  }
+  .layer-badge {
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    background: var(--badge-bg);
+    border: 1px solid var(--border-accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Geist Mono', monospace;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--accent);
+    flex-shrink: 0;
+  }
+  .layer-content { flex: 1; min-width: 0; }
+  .layer-content h4 {
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin-bottom: 5px;
+    color: var(--text);
+    letter-spacing: -0.01em;
+  }
+  .layer-content p {
+    font-size: 0.83rem;
+    color: var(--text-mid);
+    margin: 0;
+    line-height: 1.6;
+  }
+  .layer-tag {
+    font-family: 'Geist Mono', monospace;
+    font-size: 0.68rem;
+    font-weight: 500;
+    color: var(--accent);
+    background: var(--badge-bg);
+    padding: 2px 8px;
+    border-radius: 4px;
+    margin-left: 8px;
+    white-space: nowrap;
+  }
+
+  /* ── Diagrams ── */
+  .diagrams-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-top: 32px;
+  }
+  .diagram-block {
+    background: var(--diagram-bg);
+    border: 1px solid var(--diagram-border);
+    border-radius: 10px;
+    overflow: hidden;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  .diagram-block:hover {
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow-md);
+  }
+  .diagram-header {
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .diagram-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+  }
+  .diagram-dot.green { background: var(--green); }
+  .diagram-dot.yellow { background: var(--yellow); }
+  .diagram-dot.red { background: var(--red); }
+  .diagram-dot.blue { background: var(--accent); }
+  .diagram-title {
+    font-family: 'Geist Mono', monospace;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--text-mid);
+    letter-spacing: 0.02em;
+  }
+  .diagram-block pre {
+    margin: 0;
+    padding: 18px 20px;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    font-size: 0.76rem;
+    line-height: 1.8;
+    color: var(--text-mid);
+    overflow-x: auto;
+  }
+  .diagram-block pre code {
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: inherit;
+  }
+  .diagram-block .hl { color: var(--accent); font-weight: 600; }
+  .diagram-block .arrow { color: var(--text-dim); }
+  .diagram-block .warn { color: var(--red); font-weight: 600; }
+  .diagram-block .ok { color: var(--green); font-weight: 600; }
+
+  /* ── Comparison Table ── */
+  .comparison-wrap {
+    margin-top: 32px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    overflow-x: auto;
+  }
+  .comparison-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+    min-width: 700px;
+  }
+  .comparison-table thead th {
+    padding: 14px 16px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-dim);
+    background: var(--table-header-bg);
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  .comparison-table thead th:first-child {
+    color: var(--text-mid);
+    min-width: 180px;
+  }
+  .comparison-table thead th.highlight {
+    color: var(--accent);
+    background: var(--accent-bg);
+    border-bottom-color: var(--border-accent);
+  }
+  .comparison-table tbody td {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-mid);
+    vertical-align: middle;
+  }
+  .comparison-table tbody tr:last-child td { border-bottom: none; }
+  .comparison-table tbody tr:hover td { background: var(--table-row-hover); }
+  .comparison-table tbody td:first-child {
+    font-weight: 500;
+    color: var(--text);
+    font-size: 0.8rem;
+  }
+  .comparison-table td.highlight {
+    background: var(--accent-bg);
+  }
+  .comparison-table tbody tr:hover td.highlight {
+    background: var(--accent-bg);
+  }
+  .icon-check { color: var(--check); font-weight: 700; }
+  .icon-cross { color: var(--cross); opacity: 0.5; }
+  .icon-partial { color: var(--partial); }
+
+  /* ── Stats Cards ── */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
+    margin-top: 32px;
+  }
+  .stat-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 28px 24px;
+    text-align: center;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  .stat-card:hover {
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow-md);
+  }
+  .stat-val {
+    font-family: 'Geist Mono', monospace;
+    font-size: 2rem;
+    font-weight: 800;
+    color: var(--accent);
+    letter-spacing: -0.04em;
+    line-height: 1;
+    margin-bottom: 8px;
+  }
+  .stat-label {
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    line-height: 1.4;
+  }
+
+  /* ── Platform Cards ── */
+  .platform-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
+    margin-top: 32px;
+  }
+  .platform-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 28px 24px;
+    text-align: center;
+    transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
+  }
+  .platform-card:hover {
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow-md);
+    transform: translateY(-2px);
+  }
+  .platform-icon {
+    font-size: 2rem;
+    margin-bottom: 12px;
+    display: block;
+  }
+  .platform-card h4 {
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin-bottom: 6px;
+    color: var(--text);
+  }
+  .platform-card .platform-tech {
+    font-family: 'Geist Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--accent);
+    background: var(--badge-bg);
+    padding: 3px 10px;
+    border-radius: 4px;
+    display: inline-block;
+    margin-top: 4px;
+  }
+
+  /* ── Code Blocks ── */
   pre {
-    background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 8px;
-    padding: 18px 22px; overflow-x: auto; margin-bottom: 20px;
-    font-size: 13px; line-height: 1.8;
+    background: var(--bg-code);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px 24px;
+    overflow-x: auto;
+    margin-bottom: 0;
+    font-size: 0.8rem;
+    line-height: 1.85;
+  }
+  code {
+    font-family: 'Geist Mono', monospace;
+    background: var(--bg-subtle);
+    border: 1px solid var(--border);
+    padding: 2px 7px;
+    border-radius: 5px;
+    font-size: 0.83em;
+  }
+  pre code {
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: inherit;
+  }
+  .code-block {
+    margin-top: 32px;
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+  .code-header {
+    padding: 10px 18px;
+    background: var(--bg-subtle);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .code-header .dots {
+    display: flex;
+    gap: 5px;
+  }
+  .code-header .dots span {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--border-strong);
+  }
+  .code-header .filename {
+    font-family: 'Geist Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    margin-left: 8px;
+  }
+  .code-block pre {
+    border: none;
+    border-radius: 0;
+    margin: 0;
   }
   pre .comment { color: var(--text-dim); }
-  pre .cmd { color: var(--accent); }
+  pre .cmd { color: var(--accent); font-weight: 500; }
   pre .arg { color: var(--text); }
-  code {
-    background: var(--bg-subtle); border: 1px solid var(--border);
-    padding: 2px 6px; border-radius: 4px; font-size: 0.85em;
-  }
-  pre code { background: none; border: none; padding: 0; }
+  pre .str { color: var(--green); }
 
-  /* Flow diagram */
-  .flow {
-    background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 8px;
-    padding: 22px; text-align: center; font-size: 13px;
-    overflow-x: auto; white-space: nowrap; margin-bottom: 20px; color: var(--text-mid);
-    font-family: 'Geist Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  /* ── CLI Table ── */
+  .cli-table-wrap {
+    margin-top: 32px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    overflow-x: auto;
   }
-  .flow .node { color: var(--accent); font-weight: 600; }
-  .flow .arrow { color: var(--text-dim); padding: 0 4px; }
+  .cli-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.83rem;
+    min-width: 500px;
+  }
+  .cli-table thead th {
+    padding: 12px 18px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-dim);
+    background: var(--table-header-bg);
+    border-bottom: 1px solid var(--border);
+  }
+  .cli-table tbody td {
+    padding: 10px 18px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-mid);
+    vertical-align: top;
+  }
+  .cli-table tbody tr:last-child td { border-bottom: none; }
+  .cli-table tbody tr:hover td { background: var(--table-row-hover); }
+  .cli-table .cli-cmd {
+    font-family: 'Geist Mono', monospace;
+    font-size: 0.8rem;
+    color: var(--accent);
+    font-weight: 500;
+    white-space: nowrap;
+  }
 
-  /* Comparison grid */
-  .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 20px; }
-  .compare-col {
-    background: var(--bg-card); border: 1px solid var(--border);
-    border-radius: 10px; padding: 20px;
+  /* ── Divider ── */
+  .divider {
+    height: 1px;
+    background: var(--border);
+    margin: 0;
+    border: none;
   }
-  .compare-col.reality { border-color: var(--accent); }
-  .compare-col h3 {
-    font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
-    color: var(--text-dim); font-weight: 600;
-  }
-  .compare-col.reality h3 { color: var(--accent); }
-  .compare-col ul { list-style: none; padding: 0; margin-top: 12px; }
-  .compare-col li { padding: 3px 0; color: var(--text-mid); font-size: 0.9rem; }
-  .compare-col.reality li { color: var(--text); }
 
-  /* Feature grid */
-  .features { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 20px; }
-  .feature {
-    background: var(--bg-card); border: 1px solid var(--border);
-    border-radius: 10px; padding: 20px; transition: box-shadow 0.2s, border-color 0.2s;
-  }
-  .feature:hover { border-color: var(--border-strong); box-shadow: var(--shadow-md); }
-  .feature h3 { font-size: 0.9rem; }
-  .feature p { color: var(--text-mid); font-size: 0.85rem; margin-bottom: 0; }
-  /* Hardware stats */
-  .hw-grid {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-    gap: 12px; margin-bottom: 20px;
-  }
-  .hw-stat {
-    background: var(--bg-card); border: 1px solid var(--border);
-    border-radius: 10px; padding: 16px; text-align: center;
-  }
-  .hw-stat .val { font-size: 1.3rem; font-weight: 700; color: var(--accent); display: block; }
-  .hw-stat .label { font-size: 0.75rem; color: var(--text-dim); margin-top: 4px; display: block; }
-  /* Docs grid */
-  .docs-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; }
-  .doc-link {
-    display: block; background: var(--bg-card); border: 1px solid var(--border);
-    border-radius: 10px; padding: 16px 20px; text-decoration: none;
-    transition: box-shadow 0.2s, border-color 0.2s;
-  }
-  .doc-link:hover { border-color: var(--border-strong); box-shadow: var(--shadow-md); }
-  .doc-link .doc-title { color: var(--text); font-weight: 600; font-size: 0.9rem; display: block; margin-bottom: 4px; }
-  .doc-link .doc-desc { color: var(--text-dim); font-size: 0.78rem; line-height: 1.4; }
-  /* Runtime table */
-  .runtime-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 13px; }
-  .runtime-table th {
-    text-align: left; padding: 10px 12px; border-bottom: 2px solid var(--border);
-    color: var(--text-dim); font-weight: 600; font-size: 11px;
-    text-transform: uppercase; letter-spacing: 0.06em;
-  }
-  .runtime-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); color: var(--text-mid); }
-  .runtime-table tr:hover td { background: var(--bg-hover); }
-  .runtime-table tr:last-child td { border-bottom: none; }
-
-  /* Footer */
+  /* ── Footer ── */
   footer {
-    border-top: 1px solid var(--border); padding: 36px 0; text-align: center;
-    color: var(--text-dim); font-size: 0.85rem;
+    padding: 48px 0;
+    text-align: center;
+    border-top: 1px solid var(--border);
+  }
+  footer .footer-logo {
+    font-family: 'Geist Mono', monospace;
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+  }
+  footer p {
+    color: var(--text-dim);
+    font-size: 0.82rem;
+    margin-bottom: 4px;
   }
   footer a { color: var(--accent); }
-  footer p { margin-bottom: 6px; }
 
-  /* Animations */
-  @keyframes fadeUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
-  .fade-in { animation: fadeUp 0.5s ease-out both; }
-  .fade-in:nth-child(2) { animation-delay: 0.08s; }
-  .fade-in:nth-child(3) { animation-delay: 0.16s; }
+  /* ── Scroll Animations ── */
+  .reveal {
+    opacity: 0;
+    transform: translateY(20px);
+    transition: opacity 0.6s ease, transform 0.6s ease;
+  }
+  .reveal.visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  .reveal.delay-1 { transition-delay: 0.08s; }
+  .reveal.delay-2 { transition-delay: 0.16s; }
+  .reveal.delay-3 { transition-delay: 0.24s; }
+  .reveal.delay-4 { transition-delay: 0.32s; }
 
-  /* Responsive */
+  /* ── Mobile Nav Toggle ── */
+  .nav-toggle {
+    display: none;
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-mid);
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 18px;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* ── Responsive ── */
+  @media (max-width: 900px) {
+    .diagrams-grid { grid-template-columns: 1fr; }
+  }
   @media (max-width: 768px) {
-    .compare, .features, .docs-grid { grid-template-columns: 1fr; }
-    .hero { padding: 80px 0 56px; }
-    section { padding: 40px 0; }
+    .nav-links { display: none; }
+    .nav-links.open {
+      display: flex;
+      flex-direction: column;
+      position: absolute;
+      top: 56px;
+      left: 0;
+      right: 0;
+      background: var(--nav-bg);
+      backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 20px;
+      gap: 2px;
+    }
+    .nav-links.open a {
+      padding: 10px 12px;
+      font-size: 0.85rem;
+    }
+    .nav-toggle { display: flex; }
+    .problem-grid { grid-template-columns: 1fr; }
+    .stats-grid { grid-template-columns: 1fr; }
+    .platform-grid { grid-template-columns: 1fr; }
+    .hero { padding: 110px 0 70px; }
+    section { padding: 56px 0; }
+    .layer-card { flex-direction: column; gap: 12px; }
   }
   @media (max-width: 480px) {
-    .hw-grid { grid-template-columns: 1fr 1fr; }
-    pre { font-size: 11px; padding: 14px 16px; }
-    .hero h1 { font-size: 3.5rem; }
+    .hero h1 { font-size: 2.8rem; }
+    pre { font-size: 0.72rem; padding: 16px 18px; }
+    .container { padding: 0 18px; }
+    .diagrams-grid { gap: 12px; }
+    .stats-grid { grid-template-columns: 1fr 1fr; }
   }
 </style>
 </head>
 <body>
 
+<!-- ── Navigation ── -->
 <nav class="nav">
-  <a href="./" class="nav-logo">sharkcage</a>
-  <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme"></button>
+  <div class="nav-inner">
+    <a href="#" class="nav-logo">sharkcage</a>
+    <ul class="nav-links" id="navLinks">
+      <li><a href="#problem">Problem</a></li>
+      <li><a href="#layers">Layers</a></li>
+      <li><a href="#flows">Flows</a></li>
+      <li><a href="#comparison">Compare</a></li>
+      <li><a href="#architecture">Architecture</a></li>
+      <li><a href="#platforms">Platforms</a></li>
+      <li><a href="#quickstart">Start</a></li>
+      <li><a href="#cli">CLI</a></li>
+    </ul>
+    <div style="display:flex;align-items:center;gap:4px;">
+      <button class="nav-toggle" id="navToggle" aria-label="Toggle navigation">&#9776;</button>
+      <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme"></button>
+    </div>
+  </div>
 </nav>
 
 <div class="container">
 
-  <header class="hero">
-    <img src="sharkcage-logo.svg" alt="sharkcage logo" width="120" height="120" style="margin-bottom: 16px;">
-    <h1>sharkcage</h1>
-    <p class="tagline">OpenClaw inside a kernel-level sandbox. Per-skill ASRT sandboxing. Approve once, enforce always.</p>
-    <div class="hero-links">
-      <a href="https://github.com/wan0net/sharkcage" class="primary">GitHub</a>
-      <a href="unified-platform" class="secondary">Documentation</a>
+  <!-- ── Hero ── -->
+  <header class="hero" id="top">
+    <div class="hero-label">
+      <span class="dot"></span>
+      kernel-enforced security
+    </div>
+    <h1>shark<span class="accent">cage</span></h1>
+    <p class="tagline">OpenClaw, but you trust it.</p>
+    <p class="oneliner">Kernel-level sandboxing for AI agents. Every command, file access, and network call enforced at the OS level.</p>
+    <div class="hero-buttons">
+      <a href="https://github.com/wan0net/sharkcage" class="btn btn-primary">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        GitHub
+      </a>
+      <a href="unified-platform" class="btn btn-secondary">Documentation</a>
     </div>
   </header>
 
-  <section class="fade-in">
-    <div class="section-title">The pitch</div>
-    <p>OpenClaw is great. But skills run as untrusted code with no permission model. The sandbox is global. Eventually everyone ends up at <code>--dangerously-skip-permissions</code>.</p>
-    <p>Sharkcage fixes this. The <strong>entire OpenClaw binary</strong> runs inside a kernel-level outer sandbox. Every skill gets its own inner sandbox, scoped to exactly what you approved. No permission prompts at runtime. No prompt fatigue. No skipping.</p>
-    <p>Approve once at install. The kernel enforces it from then on.</p>
-  </section>
+  <hr class="divider">
 
-  <section class="fade-in">
-    <div class="section-title">How it works</div>
-    <div class="flow">
-      <span class="node">sc start</span>
-      <span class="arrow">--></span>
-      <span class="node">Supervisor</span>
-      <span class="arrow">--></span>
-      <span class="node">Outer ASRT</span>
-      <span class="arrow">--></span>
-      <span class="node">OpenClaw</span>
-      <span class="arrow">--></span>
-      <span class="node">IPC</span>
-      <span class="arrow">--></span>
-      <span class="node">Inner ASRT</span>
-      <span class="arrow">--></span>
-      <span class="node">Skill</span>
+  <!-- ── The Problem ── -->
+  <section id="problem">
+    <div class="reveal">
+      <div class="section-label">The Problem</div>
+      <h2 class="section-heading">AI agents run with your keys to the kingdom.</h2>
+      <p class="section-desc">Permission prompts don't scale. Users click through them. Scanning tools find patterns but can't stop behaviour. Nothing enforces at the kernel level.</p>
     </div>
-    <p>The supervisor is the only unsandboxed process (~200 lines). It owns all ASRT sandbox lifecycles. OpenClaw talks to skills via IPC through the supervisor — they never touch each other's network scope or filesystem.</p>
-    <pre><code><span class="comment"># Two layers of kernel enforcement:</span>
-<span class="arg">Outer ASRT → OpenClaw (entire binary, init-locked, signed)</span>
-<span class="arg">  network: [signal-cli, openrouter.ai]</span>
-<span class="arg">  deny: [~/.ssh, ~/.aws, ~/.gnupg]</span>
-
-<span class="arg">Inner ASRT → meals skill (scoped to approved capabilities)</span>
-<span class="arg">  network: [meals-api.wan0.cloud]</span>
-<span class="arg">  filesystem: none</span>
-
-<span class="arg">Inner ASRT → HA skill</span>
-<span class="arg">  network: [homeassistant.local:8123]</span>
-<span class="arg">  filesystem: none</span></code></pre>
-  </section>
-
-  <section class="fade-in">
-    <div class="section-title">Features</div>
-    <div class="features">
-      <div class="feature">
-        <h3>Entire process sandboxed</h3>
-        <p>The outer ASRT contains the whole OpenClaw binary — not just plugins. Even a vulnerability in OpenClaw itself can't escape the outer sandbox constraints.</p>
+    <div class="problem-grid">
+      <div class="problem-card reveal delay-1">
+        <h4>Full system access</h4>
+        <p>AI agents inherit your user permissions. Every file, every network socket, every credential -- reachable by default.</p>
       </div>
-      <div class="feature">
-        <h3>Per-skill isolation</h3>
-        <p>Each skill runs in its own ASRT sandbox. Meals can't reach HA. HA can't reach meals. Installing a new skill never widens the gateway's attack surface.</p>
+      <div class="problem-card reveal delay-2">
+        <h4>Permission fatigue</h4>
+        <p>Approve, approve, approve. After the 20th prompt, everyone reaches for <code>--dangerously-skip-permissions</code>.</p>
       </div>
-      <div class="feature">
-        <h3>Approve once, enforce always</h3>
-        <p>Review capabilities at install time. The kernel enforces them from then on. No prompts during use. No fatigue. No skipping.</p>
+      <div class="problem-card reveal delay-3">
+        <h4>Pattern matching, not enforcement</h4>
+        <p>Static scanners catch known-bad strings. They can't stop a novel command or an unexpected network call at runtime.</p>
       </div>
-      <div class="feature">
-        <h3>AI capability inference</h3>
-        <p>Existing ClawHub skills have no manifests. Sharkcage reads the skill code and generates one automatically. User reviews and approves. Skill runs sandboxed.</p>
-      </div>
-      <div class="feature">
-        <h3>Init-locked gateway</h3>
-        <p>The outer sandbox config is generated at setup and signed. Widening it requires deliberate action, re-signing, and restart. Tampering → won't start.</p>
-      </div>
-      <div class="feature">
-        <h3>Audit trail</h3>
-        <p>Every tool call logged: timestamp, tool, args, result, skill, capability. Blocked calls logged too. Queryable from the CLI or dashboard.</p>
+      <div class="problem-card reveal delay-4">
+        <h4>No kernel-level enforcement</h4>
+        <p>Other tools advise. Sharkcage enforces. The OS itself blocks the syscall before it completes. No userspace bypass.</p>
       </div>
     </div>
   </section>
 
-  <section class="fade-in">
-    <div class="section-title">The permission problem</div>
-    <div class="compare">
-      <div class="compare-col">
-        <h3>Before sharkcage</h3>
-        <ul>
-          <li>Skills run as untrusted code</li>
-          <li>Global sandbox or per-action prompts</li>
-          <li>Prompt fatigue → skip permissions</li>
-          <li>No per-skill network scope</li>
-          <li>Malicious skill reaches anything</li>
-        </ul>
+  <hr class="divider">
+
+  <!-- ── How It Works: 5 Layers ── -->
+  <section id="layers">
+    <div class="reveal">
+      <div class="section-label">How It Works</div>
+      <h2 class="section-heading">Five layers. Zero trust.</h2>
+      <p class="section-desc">Each layer is independent. Compromise one, the others still hold. Defence in depth, not defence in hope.</p>
+    </div>
+    <div class="layers-grid">
+      <div class="layer-card reveal delay-1">
+        <div class="layer-badge">1</div>
+        <div class="layer-content">
+          <h4>ASRT Sandbox Backend <span class="layer-tag">kernel</span></h4>
+          <p>Registered with OpenClaw as the sandbox backend. Every call to run, read, or write is wrapped by srt. Per-session policies generated at startup and locked.</p>
+        </div>
       </div>
-      <div class="compare-col reality">
-        <h3>With sharkcage</h3>
-        <ul>
-          <li>Entire OpenClaw binary in outer ASRT</li>
-          <li>Each skill in its own inner ASRT</li>
-          <li>Approve once at install</li>
-          <li>Kernel-enforced per-skill network scope</li>
-          <li>Violations blocked and logged silently</li>
-        </ul>
+      <div class="layer-card reveal delay-2">
+        <div class="layer-badge">2</div>
+        <div class="layer-content">
+          <h4>SOCKS5 Localhost Proxy <span class="layer-tag">network</span></h4>
+          <p>Per-skill authentication tokens. Controls which localhost ports each skill can reach. Skills can't talk to each other's services or hit unexpected endpoints.</p>
+        </div>
+      </div>
+      <div class="layer-card reveal delay-3">
+        <div class="layer-badge">3</div>
+        <div class="layer-content">
+          <h4>Security Scanner <span class="layer-tag">patterns</span></h4>
+          <p>All detection patterns in one auditable JSON file. Blocks dangerous commands before they run. Redacts secrets and PII from outputs. Priority-ordered hooks.</p>
+        </div>
+      </div>
+      <div class="layer-card reveal delay-4">
+        <div class="layer-badge">4</div>
+        <div class="layer-content">
+          <h4>Human Approval <span class="layer-tag">ai-invisible</span></h4>
+          <p>The AI never sees the approval exchange. User approves in their own chat channel -- Signal, Telegram, whatever. No prompt injection vector. No social engineering surface.</p>
+        </div>
+      </div>
+      <div class="layer-card reveal">
+        <div class="layer-badge">5</div>
+        <div class="layer-content">
+          <h4>Runtime Capability Discovery <span class="layer-tag">dynamic</span></h4>
+          <p>No upfront manifests to maintain. The sandbox blocks what hasn't been approved. User grants capabilities as needed. Permissions grow from zero, not shrink from everything.</p>
+        </div>
       </div>
     </div>
   </section>
 
-  <section class="fade-in">
-    <div class="section-title">CLI</div>
-    <pre><code><span class="comment"># Start everything</span>
-<span class="cmd">sc start</span>
+  <hr class="divider">
 
-<span class="comment"># Install a skill</span>
-<span class="cmd">sc plugin add</span> <span class="arg">https://github.com/wan0net/sharkcage-skill-meals</span>
-
-<span class="comment"># Review and approve capabilities</span>
-<span class="cmd">sc approve</span> <span class="arg">meals</span>
-
-<span class="comment"># Scan a skill for issues</span>
-<span class="cmd">sc verify</span> <span class="arg">./my-skill</span>
-
-<span class="comment"># Check the audit log</span>
-<span class="cmd">sc audit</span> <span class="arg">--skill meals</span>
-<span class="cmd">sc audit</span> <span class="arg">--blocked</span>
-
-<span class="comment"># Add a host to the outer sandbox</span>
-<span class="cmd">sc config add-service</span> <span class="arg">api.telegram.org</span>
-
-<span class="comment"># Stop everything</span>
-<span class="cmd">sc stop</span></code></pre>
-  </section>
-
-  <section class="fade-in">
-    <div class="section-title">Sandboxing</div>
-    <p>Sharkcage uses the <a href="https://github.com/anthropic-experimental/sandbox-runtime">Anthropic Sandbox Runtime</a> (ASRT) — OS-level primitives, no containers, no overhead.</p>
-    <div class="features" style="grid-template-columns: 1fr 1fr 1fr;">
-      <div class="feature">
-        <h3>macOS: Seatbelt</h3>
-        <p>sandbox-exec wraps the process. Filesystem and network restrictions enforced by the macOS kernel. No root required.</p>
+  <!-- ── Data Flow Diagrams ── -->
+  <section id="flows">
+    <div class="reveal">
+      <div class="section-label">Data Flows</div>
+      <h2 class="section-heading">Every path through the system.</h2>
+      <p class="section-desc">Four scenarios, four enforcement points. The happy path, first-time approval, sandbox violations, and pattern-based blocking.</p>
+    </div>
+    <div class="diagrams-grid">
+      <div class="diagram-block reveal delay-1">
+        <div class="diagram-header">
+          <span class="diagram-dot green"></span>
+          <span class="diagram-title">Normal tool call</span>
+        </div>
+        <pre><code><span class="hl">User</span> <span class="arrow">&rarr;</span> <span class="hl">AI</span> <span class="arrow">&rarr;</span> <span class="hl">OpenClaw</span> <span class="arrow">&rarr;</span> <span class="hl">sharkcage plugin</span>
+  <span class="arrow">&rarr;</span> supervisor (IPC) <span class="arrow">&rarr;</span> srt sandbox <span class="arrow">&rarr;</span> <span class="ok">skill</span>
+  <span class="arrow">&rarr;</span> result <span class="arrow">&rarr;</span> supervisor <span class="arrow">&rarr;</span> plugin <span class="arrow">&rarr;</span> AI <span class="arrow">&rarr;</span> <span class="hl">User</span></code></pre>
       </div>
-      <div class="feature">
-        <h3>Linux: bubblewrap + seccomp</h3>
-        <p>Bind-mount filesystem namespaces. Network namespace with egress proxy. seccomp BPF syscall filtering.</p>
+
+      <div class="diagram-block reveal delay-2">
+        <div class="diagram-header">
+          <span class="diagram-dot yellow"></span>
+          <span class="diagram-title">First-time approval</span>
+        </div>
+        <pre><code>AI calls tool <span class="arrow">&rarr;</span> plugin: <span class="warn">no approval file</span>
+  <span class="arrow">&rarr;</span> requireApproval <span class="hl">(AI can't see)</span>
+  <span class="arrow">&rarr;</span> User sees in Signal/Telegram
+  <span class="arrow">&rarr;</span> User approves <span class="arrow">&rarr;</span> <span class="ok">approval file written</span>
+  <span class="arrow">&rarr;</span> Next call succeeds</code></pre>
       </div>
-      <div class="feature">
-        <h3>Silent violations</h3>
-        <p>Blocked calls get ECONNREFUSED or EPERM. The skill doesn't know why. The audit log does. No prompts.</p>
+
+      <div class="diagram-block reveal delay-3">
+        <div class="diagram-header">
+          <span class="diagram-dot red"></span>
+          <span class="diagram-title">Sandbox violation</span>
+        </div>
+        <pre><code>Skill runs <span class="arrow">&rarr;</span> srt <span class="warn">blocks</span> network/file
+  <span class="arrow">&rarr;</span> supervisor returns <span class="warn">violation</span>
+  <span class="arrow">&rarr;</span> plugin surfaces via requireApproval
+  <span class="arrow">&rarr;</span> User: <span class="ok">allow</span> / allow once / <span class="warn">never</span>
+  <span class="arrow">&rarr;</span> Capability added to approval</code></pre>
+      </div>
+
+      <div class="diagram-block reveal delay-4">
+        <div class="diagram-header">
+          <span class="diagram-dot red"></span>
+          <span class="diagram-title">Security scanner</span>
+        </div>
+        <pre><code>AI calls <span class="warn">dangerous command</span>
+  <span class="arrow">&rarr;</span> before_tool_call <span class="hl">(priority 200)</span>
+  <span class="arrow">&rarr;</span> pattern match <span class="arrow">&rarr;</span> <span class="warn">BLOCKED</span>
+  <span class="arrow">&rarr;</span> AI sees: "Blocked: dangerous command"</code></pre>
       </div>
     </div>
   </section>
 
-  <section class="fade-in">
-    <div class="section-title">Documentation</div>
-    <div class="docs-grid">
-      <a class="doc-link" href="unified-platform">
-        <span class="doc-title">Design Doc</span>
-        <span class="doc-desc">Full architecture, capability model, sandbox enforcement, AI inference, security model, implementation plan.</span>
-      </a>
+  <hr class="divider">
+
+  <!-- ── Comparison Table ── -->
+  <section id="comparison">
+    <div class="reveal">
+      <div class="section-label">Comparison</div>
+      <h2 class="section-heading">How sharkcage stacks up.</h2>
+      <p class="section-desc">Feature-by-feature against the alternatives. Only sharkcage combines kernel enforcement with AI-invisible approval and runtime discovery.</p>
+    </div>
+    <div class="comparison-wrap reveal delay-1">
+      <table class="comparison-table">
+        <thead>
+          <tr>
+            <th>Feature</th>
+            <th class="highlight">sharkcage</th>
+            <th>OpenClaw Shield</th>
+            <th>SecureClaw</th>
+            <th>DefenseClaw</th>
+            <th>jai</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Kernel sandbox</td>
+            <td class="highlight"><span class="icon-check">&#10003;</span></td>
+            <td><span class="icon-cross">&#10005;</span></td>
+            <td><span class="icon-partial">&#9679;</span></td>
+            <td><span class="icon-cross">&#10005;</span></td>
+            <td><span class="icon-cross">&#10005;</span></td>
+          </tr>
+          <tr>
+            <td>AI-invisible approval</td>
+            <td class="highlight"><span class="icon-check">&#10003;</span></td>
+            <td><span class="icon-cross">&#10005;</span></td>
+            <td><span class="icon-cross">&#10005;</span></td>
+            <td><span class="icon-partial">&#9679;</span></td>
+            <td><span class="icon-cross">&#10005;</span></td>
+          </tr>
+          <tr>
+            <td>Runtime capability discovery</td>
+            <td class="highlight"><span class="icon-check">&#10003;</span></td>
+            <td><span class="icon-cross">&#10005;</span></td>
+            <td><span class="icon-cross">&#10005;</span></td>
+            <td><span class="icon-cross">&#10005;</span></td>
+            <td><span class="icon-partial">&#9679;</span></td>
+          </tr>
+          <tr>
+            <td>Per-session isolation</td>
+            <td class="highlight"><span class="icon-check">&#10003;</span></td>
+            <td><span class="icon-partial">&#9679;</span></td>
+            <td><span class="icon-check">&#10003;</span></td>
+            <td><span class="icon-cross">&#10005;</span></td>
+            <td><span class="icon-cross">&#10005;</span></td>
+          </tr>
+          <tr>
+            <td>Secret/PII detection</td>
+            <td class="highlight"><span class="icon-check">&#10003;</span></td>
+            <td><span class="icon-check">&#10003;</span></td>
+            <td><span class="icon-partial">&#9679;</span></td>
+            <td><span class="icon-check">&#10003;</span></td>
+            <td><span class="icon-cross">&#10005;</span></td>
+          </tr>
+          <tr>
+            <td>Skill signing</td>
+            <td class="highlight"><span class="icon-check">&#10003;</span></td>
+            <td><span class="icon-cross">&#10005;</span></td>
+            <td><span class="icon-check">&#10003;</span></td>
+            <td><span class="icon-cross">&#10005;</span></td>
+            <td><span class="icon-partial">&#9679;</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="font-size:0.72rem;color:var(--text-dim);margin-top:12px;" class="reveal delay-2">
+      <span class="icon-check" style="color:var(--check)">&#10003;</span> Full support&emsp;
+      <span class="icon-partial" style="color:var(--partial)">&#9679;</span> Partial&emsp;
+      <span class="icon-cross" style="color:var(--cross)">&#10005;</span> Not supported
+    </p>
+  </section>
+
+  <hr class="divider">
+
+  <!-- ── Architecture ── -->
+  <section id="architecture">
+    <div class="reveal">
+      <div class="section-label">Architecture</div>
+      <h2 class="section-heading">Small surface. Auditable.</h2>
+      <p class="section-desc">The entire security-critical path fits in six files. Every detection pattern lives in a single JSON. No hidden logic.</p>
+    </div>
+    <div class="stats-grid">
+      <div class="stat-card reveal delay-1">
+        <div class="stat-val">29</div>
+        <div class="stat-label">Total files</div>
+      </div>
+      <div class="stat-card reveal delay-2">
+        <div class="stat-val">~5,700</div>
+        <div class="stat-label">Lines of code</div>
+      </div>
+      <div class="stat-card reveal delay-3">
+        <div class="stat-val">6</div>
+        <div class="stat-label">Security-critical files</div>
+      </div>
+    </div>
+    <div class="stats-grid" style="margin-top:14px;">
+      <div class="stat-card reveal delay-1">
+        <div class="stat-val">~1,760</div>
+        <div class="stat-label">Lines in audit path</div>
+      </div>
+      <div class="stat-card reveal delay-2">
+        <div class="stat-val">1</div>
+        <div class="stat-label">Pattern config file</div>
+      </div>
+      <div class="stat-card reveal delay-3">
+        <div class="stat-val">0</div>
+        <div class="stat-label">Hidden dependencies</div>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider">
+
+  <!-- ── Platform Support ── -->
+  <section id="platforms">
+    <div class="reveal">
+      <div class="section-label">Platforms</div>
+      <h2 class="section-heading">Runs where you run.</h2>
+      <p class="section-desc">Native kernel primitives on each platform. No containers. No virtualisation overhead. Just the OS doing what it already knows how to do.</p>
+    </div>
+    <div class="platform-grid">
+      <div class="platform-card reveal delay-1">
+        <span class="platform-icon" aria-hidden="true">&#63743;</span>
+        <h4>macOS</h4>
+        <p style="font-size:0.82rem;color:var(--text-mid);margin:0 0 10px;">Seatbelt sandbox profiles via sandbox-exec. No root required. Filesystem and network restrictions enforced by the XNU kernel.</p>
+        <span class="platform-tech">Seatbelt</span>
+      </div>
+      <div class="platform-card reveal delay-2">
+        <span class="platform-icon" aria-hidden="true">&#9881;</span>
+        <h4>Linux</h4>
+        <p style="font-size:0.82rem;color:var(--text-mid);margin:0 0 10px;">bubblewrap for filesystem namespaces. seccomp BPF for syscall filtering. Network namespaces with egress proxy.</p>
+        <span class="platform-tech">bubblewrap + seccomp</span>
+      </div>
+      <div class="platform-card reveal delay-3">
+        <span class="platform-icon" aria-hidden="true">&#9638;</span>
+        <h4>Windows</h4>
+        <p style="font-size:0.82rem;color:var(--text-mid);margin:0 0 10px;">WSL2 backend with Linux kernel enforcement. Full bubblewrap+seccomp support inside the WSL environment.</p>
+        <span class="platform-tech">WSL2</span>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider">
+
+  <!-- ── Quick Start ── -->
+  <section id="quickstart">
+    <div class="reveal">
+      <div class="section-label">Quick Start</div>
+      <h2 class="section-heading">Three commands. Running.</h2>
+      <p class="section-desc">Clone, bootstrap, start. The bootstrap script detects your platform, installs the sandbox backend, and generates initial configs.</p>
+    </div>
+    <div class="code-block reveal delay-1">
+      <div class="code-header">
+        <div class="dots"><span></span><span></span><span></span></div>
+        <span class="filename">terminal</span>
+      </div>
+      <pre><code><span class="comment"># Clone the repo</span>
+<span class="cmd">git clone</span> <span class="str">https://github.com/wan0net/sharkcage.git</span>
+
+<span class="comment"># Bootstrap -- detects platform, installs srt backend</span>
+<span class="cmd">cd</span> <span class="arg">sharkcage</span> && <span class="cmd">./bootstrap.sh</span>
+
+<span class="comment"># Initialize config and start the supervisor</span>
+<span class="cmd">sc init</span> && <span class="cmd">sc start</span></code></pre>
+    </div>
+  </section>
+
+  <hr class="divider">
+
+  <!-- ── CLI Reference ── -->
+  <section id="cli">
+    <div class="reveal">
+      <div class="section-label">CLI Reference</div>
+      <h2 class="section-heading">The <code style="font-size:inherit;background:var(--badge-bg);border-color:var(--border-accent);color:var(--accent);">sc</code> command.</h2>
+      <p class="section-desc">Everything you need to manage sandboxes, skills, approvals, and audit logs from the terminal.</p>
+    </div>
+    <div class="cli-table-wrap reveal delay-1">
+      <table class="cli-table">
+        <thead>
+          <tr>
+            <th>Command</th>
+            <th>Description</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="cli-cmd">sc init</td>
+            <td>Initialize sharkcage configuration and generate sandbox profiles</td>
+          </tr>
+          <tr>
+            <td class="cli-cmd">sc start</td>
+            <td>Start the supervisor and sandbox environment</td>
+          </tr>
+          <tr>
+            <td class="cli-cmd">sc stop</td>
+            <td>Stop all running sandboxes and the supervisor</td>
+          </tr>
+          <tr>
+            <td class="cli-cmd">sc status</td>
+            <td>Show running skills, sandbox state, and active policies</td>
+          </tr>
+          <tr>
+            <td class="cli-cmd">sc plugin add &lt;url&gt;</td>
+            <td>Install a skill from a repository URL</td>
+          </tr>
+          <tr>
+            <td class="cli-cmd">sc approve &lt;skill&gt;</td>
+            <td>Review inferred capabilities and approve a skill's permissions</td>
+          </tr>
+          <tr>
+            <td class="cli-cmd">sc verify &lt;path&gt;</td>
+            <td>Scan a skill directory for security issues before installation</td>
+          </tr>
+          <tr>
+            <td class="cli-cmd">sc audit</td>
+            <td>View the full audit log of all tool calls and results</td>
+          </tr>
+          <tr>
+            <td class="cli-cmd">sc audit --blocked</td>
+            <td>Filter audit log to show only blocked or denied calls</td>
+          </tr>
+          <tr>
+            <td class="cli-cmd">sc audit --skill &lt;name&gt;</td>
+            <td>Filter audit log by skill name</td>
+          </tr>
+          <tr>
+            <td class="cli-cmd">sc config add-service &lt;host&gt;</td>
+            <td>Add an allowed host to the outer sandbox network policy</td>
+          </tr>
+        </tbody>
+      </table>
     </div>
   </section>
 
 </div>
 
+<!-- ── Footer ── -->
 <footer>
   <div class="container">
-    <p><a href="https://github.com/wan0net/sharkcage">wan0net/sharkcage</a></p>
-    <p>OpenClaw, but the entire binary is in a cage.</p>
+    <div class="footer-logo">&gt; sharkcage</div>
+    <p style="margin-bottom:12px;"><a href="https://github.com/wan0net/sharkcage">wan0net/sharkcage</a></p>
+    <p>OpenClaw, but you trust it.</p>
   </div>
 </footer>
 
+<!-- ── Scripts ── -->
 <script>
+// Theme toggle
 (function(){
   var btn = document.querySelector('.theme-toggle');
   var current = document.documentElement.getAttribute('data-theme');
@@ -410,9 +1306,37 @@ function toggleTheme() {
   var next = current === 'dark' ? 'light' : 'dark';
   document.documentElement.setAttribute('data-theme', next);
   localStorage.setItem('theme', next);
-  var btn = document.querySelector('.theme-toggle');
-  btn.textContent = next === 'dark' ? '\u2600' : '\u263E';
+  document.querySelector('.theme-toggle').textContent = next === 'dark' ? '\u2600' : '\u263E';
 }
+
+// Mobile nav toggle
+document.getElementById('navToggle').addEventListener('click', function() {
+  document.getElementById('navLinks').classList.toggle('open');
+});
+// Close mobile nav on link click
+document.querySelectorAll('#navLinks a').forEach(function(link) {
+  link.addEventListener('click', function() {
+    document.getElementById('navLinks').classList.remove('open');
+  });
+});
+
+// Scroll reveal with IntersectionObserver
+(function() {
+  var els = document.querySelectorAll('.reveal');
+  if (!('IntersectionObserver' in window)) {
+    els.forEach(function(el) { el.classList.add('visible'); });
+    return;
+  }
+  var observer = new IntersectionObserver(function(entries) {
+    entries.forEach(function(entry) {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+        observer.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.08, rootMargin: '0px 0px -40px 0px' });
+  els.forEach(function(el) { observer.observe(el); });
+})();
 </script>
 
 </body>
