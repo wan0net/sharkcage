@@ -94,8 +94,17 @@ export default async function start() {
   log("sc", "Supervisor ready");
 
   // --- 8. Start OpenClaw ---
+  let runAsUser: string | undefined;
+  try {
+    const scConfig = JSON.parse(readFileSync(`${configDir}/gateway.json`, "utf-8"));
+    runAsUser = scConfig.runAsUser;
+  } catch { /* no config or missing field */ }
+
+  if (runAsUser) {
+    log("sc", `Running OpenClaw as user: ${runAsUser}`);
+  }
   log("sc", "Starting OpenClaw...");
-  const openclawProc = startOpenClaw();
+  const openclawProc = startOpenClaw(runAsUser);
   log("sc", `OpenClaw PID ${openclawProc.pid}`);
 
   await waitForHttp("http://127.0.0.1:18789", 30_000);
@@ -231,7 +240,7 @@ function startSupervisor(): ChildProcess {
 // Module-level so it's accessible after startup for printing
 let gatewayToken = "";
 
-function startOpenClaw(): ChildProcess {
+function startOpenClaw(runAsUser?: string): ChildProcess {
   // Use OpenClaw's configured token if available, then env var, then generate
   gatewayToken = process.env.OPENCLAW_GATEWAY_TOKEN ?? "";
   if (!gatewayToken) {
@@ -249,7 +258,9 @@ function startOpenClaw(): ChildProcess {
   // Security is enforced per-tool-call: every bash/file operation the AI
   // executes goes through `srt --settings <policy>` via the sandbox backend.
   // Skills get per-skill srt sandboxes. The gateway itself just serves chat.
-  const proc = spawn("openclaw", args, {
+  const cmd = runAsUser ? "sudo" : "openclaw";
+  const cmdArgs = runAsUser ? ["-u", runAsUser, "openclaw", ...args] : args;
+  const proc = spawn(cmd, cmdArgs, {
     stdio: ["pipe", "pipe", "pipe"],
     env: process.env,
     detached: true,

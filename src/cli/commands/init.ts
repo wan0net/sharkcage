@@ -15,7 +15,7 @@ type Mode = "full" | "skills-only";
 
 interface SharkcageConfig {
   mode: Mode;
-  outerSandbox: boolean;
+  runAsUser?: string;
 }
 
 const home = process.env.HOME ?? ".";
@@ -41,7 +41,7 @@ export default async function init() {
     p.note(
       "OpenClaw needs to be set up first.\n" +
       "This wizard will configure your model, API key, channels, and gateway.\n" +
-      "After that, sharkcage will wrap it in a sandbox.",
+      "After that, sharkcage will configure sandboxing.",
       "OpenClaw Setup"
     );
 
@@ -107,17 +107,82 @@ export default async function init() {
       {
         value: "full" as Mode,
         label: "Full sandbox (recommended)",
-        hint: "Outer ASRT sandbox + per-session + per-skill sandboxing",
+        hint: "Per-tool + per-skill kernel sandboxing via srt",
       },
       {
         value: "skills-only" as Mode,
         label: "Skills only",
-        hint: "No outer sandbox. Just sandbox skills you install.",
+        hint: "Only sandbox skill execution, not regular tool calls",
       },
     ],
   });
 
   if (p.isCancel(mode)) { p.cancel("Cancelled."); process.exit(0); }
+
+  // --- 3b. Optional: dedicated user for hardened deployments ---
+  let runAsUser: string | undefined;
+
+  if (process.platform === "linux") {
+    const useHardening = await p.confirm({
+      message: "Create a dedicated user to run OpenClaw? (recommended for servers)",
+      initialValue: false,
+    });
+
+    if (!p.isCancel(useHardening) && useHardening) {
+      const username = await p.text({
+        message: "Username for the dedicated user:",
+        initialValue: "openclaw",
+        validate: (v) => {
+          if (!v || !/^[a-z_][a-z0-9_-]{0,31}$/.test(v)) return "Invalid username";
+        },
+      });
+
+      if (p.isCancel(username)) { p.cancel("Cancelled."); process.exit(0); }
+
+      // Check if user exists
+      let userExists = false;
+      try {
+        execFileSync("id", [username], { stdio: "pipe" });
+        userExists = true;
+        p.log.success(`User "${username}" already exists.`);
+      } catch {
+        // Need to create
+      }
+
+      if (!userExists) {
+        p.log.info(`Creating user "${username}"...`);
+        try {
+          execFileSync("sudo", [
+            "useradd",
+            "--system",
+            "--create-home",
+            "--home-dir", `/home/${username}`,
+            "--shell", "/usr/sbin/nologin",
+            "--comment", "OpenClaw sandbox user",
+            username,
+          ], { stdio: "inherit" });
+
+          // Set up the new user's home with sharkcage
+          execFileSync("sudo", ["mkdir", "-p", `/home/${username}/.sharkcage`], { stdio: "pipe" });
+          execFileSync("sudo", ["cp", "-r", `${home}/.sharkcage/.`, `/home/${username}/.sharkcage/`], { stdio: "pipe" });
+          execFileSync("sudo", ["chown", "-R", `${username}:${username}`, `/home/${username}`], { stdio: "pipe" });
+
+          p.log.success(`User "${username}" created. OpenClaw will run as this user.`);
+        } catch (err) {
+          p.log.error(`Failed to create user: ${err instanceof Error ? err.message : err}`);
+          p.log.warning("Continuing without dedicated user.");
+        }
+      }
+
+      // Verify the user exists before committing to config
+      try {
+        execFileSync("id", [username], { stdio: "pipe" });
+        runAsUser = username;
+      } catch {
+        // User creation failed, don't set runAsUser
+      }
+    }
+  }
 
   // --- 4. Write config ---
   mkdirSync(configDir, { recursive: true });
@@ -133,7 +198,7 @@ export default async function init() {
 
   const config: SharkcageConfig = {
     mode,
-    outerSandbox: mode === "full",
+    ...(runAsUser && { runAsUser }),
   };
 
   writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
