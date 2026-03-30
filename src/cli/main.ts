@@ -104,6 +104,18 @@ program
   });
 
 program
+  .command("user")
+  .description("Manage dedicated OpenClaw user (copy-in | shell | home | info)")
+  .argument("<action>", "copy-in | shell | home | info")
+  .argument("[args...]", "Additional arguments")
+  .option("--mode <perms>", "File permissions (e.g. 600, 755)")
+  .option("--dest <path>", "Destination path relative to user home")
+  .action(async (action: string, args: string[], options: { mode?: string; dest?: string }) => {
+    const m = await import("./commands/user.ts");
+    await m.default(action, args, options);
+  });
+
+program
   .command("audit")
   .description("Show recent audit log entries")
   .option("--blocked", "Show only blocked calls")
