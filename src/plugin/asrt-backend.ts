@@ -163,6 +163,8 @@ function buildSessionPolicy(
         "/var/folders",
         workspaceDir,
         agentWorkspaceDir,
+        `${home}/.openclaw/workspace`,
+        `${home}/.openclaw/sandboxes`,
       ],
       denyRead: MANDATORY_DENY_READ,
       denyWrite: [],
