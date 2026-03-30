@@ -90,11 +90,23 @@ function updateSkillCapabilities(skill: string, violation: SandboxViolation): vo
       : "system.exec";
 
     const existing = capabilities.find((c) => c.capability === capabilityName);
-    if (existing) {
-      // Merge target into scope
-      const scope = existing.scope ?? [];
-      if (!scope.includes(violation.target)) {
-        existing.scope = [...scope, violation.target];
+
+    if (!violation.target) {
+      // Broad approval — no scope restriction (e.g. "allow-all" for network)
+      if (existing) {
+        delete existing.scope; // remove scope = unrestricted
+        existing.reason = "User-approved: unrestricted";
+      } else {
+        capabilities.push({
+          capability: capabilityName,
+          reason: "User-approved: unrestricted",
+        });
+      }
+    } else if (existing) {
+      if (!existing.scope) {
+        // Already unrestricted — nothing to do
+      } else if (!existing.scope.includes(violation.target)) {
+        existing.scope = [...existing.scope, violation.target];
       }
     } else {
       capabilities.push({
@@ -206,30 +218,57 @@ export function register(api: OpenClawPluginApi): void {
         };
       }
 
-      const violationLabel = pendingViolation.type === "network"
-        ? `network access to "${pendingViolation.target}"`
-        : pendingViolation.type === "filesystem"
-        ? `filesystem access to "${pendingViolation.target}"`
-        : `exec access to "${pendingViolation.target}"`;
-
       const capturedViolation = pendingViolation;
+
+      // Build a clear description based on violation type
+      let description: string;
+      if (pendingViolation.type === "network") {
+        description = [
+          `Skill "${skill}" tried to reach: ${pendingViolation.target}`,
+          `Reason: ${pendingViolation.detail}`,
+          ``,
+          `Options:`,
+          `• "allow" — allow this specific host (${pendingViolation.target})`,
+          `• "allow-all" — allow all outbound network for this skill (for browser/search skills)`,
+          `• "deny" — block this once`,
+          `• "never" — block this host permanently`,
+        ].join("\n");
+      } else if (pendingViolation.type === "filesystem") {
+        description = [
+          `Skill "${skill}" tried to access: ${pendingViolation.target}`,
+          `Reason: ${pendingViolation.detail}`,
+          ``,
+          `• "allow" — allow access to this path`,
+          `• "deny" — block this once`,
+          `• "never" — block this path permanently`,
+        ].join("\n");
+      } else {
+        description = [
+          `Skill "${skill}" tried to: ${pendingViolation.target}`,
+          `Reason: ${pendingViolation.detail}`,
+        ].join("\n");
+      }
+
       return {
         requireApproval: {
-          title: `Skill "${skill}" needs ${pendingViolation.type} access`,
-          description: `Wants to reach: ${pendingViolation.target}\nReason: ${pendingViolation.detail}\n\nAllow "${skill}" to have ${violationLabel}?`,
+          title: `Skill "${skill}" blocked — needs ${pendingViolation.type} access`,
+          description,
           severity: "warning" as const,
           timeoutMs: 240_000,
           timeoutBehavior: "deny" as const,
           onResolution: async (decision: string) => {
-            if (decision === "approved" || decision === "allow") {
-              // Persist the capability so the next call succeeds
+            const d = decision.toLowerCase().trim();
+            if (d === "allow-all" && capturedViolation.type === "network") {
+              // Broad network access — no scope restriction
+              updateSkillCapabilities(skill, { ...capturedViolation, target: "" });
+              console.log(`[sharkcage] broad network approved for ${skill}`);
+            } else if (d === "approved" || d === "allow") {
               updateSkillCapabilities(skill, capturedViolation);
               console.log(`[sharkcage] violation approved for ${skill}: ${capturedViolation.type}:${capturedViolation.target}`);
-            } else if (decision === "never" || decision === "deny") {
+            } else if (d === "never") {
               addToDenyList(skill, capturedViolation);
               console.log(`[sharkcage] violation denied (never) for ${skill}: ${capturedViolation.type}:${capturedViolation.target}`);
             } else {
-              // "deny" once — don't persist either way, just don't allow
               console.log(`[sharkcage] violation denied (once) for ${skill}: ${capturedViolation.type}:${capturedViolation.target}`);
             }
           },
