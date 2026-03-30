@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Build plugin
+        run: |
+          npx tsc -p tsconfig.plugin.json --outDir dist/sharkcage-build
+          mkdir -p dist/sharkcage
+          cp dist/sharkcage-build/plugin/* dist/sharkcage/
+          cp src/plugin/openclaw.plugin.json dist/sharkcage/
+          cp src/plugin/security-patterns.json dist/sharkcage/
+
+      - name: Validate security patterns
+        run: node -e "const p = require('./src/plugin/security-patterns.json'); console.log('Patterns OK:', Object.keys(p.secrets).length, 'secrets,', p.dangerous_commands.length, 'commands,', p.sensitive_files.length, 'files')"
+
+      - name: Verify CLI loads
+        run: npx tsx src/cli/main.ts help

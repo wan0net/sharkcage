@@ -84,10 +84,20 @@ fi
 
 echo ""
 
+# --- Build plugin for OpenClaw ---
+echo "Building plugin..."
+npx tsc -p tsconfig.plugin.json --outDir dist/sharkcage-build 2>/dev/null
+mkdir -p dist/sharkcage
+cp dist/sharkcage-build/plugin/* dist/sharkcage/ 2>/dev/null || true
+cp src/plugin/openclaw.plugin.json dist/sharkcage/
+cp src/plugin/security-patterns.json dist/sharkcage/
+echo "  [ok] Plugin built to dist/sharkcage/"
+echo ""
+
 # --- Create config directories ---
 echo "Creating config directories..."
 SHARKCAGE_DIR="${HOME}/.config/sharkcage"
-mkdir -p "$SHARKCAGE_DIR"/{data,plugins,approvals}
+mkdir -p "$SHARKCAGE_DIR"/{data,plugins,approvals,denied}
 echo "  [ok] $SHARKCAGE_DIR"
 echo ""
 
