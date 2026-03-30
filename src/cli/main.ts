@@ -10,6 +10,7 @@ const commands: Record<string, () => Promise<void>> = {
   approve: () => import("./commands/approve.ts").then((m) => m.default()),
   sign: () => import("./commands/sign.ts").then((m) => m.default()),
   trust: () => import("./commands/trust.ts").then((m) => m.default()),
+  upgrade: () => import("./commands/upgrade.ts").then((m) => m.default()),
   config: () => import("./commands/config.ts").then((m) => m.default()),
   audit: () => import("./commands/audit.ts").then((m) => m.default()),
 };
@@ -36,6 +37,8 @@ Commands:
   config show                    Show gateway sandbox config
   config add-service <host>      Add a host to the outer sandbox
   config remove-service <host>   Remove a host from the outer sandbox
+
+  upgrade                        Safely upgrade OpenClaw with rollback
 
   audit                          Show recent audit log entries
   audit --blocked                Show only blocked calls
