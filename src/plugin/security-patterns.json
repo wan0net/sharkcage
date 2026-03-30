@@ -1,0 +1,77 @@
+{
+  "_comment": "Sharkcage security patterns. Easy to audit — one file, all patterns.",
+
+  "secrets": {
+    "AWS_ACCESS_KEY": "AKIA[0-9A-Z]{16}",
+    "AWS_SECRET_KEY": "(?:aws_secret_access_key|AWS_SECRET_ACCESS_KEY)\\s*[:=]\\s*[\"']?[A-Za-z0-9/+=]{40}",
+    "GITHUB_TOKEN": "gh[pousr]_[a-zA-Z0-9]{36}",
+    "GITHUB_PAT": "github_pat_[a-zA-Z0-9_]{22,}",
+    "OPENAI_KEY": "sk-[a-zA-Z0-9]{20,}",
+    "ANTHROPIC_KEY": "sk-ant-[a-zA-Z0-9_-]{20,}",
+    "STRIPE_KEY": "[sr]k[-_](?:live|test)[-_][a-zA-Z0-9]{20,}",
+    "SLACK_TOKEN": "xox[bpras]-[a-zA-Z0-9-]{10,}",
+    "SENDGRID_KEY": "SG\\.[a-zA-Z0-9_-]{22}\\.[a-zA-Z0-9_-]{43}",
+    "NPM_TOKEN": "npm_[a-zA-Z0-9]{36,}",
+    "PRIVATE_KEY": "-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----",
+    "JWT": "eyJ[a-zA-Z0-9_-]{10,}\\.eyJ[a-zA-Z0-9_-]{10,}\\.[a-zA-Z0-9_-]{10,}",
+    "BEARER_TOKEN": "(?:Authorization|authorization)\\s*[:=]\\s*[\"']?Bearer\\s+[a-zA-Z0-9_.\\-/+=]{20,}",
+    "GENERIC_API_KEY": "(?:api[-_]?key|api[-_]?secret|secret[-_]?key)\\s*[:=]\\s*[\"']?[a-zA-Z0-9_.\\-/+=]{20,}"
+  },
+
+  "pii": {
+    "EMAIL": "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}",
+    "US_SSN": "\\b(?!000|666|9\\d{2})\\d{3}-(?!00)\\d{2}-(?!0000)\\d{4}\\b",
+    "CREDIT_CARD": "\\b[3-6]\\d{3}[\\s-]?\\d{4}[\\s-]?\\d{4}[\\s-]?\\d{1,7}\\b",
+    "US_PHONE": "\\b(?:\\+?1[-.\\s]?)?(?:\\(?[2-9]\\d{2}\\)?[-.\\s]?)[2-9]\\d{2}[-.\\s]?\\d{4}\\b"
+  },
+
+  "dangerous_commands": [
+    "rm\\s+(-[a-z]*f|-[a-z]*r|--force|--recursive)",
+    "rm\\s+-rf\\s+/",
+    "mkfs\\b",
+    "dd\\s+if=",
+    "curl\\s.*\\|\\s*(sh|bash|zsh)",
+    "wget\\s.*\\|\\s*(sh|bash|zsh)",
+    "eval\\s*\\(",
+    "exec\\s*\\(",
+    "os\\.system\\(",
+    "subprocess\\.(?:call|run|Popen)\\(",
+    "DROP\\s+(?:TABLE|DATABASE)",
+    "TRUNCATE\\s+TABLE",
+    "DELETE\\s+FROM\\s+\\w+\\s*;",
+    "chmod\\s+777",
+    "chown\\s+-R"
+  ],
+
+  "sensitive_files": [
+    "\\.env(?:\\.|$)",
+    "credentials\\.json$",
+    "\\.pem$",
+    "\\.key$",
+    "id_(?:rsa|ed25519|ecdsa|dsa)(?:\\.pub)?$",
+    "\\.ssh/config$",
+    "\\.netrc$",
+    "\\.npmrc$",
+    "\\.pypirc$",
+    "\\.aws/(?:credentials|config)$",
+    "\\.kube/config$",
+    "token(?:s)?\\.json$",
+    "secret(?:s)?\\.(?:ya?ml|json|toml)$",
+    "/etc/shadow$",
+    "/etc/passwd$"
+  ],
+
+  "exfiltration_domains": [
+    "webhook.site",
+    "pipedream.net",
+    "ngrok.io",
+    "burpcollaborator.net",
+    "requestbin.com",
+    "hookbin.com"
+  ],
+
+  "c2_patterns": [
+    "install.app-distribution.net",
+    "glot.io"
+  ]
+}

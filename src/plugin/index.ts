@@ -19,6 +19,7 @@ import { SupervisorClient } from "./ipc.js";
 import { SkillMap } from "./skill-map.js";
 import { registerDashboardRoutes } from "./dashboard.js";
 import { registerAsrtBackend } from "./asrt-backend.js";
+import { scanSecrets, scanPII, scanCommand, isSensitiveFile, redact } from "./security-scanner.js";
 
 // --- Config ---
 const home = process.env.HOME ?? ".";
@@ -286,13 +287,46 @@ export function register(api: OpenClawPluginApi): void {
     };
   }, { priority: 150 });
 
-  // --- Hook 2: after_tool_call (priority 50) — audit logging ---
-  // Logs tool calls that went through OpenClaw natively (not sharkcage-managed).
+  // --- Hook 2: before_tool_call (priority 200) — security scanning ---
+  // Runs BEFORE the approval gate. Blocks dangerous commands and sensitive file access.
+  api.on("before_tool_call", async (event: BeforeToolCallEvent, _ctx: HookContext) => {
+    const params = event.params ?? {};
+    const toolName = event.toolName;
+
+    // Block dangerous commands in exec/bash tool calls
+    if (toolName === "exec" || toolName === "bash" || toolName === "process") {
+      const cmd = String(params.command ?? params.cmd ?? params.script ?? "");
+      if (cmd) {
+        const danger = scanCommand(cmd);
+        if (danger) {
+          console.log(`[sharkcage-security] blocked dangerous command: ${cmd.slice(0, 100)}`);
+          return { block: true, blockReason: `Blocked: dangerous command pattern detected (${danger.name})` };
+        }
+        // Check for secrets in command args
+        const secrets = scanSecrets(cmd);
+        if (secrets.length > 0) {
+          console.log(`[sharkcage-security] blocked secret in command: ${secrets.map(s => s.name).join(", ")}`);
+          return { block: true, blockReason: `Blocked: command contains embedded secret (${secrets[0].name})` };
+        }
+      }
+    }
+
+    // Block access to sensitive files
+    if (toolName === "read" || toolName === "write" || toolName === "edit") {
+      const path = String(params.path ?? params.file_path ?? "");
+      if (path && isSensitiveFile(path)) {
+        console.log(`[sharkcage-security] blocked sensitive file access: ${path}`);
+        return { block: true, blockReason: `Blocked: access to sensitive file (${path})` };
+      }
+    }
+
+    return undefined;
+  }, { priority: 200 });
+
+  // --- Hook 3: after_tool_call (priority 50) — audit logging ---
   api.on("after_tool_call", async (event: AfterToolCallEvent, _ctx: HookContext) => {
-    // Sharkcage-managed tools are already audited by the supervisor.
-    // This catches OpenClaw-native tool calls (bash, read, write, edit).
     const skill = skillMap.getSkill(event.toolName);
-    if (skill) return; // already audited by supervisor
+    if (skill) return;
 
     console.log(`[sharkcage-audit] tool: ${event.toolName}, duration: ${event.durationMs}ms`);
   }, { priority: 50 });
@@ -323,16 +357,24 @@ export function register(api: OpenClawPluginApi): void {
     return undefined;
   }, { priority: 200 });
 
-  // --- Hook 4: before_message_write (priority 100) — scrub sharkcage internals ---
+  // --- Hook 6: before_message_write (priority 100) — scrub internals + redact secrets ---
   api.on("before_message_write", (event: BeforeMessageWriteEvent, _ctx: HookContext) => {
     const content = typeof event.message?.content === "string" ? event.message.content : "";
-    if (
-      content.includes("[sharkcage]") ||
-      content.includes("sc yes ") ||
-      content.includes("sc no ")
-    ) {
+
+    // Block sharkcage internal messages
+    if (content.includes("[sharkcage]") || content.includes("sc yes ") || content.includes("sc no ")) {
       return { block: true };
     }
+
+    // Redact any secrets or PII from message content before it reaches the AI
+    const secrets = scanSecrets(content);
+    const pii = scanPII(content);
+    if (secrets.length > 0 || pii.length > 0) {
+      const redacted = redact(content);
+      console.log(`[sharkcage-security] redacted ${secrets.length} secret(s), ${pii.length} PII from message`);
+      return { message: { content: redacted } };
+    }
+
     return undefined;
   }, { priority: 100 });
 
