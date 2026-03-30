@@ -71,7 +71,9 @@ export function buildAsrtConfig(
         break;
       }
       case "system.files.write":
-        allowWrite.push(...scope);
+        for (const p of scope) {
+          if (/^\//.test(p) && !p.includes("..")) allowWrite.push(p);
+        }
         break;
     }
   }

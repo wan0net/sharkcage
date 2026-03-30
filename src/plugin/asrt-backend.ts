@@ -99,7 +99,8 @@ interface OpenClawPluginApiWithSandbox {
 
 // --- Policy path helpers ---
 
-const home = process.env.HOME ?? "";
+const home = process.env.HOME;
+if (!home) throw new Error("[sharkcage] HOME environment variable is not set — cannot configure sandbox");
 const sessionPolicyDir = join(
   process.env.SHARKCAGE_DATA_DIR ??
     `${home}/.config/sharkcage/data`,
@@ -107,6 +108,9 @@ const sessionPolicyDir = join(
 );
 
 function policyPathForScope(scopeKey: string): string {
+  if (!/^[a-zA-Z0-9_.-]+$/.test(scopeKey)) {
+    throw new Error(`Invalid scopeKey: ${scopeKey}`);
+  }
   return join(sessionPolicyDir, `${scopeKey}.json`);
 }
 
@@ -145,13 +149,13 @@ function buildSessionPolicy(
         "/Library/Frameworks/Python.framework",
         "/private/var/run", // mDNSResponder for DNS (macOS)
         "/var/folders",     // macOS temp
-        // User home — scoped to this user only, not /home
-        home,
         // Workspace dirs (passed by OpenClaw)
         workspaceDir,
         agentWorkspaceDir,
+        // Scoped home subdirs — not the bare home dir
         `${home}/.openclaw/workspace`,
         `${home}/.openclaw/sandboxes`,
+        `${home}/.openclaw/tmp`,
         // Runtime dependencies
         `${home}/.node_modules`,
         `${home}/.npm`,

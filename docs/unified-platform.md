@@ -176,7 +176,7 @@ Per-tool session policies are generated dynamically by the sandbox backend. Each
 # Session policy example (generated at session start):
 ~/.config/sharkcage/sessions/<session-id>.json:
   network.allowedDomains: ["openrouter.ai"]
-  filesystem.allowWrite: ["~/.openclaw/data"]
+  filesystem.allowWrite: ["~/.openclaw/tmp", "~/.openclaw/workspace", "~/.openclaw/sandboxes"]
   filesystem.denyRead: ["~/.ssh", "~/.aws", "~/.gnupg"]
 ```
 
@@ -305,7 +305,7 @@ Every AI-directed tool call is wrapped by the sandbox backend using `srt --setti
 ```
 Session policy (generated dynamically per session):
   network.allowedDomains: ["openrouter.ai"]
-  filesystem.allowWrite: ["~/.openclaw/data", "~/.config/sharkcage"]
+  filesystem.allowWrite: ["~/.openclaw/tmp", "~/.openclaw/workspace", "~/.openclaw/sandboxes"]
   filesystem.denyRead: ["~/.ssh", "~/.aws", "~/.gnupg"]
 ```
 

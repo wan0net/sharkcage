@@ -5,7 +5,7 @@ const program = new Command();
 program
   .name("sc")
   .description("sharkcage — trust layer for OpenClaw")
-  .version("0.1.0");
+  .version("1.0.0");
 
 program
   .command("start")

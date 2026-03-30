@@ -218,8 +218,13 @@ function getAuditEntries(
   tail: number,
   skillFilter: string | null,
   blockedOnly: boolean
-): AuditEntry[] {
+): Omit<AuditEntry, "args" | "result">[] {
   if (!existsSync(auditPath)) return [];
+
+  try {
+    const stat = statSync(auditPath);
+    if (stat.size > 100 * 1024 * 1024) return [];
+  } catch { return []; }
 
   const maxTail = Math.min(tail, 10000);
 
@@ -234,7 +239,7 @@ function getAuditEntries(
   if (skillFilter) entries = entries.filter((e) => e.skill === skillFilter);
   if (blockedOnly) entries = entries.filter((e) => e.blocked);
 
-  return entries.slice(-maxTail).map(sanitizeAuditEntry) as unknown as AuditEntry[];
+  return entries.slice(-maxTail).map(sanitizeAuditEntry);
 }
 
 function getAuditStats(auditPath: string): Record<string, unknown> {

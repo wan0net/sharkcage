@@ -141,9 +141,14 @@ export function checkTarget(
   allowed: AllowedTarget[],
   host: string,
   port: number
-): { allowed: boolean; capability?: string } {
+): { allowed: boolean; capability?: string; reason?: string } {
   // Normalise localhost aliases to 127.0.0.1
   const normHost = (host === "localhost" || host === "::1") ? "127.0.0.1" : host;
+
+  // Always block the supervisor API — even for wildcard network.internal
+  if ((normHost === "127.0.0.1" || normHost === "localhost") && (port === 18790 || port === 18800)) {
+    return { allowed: false, reason: "supervisor ports blocked" };
+  }
 
   for (const target of allowed) {
     // Wildcard sentinel — allow any host/port
