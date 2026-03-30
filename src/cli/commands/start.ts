@@ -126,8 +126,13 @@ export default async function start() {
     safeKill(supervisorProc);
     try { unlinkSync(pidFile); } catch { /* gone */ }
     try { unlinkSync(socketPath); } catch { /* gone */ }
-    log("sc", "Stopped");
-    process.exit(0);
+    // Give processes time to die, then force kill and exit
+    setTimeout(() => {
+      forceKill(openclawProc);
+      forceKill(supervisorProc);
+      log("sc", "Stopped");
+      process.exit(0);
+    }, 3000);
   };
 
   process.on("SIGINT", shutdown);
@@ -356,6 +361,12 @@ function safeKill(proc: ChildProcess): void {
   try { process.kill(-proc.pid, "SIGTERM"); } catch { /* dead */ }
   // Fallback: kill just the process
   try { proc.kill("SIGTERM"); } catch { /* dead */ }
+}
+
+function forceKill(proc: ChildProcess): void {
+  if (!proc.pid) return;
+  try { process.kill(-proc.pid, "SIGKILL"); } catch { /* dead */ }
+  try { proc.kill("SIGKILL"); } catch { /* dead */ }
 }
 
 function waitForSocket(path: string, timeoutMs: number): Promise<void> {
