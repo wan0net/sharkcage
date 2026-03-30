@@ -343,6 +343,10 @@ export function register(api: OpenClawPluginApi): void {
     const installMatch = text.match(/^sc\s+(?:skill\s+add|install)\s+(.+)$/i);
     if (installMatch) {
       const source = installMatch[1].trim();
+      if (!source.match(/^https?:\/\//) && !source.match(/^[a-zA-Z0-9@_-][a-zA-Z0-9@/_.-]*$/)) {
+        console.log(`[sharkcage] rejected install source: ${source}`);
+        return { handled: true };
+      }
       console.log(`[sharkcage] plugin install from chat: ${source}`);
       const { execFileSync } = await import("node:child_process");
       try {
@@ -363,7 +367,18 @@ export function register(api: OpenClawPluginApi): void {
 
   // --- Hook 6: before_message_write (priority 100) — scrub internals + redact secrets ---
   api.on("before_message_write", (event: BeforeMessageWriteEvent, _ctx: HookContext) => {
-    const content = typeof event.message?.content === "string" ? event.message.content : "";
+    const msg = event.message;
+    if (!msg) return undefined;
+
+    let content: string;
+    const isArray = Array.isArray(msg.content);
+    if (typeof msg.content === "string") {
+      content = msg.content;
+    } else if (isArray) {
+      content = (msg.content as unknown[]).map((p: unknown) => typeof p === "string" ? p : (p as any)?.text ?? "").join("\n");
+    } else {
+      return undefined;
+    }
 
     // Block sharkcage internal messages — use lowercase + regex to prevent case-based bypass
     const lc = content.toLowerCase();
@@ -377,6 +392,24 @@ export function register(api: OpenClawPluginApi): void {
     if (secrets.length > 0 || pii.length > 0) {
       const redacted = redact(content);
       console.log(`[sharkcage-security] redacted ${secrets.length} secret(s), ${pii.length} PII from message`);
+      if (isArray) {
+        // Rebuild array preserving non-text parts, replacing text parts with redacted content
+        const parts = msg.content as unknown[];
+        let redactedRemaining = redacted;
+        const newParts = parts.map((p: unknown) => {
+          if (typeof p === "string") {
+            const chunk = redactedRemaining.slice(0, p.length);
+            redactedRemaining = redactedRemaining.slice(p.length + 1); // +1 for the join "\n"
+            return chunk;
+          } else if (p != null && typeof (p as any).text === "string") {
+            const chunk = redactedRemaining.slice(0, (p as any).text.length);
+            redactedRemaining = redactedRemaining.slice((p as any).text.length + 1);
+            return { ...(p as object), text: chunk };
+          }
+          return p;
+        });
+        return { message: { ...msg, content: newParts } };
+      }
       return { message: { content: redacted } };
     }
 
@@ -447,7 +480,7 @@ interface InboundClaimEvent {
 }
 
 interface BeforeMessageWriteEvent {
-  message?: { content?: string };
+  message?: { content?: string | unknown[] };
 }
 
 interface RequireApprovalResult {
@@ -487,7 +520,7 @@ interface OpenClawPluginApi {
   ): void;
   on(
     event: "before_message_write",
-    handler: (event: BeforeMessageWriteEvent, ctx: HookContext) => { block: true } | { message?: BeforeMessageWriteEvent["message"] } | undefined | void,
+    handler: (event: BeforeMessageWriteEvent, ctx: HookContext) => { block: true } | { message?: { content?: string | unknown[] } } | undefined | void,
     opts?: { priority?: number }
   ): void;
 

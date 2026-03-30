@@ -87,7 +87,7 @@ export default async function start() {
         "find-generic-password", "-s", "Claude Code-credentials", "-w"
       ], { encoding: "utf-8", timeout: 10_000 }).trim();
       if (raw) {
-        writeFileSync(credFile, raw);
+        writeFileSync(credFile, raw, { mode: 0o600 });
         log("sc", "CLI credentials exported for sandbox");
       }
     } catch {

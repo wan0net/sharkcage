@@ -6,6 +6,30 @@ import type { AsrtConfig, SkillCapability } from "./types.js";
 /** Resolved home directory — used instead of `~` so srt doesn't have to expand it */
 const HOME = homedir();
 
+/** Hosts that must never appear in allowedDomains — SSRF / cloud-metadata targets. */
+const BLOCKED_HOSTS = new Set([
+  "169.254.169.254",
+  "metadata.google.internal",
+  "metadata",
+  "100.100.100.100",
+  "127.0.0.1",
+  "::1",
+  "localhost",
+]);
+
+/** IP prefixes that must never appear in allowedDomains (private / link-local ranges). */
+const BLOCKED_PREFIXES = [
+  "10.", "172.16.", "172.17.", "172.18.", "172.19.", "172.20.", "172.21.", "172.22.",
+  "172.23.", "172.24.", "172.25.", "172.26.", "172.27.", "172.28.", "172.29.", "172.30.",
+  "172.31.", "192.168.", "169.254.", "127.",
+];
+
+function isDangerousHost(host: string): boolean {
+  const h = host.toLowerCase().replace(/:\d+$/, ""); // strip port if present
+  if (BLOCKED_HOSTS.has(h)) return true;
+  return BLOCKED_PREFIXES.some((prefix) => h.startsWith(prefix));
+}
+
 /** Paths that are ALWAYS denied regardless of capabilities */
 const MANDATORY_DENY_READ = [
   `${HOME}/.ssh`,
@@ -63,8 +87,10 @@ export function buildAsrtConfig(
     }
   }
 
+  const allowedDomains = [...domains].filter((h) => !isDangerousHost(h));
+
   return {
-    network: { allowedDomains: [...domains], allowUnixSockets: false },
+    network: { allowedDomains, allowUnixSockets: false },
     filesystem: { allowWrite, denyRead: [...MANDATORY_DENY_READ] },
   };
 }

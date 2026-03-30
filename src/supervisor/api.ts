@@ -10,6 +10,11 @@ import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import type { ApprovalStore } from "./approvals.js";
 
+/** Only allow simple alphanumeric skill/approval names — no path components. */
+function isValidName(name: string): boolean {
+  return /^[a-zA-Z0-9_-]+$/.test(name);
+}
+
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -62,6 +67,10 @@ export function startDashboardApi(
       // --- GET /api/skills/:name ---
       if (path.startsWith("/api/skills/") && req.method === "GET") {
         const name = path.slice("/api/skills/".length);
+        if (!isValidName(name)) {
+          respond(res, 400, { error: "Invalid skill name" });
+          return;
+        }
         const skill = getSkillDetail(name, pluginDir, approvalsDir);
         if (!skill) {
           respond(res, 404, { error: "Skill not found" });
@@ -91,11 +100,10 @@ export function startDashboardApi(
 
       // --- GET /api/config ---
       if (path === "/api/config" && req.method === "GET") {
-        const sandboxConfig = safeReadJson(`${configDir}/gateway-sandbox.json`);
-        const gatewayConfig = safeReadJson(`${configDir}/gateway.json`);
+        // Return only non-sensitive config summary — omit full sandbox/gateway JSON
+        // which can contain credentials and network topology.
         respond(res, 200, {
-          sandbox: sandboxConfig,
-          gateway: gatewayConfig,
+          configDir,
         });
         return;
       }
@@ -193,6 +201,12 @@ interface AuditEntry {
   blockReason: string | null;
 }
 
+/** Strip sensitive fields from an audit entry before serving via API. */
+function sanitizeAuditEntry(entry: AuditEntry): Omit<AuditEntry, "args" | "result"> {
+  const { args: _args, result: _result, ...safe } = entry;
+  return safe;
+}
+
 function getAuditEntries(
   auditPath: string,
   tail: number,
@@ -212,7 +226,7 @@ function getAuditEntries(
   if (skillFilter) entries = entries.filter((e) => e.skill === skillFilter);
   if (blockedOnly) entries = entries.filter((e) => e.blocked);
 
-  return entries.slice(-tail);
+  return entries.slice(-tail).map(sanitizeAuditEntry) as unknown as AuditEntry[];
 }
 
 function getAuditStats(auditPath: string): Record<string, unknown> {
