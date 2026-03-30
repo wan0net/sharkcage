@@ -985,15 +985,42 @@
 
   <hr class="divider">
 
-  <!-- ── Data Flow Diagrams ── -->
+  <!-- ── Data Flows ── -->
   <section id="flows">
     <div class="reveal">
-      <div class="section-label">Data Flows</div>
-      <h2 class="section-heading">Every path through the system.</h2>
-      <p class="section-desc">Four scenarios, four enforcement points. The happy path, first-time approval, sandbox violations, and pattern-based blocking.</p>
+      <div class="section-label">What Happens</div>
+      <h2 class="section-heading">Four scenarios. Step by step.</h2>
+      <p class="section-desc">Read each one top to bottom. Every step is one sentence.</p>
     </div>
     <style>
-      /* ── Visual Flow Diagrams ── */
+      .flow-scenarios { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 32px; }
+      @media (max-width: 900px) { .flow-scenarios { grid-template-columns: 1fr; } }
+      .scenario { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+      .scenario-header { padding: 14px 18px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; }
+      .scenario-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+      .scenario-dot.green { background: var(--green); }
+      .scenario-dot.yellow { background: var(--yellow); }
+      .scenario-dot.red { background: var(--red); }
+      .scenario-title { font-family: 'Geist Mono', monospace; font-size: 0.75rem; font-weight: 600; color: var(--text); }
+      .steps { padding: 16px 18px; display: flex; flex-direction: column; gap: 0; }
+      .step { display: flex; gap: 12px; padding: 8px 0; position: relative; }
+      .step:not(:last-child)::after { content: ''; position: absolute; left: 11px; top: 28px; bottom: -8px; width: 1.5px; }
+      .step.ok:not(:last-child)::after { background: color-mix(in srgb, var(--green) 30%, transparent); }
+      .step.warn:not(:last-child)::after { background: color-mix(in srgb, var(--yellow) 30%, transparent); }
+      .step.bad:not(:last-child)::after { background: color-mix(in srgb, var(--red) 30%, transparent); }
+      .step.mute:not(:last-child)::after { background: var(--border); }
+      .step-icon { width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.6rem; flex-shrink: 0; line-height: 1; }
+      .step.ok .step-icon { background: color-mix(in srgb, var(--green) 18%, transparent); color: var(--green); border: 1.5px solid color-mix(in srgb, var(--green) 40%, transparent); }
+      .step.warn .step-icon { background: color-mix(in srgb, var(--yellow) 18%, transparent); color: var(--yellow); border: 1.5px solid color-mix(in srgb, var(--yellow) 40%, transparent); }
+      .step.bad .step-icon { background: color-mix(in srgb, var(--red) 18%, transparent); color: var(--red); border: 1.5px solid color-mix(in srgb, var(--red) 40%, transparent); }
+      .step.mute .step-icon { background: color-mix(in srgb, var(--text-mid) 12%, transparent); color: var(--text-mid); border: 1.5px solid color-mix(in srgb, var(--text-mid) 25%, transparent); }
+      .step-text { font-size: 0.78rem; line-height: 1.5; color: var(--text-mid); padding-top: 1px; }
+      .step-text strong { color: var(--text); font-weight: 600; }
+      .step-text em { color: var(--accent); font-style: normal; font-family: 'Geist Mono', monospace; font-size: 0.72rem; }
+      .step-badge { display: inline-block; font-size: 0.58rem; font-weight: 700; padding: 2px 6px; border-radius: 4px; margin-left: 6px; vertical-align: middle; }
+      .step-badge.invisible { background: color-mix(in srgb, var(--red) 15%, transparent); color: var(--red); border: 1px solid color-mix(in srgb, var(--red) 35%, transparent); }
+      .step-badge.kernel { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); }
+      /* keep old styles for compat */
       .flow-diagrams-grid {
         display: grid;
         grid-template-columns: 1fr 1fr;
@@ -1311,14 +1338,71 @@
       }
     </style>
 
-    <div class="flow-diagrams-grid">
+    <div class="flow-scenarios">
 
-      <!-- ① Normal Tool Call (green) -->
-      <div class="flow-diagram reveal delay-1">
-        <div class="diagram-header">
-          <span class="diagram-dot green"></span>
-          <span class="diagram-title">Approved tool call</span>
+      <!-- ① Approved tool call -->
+      <div class="scenario reveal delay-1">
+        <div class="scenario-header">
+          <span class="scenario-dot green"></span>
+          <span class="scenario-title">User asks a question that needs a skill</span>
         </div>
+        <div class="steps">
+          <div class="step ok"><div class="step-icon">1</div><div class="step-text"><strong>User</strong> asks "what's for dinner?" in Signal</div></div>
+          <div class="step ok"><div class="step-icon">2</div><div class="step-text"><strong>AI</strong> decides to call the <em>meals_suggest</em> tool</div></div>
+          <div class="step mute"><div class="step-icon">🛡</div><div class="step-text"><strong>Plugin</strong> intercepts — checks approval file exists ✓</div></div>
+          <div class="step mute"><div class="step-icon">3</div><div class="step-text"><strong>Supervisor</strong> receives the call over IPC</div></div>
+          <div class="step mute"><div class="step-icon">🔒</div><div class="step-text"><strong>srt</strong> wraps the skill in a kernel sandbox <span class="step-badge kernel">kernel</span></div></div>
+          <div class="step ok"><div class="step-icon">4</div><div class="step-text"><strong>Skill</strong> runs, calls the meals API, returns suggestions</div></div>
+          <div class="step ok"><div class="step-icon">5</div><div class="step-text"><strong>Result</strong> flows back through supervisor → plugin → AI → user</div></div>
+          <div class="step ok"><div class="step-icon">✓</div><div class="step-text"><strong>User</strong> sees "How about pasta tonight?"</div></div>
+        </div>
+      </div>
+
+      <!-- ② First-time approval -->
+      <div class="scenario reveal delay-2">
+        <div class="scenario-header">
+          <span class="scenario-dot yellow"></span>
+          <span class="scenario-title">First time using a new skill</span>
+        </div>
+        <div class="steps">
+          <div class="step ok"><div class="step-icon">1</div><div class="step-text"><strong>AI</strong> tries to call a tool from a skill that hasn't been approved yet</div></div>
+          <div class="step warn"><div class="step-icon">🛡</div><div class="step-text"><strong>Plugin</strong> checks — no approval file found</div></div>
+          <div class="step warn"><div class="step-icon">2</div><div class="step-text"><strong>OpenClaw</strong> prompts the user in their chat channel <span class="step-badge invisible">AI cannot see</span></div></div>
+          <div class="step warn"><div class="step-icon">3</div><div class="step-text"><strong>User</strong> sees: "Skill meals wants: data.meals, network.external. Approve?"</div></div>
+          <div class="step ok"><div class="step-icon">4</div><div class="step-text"><strong>User</strong> approves — approval file written to disk</div></div>
+          <div class="step ok"><div class="step-icon">✓</div><div class="step-text"><strong>Tool call proceeds</strong> — next time, no prompt needed</div></div>
+        </div>
+      </div>
+
+      <!-- ③ Sandbox violation -->
+      <div class="scenario reveal delay-3">
+        <div class="scenario-header">
+          <span class="scenario-dot red"></span>
+          <span class="scenario-title">Skill tries something it hasn't been allowed to do</span>
+        </div>
+        <div class="steps">
+          <div class="step ok"><div class="step-icon">1</div><div class="step-text"><strong>Skill</strong> is approved and running inside the sandbox</div></div>
+          <div class="step bad"><div class="step-icon">🔒</div><div class="step-text"><strong>srt</strong> blocks the skill from reaching <em>api.example.com</em> — not in its allowed list <span class="step-badge kernel">kernel</span></div></div>
+          <div class="step bad"><div class="step-icon">2</div><div class="step-text"><strong>Supervisor</strong> detects the violation and returns it to the plugin</div></div>
+          <div class="step warn"><div class="step-icon">3</div><div class="step-text"><strong>User</strong> is prompted: "Allow meals to reach api.example.com?" <span class="step-badge invisible">AI cannot see</span></div></div>
+          <div class="step warn"><div class="step-icon">4</div><div class="step-text"><strong>User</strong> chooses: Allow (permanent) / Allow once / Never</div></div>
+          <div class="step ok"><div class="step-icon">✓</div><div class="step-text"><strong>If allowed</strong> — capability added, next call to that host succeeds</div></div>
+        </div>
+      </div>
+
+      <!-- ④ Dangerous command blocked -->
+      <div class="scenario reveal delay-4">
+        <div class="scenario-header">
+          <span class="scenario-dot red"></span>
+          <span class="scenario-title">AI tries to run a dangerous command</span>
+        </div>
+        <div class="steps">
+          <div class="step ok"><div class="step-icon">1</div><div class="step-text"><strong>AI</strong> decides to run a shell command: <em>rm -rf /</em></div></div>
+          <div class="step mute"><div class="step-icon">🛡</div><div class="step-text"><strong>Security scanner</strong> intercepts before anything runs (priority 200)</div></div>
+          <div class="step bad"><div class="step-icon">2</div><div class="step-text"><strong>Pattern matched</strong> against security-patterns.json — dangerous command detected</div></div>
+          <div class="step bad"><div class="step-icon">✗</div><div class="step-text"><strong>BLOCKED</strong> — command never runs. AI gets: "Blocked: dangerous command"</div></div>
+        </div>
+      </div>
         <div class="flow-diagram-body">
           <!-- Forward path row 1 -->
           <div class="fd-row">
