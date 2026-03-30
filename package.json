@@ -13,7 +13,9 @@
     "supervisor": "npx tsx src/supervisor/main.ts"
   },
   "dependencies": {
-    "@clack/prompts": "^1.1.0"
+    "@clack/prompts": "^1.1.0",
+    "@pondwader/socks5-server": "^1.0.10",
+    "commander": "^14.0.3"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

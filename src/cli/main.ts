@@ -1,55 +1,118 @@
-const command = process.argv[2];
+import { Command } from "commander";
 
-const commands: Record<string, () => Promise<void>> = {
-  start: () => import("./commands/start.ts").then((m) => m.default()),
-  stop: () => import("./commands/stop.ts").then((m) => m.default()),
-  status: () => import("./commands/status.ts").then((m) => m.default()),
-  init: () => import("./commands/init.ts").then((m) => m.default()),
-  skill: () => import("./commands/plugin.ts").then((m) => m.default()),
-  verify: () => import("./commands/verify.ts").then((m) => m.default()),
-  approve: () => import("./commands/approve.ts").then((m) => m.default()),
-  sign: () => import("./commands/sign.ts").then((m) => m.default()),
-  trust: () => import("./commands/trust.ts").then((m) => m.default()),
-  upgrade: () => import("./commands/upgrade.ts").then((m) => m.default()),
-  config: () => import("./commands/config.ts").then((m) => m.default()),
-  audit: () => import("./commands/audit.ts").then((m) => m.default()),
-};
+const program = new Command();
 
-if (!command || command === "help" || command === "--help") {
-  console.log(`sc — trust layer for OpenClaw
+program
+  .name("sc")
+  .description("sharkcage — trust layer for OpenClaw")
+  .version("0.1.0");
 
-Commands:
-  start                          Start sharkcage + sandboxed OpenClaw
-  stop                           Stop sharkcage
-  init                           Setup wizard
-  status                         Show running status
+program
+  .command("start")
+  .description("Start sharkcage + sandboxed OpenClaw")
+  .action(async () => {
+    const m = await import("./commands/start.ts");
+    await m.default();
+  });
 
-  skill add <url|path>           Install a skill
-  skill list                     List installed skills
-  skill remove <name>            Remove a skill
-  skill infer <name>             Infer capabilities from source
+program
+  .command("stop")
+  .description("Stop sharkcage")
+  .action(async () => {
+    const m = await import("./commands/stop.ts");
+    await m.default();
+  });
 
-  approve <name>                 Review and approve skill capabilities
-  verify <path>                  Scan a skill for issues
-  sign <path>                    Sign a skill manifest
-  trust <fingerprint>            Trust a skill signer
+program
+  .command("status")
+  .description("Show running status")
+  .action(async () => {
+    const m = await import("./commands/status.ts");
+    await m.default();
+  });
 
-  config show                    Show gateway sandbox config
-  config add-service <host>      Add a host to the outer sandbox
-  config remove-service <host>   Remove a host from the outer sandbox
+program
+  .command("init")
+  .description("Setup wizard")
+  .action(async () => {
+    const m = await import("./commands/init.ts");
+    await m.default();
+  });
 
-  upgrade                        Safely upgrade OpenClaw with rollback
+program
+  .command("skill")
+  .description("Manage skills (add | list | remove | infer)")
+  .argument("<action>", "add | list | remove | infer")
+  .argument("[args...]", "Additional arguments")
+  .action(async () => {
+    const m = await import("./commands/plugin.ts");
+    await m.default();
+  });
 
-  audit                          Show recent audit log entries
-  audit --blocked                Show only blocked calls
-`);
-  process.exit(0);
-}
+program
+  .command("approve")
+  .description("Review and approve skill capabilities")
+  .argument("<name>", "Skill name")
+  .action(async () => {
+    const m = await import("./commands/approve.ts");
+    await m.default();
+  });
 
-const handler = commands[command];
-if (!handler) {
-  console.error(`Unknown command: ${command}\nRun 'sc help' for usage.`);
-  process.exit(1);
-}
+program
+  .command("verify")
+  .description("Scan a skill for issues")
+  .argument("<path>", "Path to skill")
+  .action(async () => {
+    const m = await import("./commands/verify.ts");
+    await m.default();
+  });
 
-await handler();
+program
+  .command("sign")
+  .description("Sign a skill manifest")
+  .argument("<path>", "Path to skill")
+  .action(async () => {
+    const m = await import("./commands/sign.ts");
+    await m.default();
+  });
+
+program
+  .command("trust")
+  .description("Trust a skill signer")
+  .argument("<fingerprint>", "Signer fingerprint")
+  .action(async () => {
+    const m = await import("./commands/trust.ts");
+    await m.default();
+  });
+
+program
+  .command("config")
+  .description("Manage gateway sandbox config (show | add-service | remove-service)")
+  .argument("<action>", "show | add-service | remove-service")
+  .argument("[args...]", "Additional arguments")
+  .action(async () => {
+    const m = await import("./commands/config.ts");
+    await m.default();
+  });
+
+program
+  .command("upgrade")
+  .description("Safely upgrade OpenClaw with rollback")
+  .action(async () => {
+    const m = await import("./commands/upgrade.ts");
+    await m.default();
+  });
+
+program
+  .command("audit")
+  .description("Show recent audit log entries")
+  .option("--blocked", "Show only blocked calls")
+  .option("--skill <name>", "Filter by skill name")
+  .option("--tool <name>", "Filter by tool name")
+  .option("--tail <n>", "Show last N entries")
+  .action(async () => {
+    const m = await import("./commands/audit.ts");
+    await m.default();
+  });
+
+program.parse();
