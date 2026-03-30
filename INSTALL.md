@@ -2,16 +2,32 @@
 
 > OpenClaw, but you trust it.
 
-Sharkcage runs the **entire OpenClaw binary inside a kernel-level sandbox** (outer ASRT) and
-adds per-skill sandboxing for plugins (inner ASRT). Every skill runs in its own
-[Anthropic Sandbox Runtime](https://github.com/anthropic-experimental/sandbox-runtime)
-with only the capabilities the user approved. No permission prompts at runtime.
+Sharkcage adds per-tool kernel-level sandboxing to OpenClaw. Every AI-directed tool call runs
+in its own [Anthropic Sandbox Runtime](https://github.com/anthropic-experimental/sandbox-runtime)
+with only the capabilities the user approved. The gateway process itself is not sandboxed —
+enforcement is at the individual tool call level. No permission prompts at runtime.
 
 ## Prerequisites
 
 - **Node.js 22+** — [nodejs.org](https://nodejs.org/)
 - **Git** — for cloning skills
 - **macOS or Linux** — ASRT uses Seatbelt (macOS) or bubblewrap (Linux)
+
+### Linux-specific prerequisites
+
+```bash
+# Required packages (Ubuntu/Debian)
+sudo apt-get install -y ripgrep bubblewrap socat
+
+# AppArmor profile for bubblewrap (Ubuntu 24.04+ / Noble)
+# Without this, bwrap fails with "Permission denied" on user namespaces
+echo 'abi <abi/4.0>,
+include <tunables/global>
+profile bwrap /usr/bin/bwrap flags=(unconfined) {
+  userns,
+}' | sudo tee /etc/apparmor.d/bwrap
+sudo apparmor_parser -r /etc/apparmor.d/bwrap
+```
 
 ## Quick Start
 
@@ -36,14 +52,28 @@ sc init
 sc start
 ```
 
+## Network configuration
+
+By default, OpenClaw binds to `127.0.0.1` (localhost only). For remote access via Tailscale or a reverse proxy:
+
+```bash
+# After sc init, update the bind address:
+jq '.gateway.bind = "lan"' ~/.openclaw/openclaw.json > /tmp/oc.json && mv /tmp/oc.json ~/.openclaw/openclaw.json
+
+# Allow all origins (if terminating TLS at a reverse proxy):
+jq '.gateway.controlUi.allowedOrigins = ["*"]' ~/.openclaw/openclaw.json > /tmp/oc.json && mv /tmp/oc.json ~/.openclaw/openclaw.json
+```
+
+If accessing via HTTPS (recommended), configure your reverse proxy (Traefik, Caddy, nginx) to terminate TLS and forward to `http://localhost:18789`.
+
 ## What `sc start` does
 
 1. Checks dependencies — installs OpenClaw and srt if missing
 2. Runs the setup wizard if no config exists
-3. Generates a signed gateway sandbox config (outer ASRT)
+3. Configures per-tool ASRT sandboxing for all AI-directed commands
 4. Registers the sharkcage plugin with OpenClaw
 5. Starts the supervisor (IPC, audit log, skill sandbox spawning)
-6. Starts the **entire OpenClaw binary** inside the outer ASRT sandbox
+6. Starts OpenClaw with the sharkcage sandbox backend active
 7. Monitors both processes
 
 ## Installing skills
@@ -150,13 +180,13 @@ sc stop
 See [docs/unified-platform.md](docs/unified-platform.md) for the full design doc,
 or [docs/architecture.svg](docs/architecture.svg) for the diagram.
 
-**TL;DR:** sharkcage is a supervisor process that owns all ASRT sandboxes. The entire
-OpenClaw binary runs inside the outer sandbox. Each skill runs inside its own inner sandbox.
-The supervisor is the only unsandboxed process (~200 lines, auditable in 15 minutes).
+**TL;DR:** sharkcage is a supervisor process that owns all ASRT sandboxes. Each skill runs
+inside its own sandbox. Every individual tool call is sandboxed — the gateway process itself
+is not. The supervisor is the only unsandboxed process (~200 lines, auditable in 15 minutes).
 
 ## Security Model
 
-- **Entire OpenClaw process sandboxed** — the outer ASRT contains the whole gateway binary, not just plugins
+- **Per-tool sandboxing** — every individual tool call runs in its own ASRT sandbox; the gateway process itself is not sandboxed
 - **Fail closed** — if the supervisor is unreachable, all tool calls are blocked
 - **Per-skill sandboxing** — each skill gets its own ASRT config (kernel-enforced)
 - **Init-locked gateway** — outer sandbox only allows init-configured services

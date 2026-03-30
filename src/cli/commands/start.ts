@@ -4,11 +4,10 @@
  * One command to go from nothing to running:
  * 1. Check/install dependencies (OpenClaw, srt)
  * 2. Run sharkcage init if no config exists
- * 3. Generate + verify gateway sandbox config
- * 4. Register sharkcage plugin with OpenClaw
- * 5. Start the supervisor
- * 6. Start OpenClaw in outer ASRT sandbox
- * 7. Monitor both processes, restart on failure
+ * 3. Register sharkcage plugin with OpenClaw
+ * 4. Start the supervisor
+ * 5. Start OpenClaw
+ * 6. Monitor both processes, restart on failure
  */
 
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
@@ -47,24 +46,15 @@ export default async function start() {
     await init.default();
   }
 
-  // --- 3. Generate gateway sandbox config ---
-  const sandboxConfigPath = `${configDir}/gateway-sandbox.json`;
-  if (!existsSync(sandboxConfigPath)) {
-    generateGatewaySandboxConfig(sandboxConfigPath);
-    log("sc", `Gateway sandbox config written to ${sandboxConfigPath}`);
-  } else {
-    log("sc", "Gateway sandbox config exists");
-  }
-
-  // --- 4. Ensure directories ---
+  // --- 3. Ensure directories ---
   for (const dir of [dataDir, `${configDir}/plugins`, `${configDir}/approvals`]) {
     mkdirSync(dir, { recursive: true });
   }
 
-  // --- 5. Register sharkcage plugin with OpenClaw ---
+  // --- 4. Register sharkcage plugin with OpenClaw ---
   ensureOpenClawPluginRegistered();
 
-  // --- 6. Check if already running ---
+  // --- 5. Check if already running ---
   if (existsSync(pidFile)) {
     try {
       const pids = JSON.parse(readFileSync(pidFile, "utf-8"));
@@ -76,7 +66,7 @@ export default async function start() {
     try { unlinkSync(pidFile); } catch { /* gone */ }
   }
 
-  // --- 6b. Pre-sync CLI auth credentials before sandboxing ---
+  // --- 6. Pre-sync CLI auth credentials before sandboxing ---
   // CLI-based auth (Claude CLI, Codex CLI, etc.) stores credentials in the
   // keychain. The sandbox blocks keychain access, but the file-based fallback
   // works. Ensure the file fallback exists by reading keychain BEFORE sandbox.
@@ -227,7 +217,7 @@ function startSupervisor(): ChildProcess {
   const proc = spawn("npx", ["tsx", supervisorPath], {
     stdio: ["pipe", "pipe", "pipe"],
     env: passEnvVars(),
-    detached: false,
+    detached: true,
   });
   prefixOutput(proc, "supervisor");
   return proc;
@@ -257,7 +247,7 @@ function startOpenClaw(): ChildProcess {
   const proc = spawn("openclaw", args, {
     stdio: ["pipe", "pipe", "pipe"],
     env: process.env,
-    detached: false,
+    detached: true,
   });
   prefixOutput(proc, "openclaw");
   return proc;
@@ -322,124 +312,6 @@ function ensureOpenClawPluginRegistered(): void {
   }
 }
 
-// --- Gateway sandbox config ---
-
-function generateGatewaySandboxConfig(outPath: string): void {
-  let config: Record<string, unknown> = {};
-  try {
-    config = JSON.parse(readFileSync(`${configDir}/gateway.json`, "utf-8"));
-  } catch { /* defaults */ }
-
-  const allowedDomains = new Set<string>();
-
-  // LLM provider — detect from OpenClaw's configured model
-  const providerDomains: Record<string, string[]> = {
-    anthropic: ["api.anthropic.com"],
-    openai: ["api.openai.com"],
-    "openai-codex": ["api.openai.com", "auth.openai.com"],
-    openrouter: ["openrouter.ai"],
-    google: ["generativelanguage.googleapis.com"],
-    xai: ["api.x.ai"],
-    deepseek: ["api.deepseek.com"],
-    mistral: ["api.mistral.ai"],
-    together: ["api.together.xyz"],
-    ollama: ["127.0.0.1"],
-  };
-
-  // Read model config to determine provider
-  try {
-    const ocCfg = JSON.parse(readFileSync(`${home}/.openclaw/openclaw.json`, "utf-8"));
-    const model = ocCfg.agents?.defaults?.model;
-    const modelStr = typeof model === "string" ? model : model?.primary ?? "";
-    const provider = modelStr.split("/")[0]; // e.g. "anthropic" from "anthropic/claude-3-haiku"
-    const domains = providerDomains[provider];
-    if (domains) domains.forEach((d) => allowedDomains.add(d));
-    // Also check for claude-cli which uses anthropic API
-    if (modelStr.includes("claude-cli") || modelStr.includes("claude")) {
-      allowedDomains.add("api.anthropic.com");
-    }
-  } catch { /* can't read */ }
-
-  // Read OpenClaw channel config to determine which API hosts are needed
-  const ocConfigPath = `${home}/.openclaw/openclaw.json`;
-  if (existsSync(ocConfigPath)) {
-    try {
-      const ocConfig = JSON.parse(readFileSync(ocConfigPath, "utf-8"));
-      const channels = ocConfig.channels ?? {};
-
-      const channelHosts: Record<string, string[]> = {
-        signal: ["127.0.0.1:7583"],
-        telegram: ["api.telegram.org"],
-        whatsapp: ["web.whatsapp.com"],
-        discord: ["discord.com", "gateway.discord.gg"],
-        slack: ["slack.com"],
-        matrix: [], // homeserver-specific
-        irc: [], // server-specific
-      };
-
-      for (const [name, channelConfig] of Object.entries(channels)) {
-        const cfg = channelConfig as Record<string, unknown>;
-        if (cfg?.enabled !== false) {
-          const hosts = channelHosts[name];
-          if (hosts) hosts.forEach((h) => allowedDomains.add(h));
-        }
-      }
-    } catch { /* can't read */ }
-  }
-
-  // Fallback: localhost for signal-cli
-  if (allowedDomains.size <= 1) {
-    const signalUrl = String(config.signal_cli_url ?? "127.0.0.1:7583");
-    allowedDomains.add(signalUrl.replace(/^https?:\/\//, ""));
-  }
-
-  // srt config format: domains must be valid hostnames (no ports), arrays for all fields
-  const domainList = [...allowedDomains].map((d) => d.replace(/:\d+$/, "")); // strip ports
-
-  const sandboxConfig = {
-    network: {
-      allowedDomains: domainList.length > 0 ? domainList : [],
-      deniedDomains: [],
-      allowLocalBinding: true,
-      allowAllUnixSockets: true,
-    },
-    filesystem: {
-      allowRead: ["/usr", "/lib", "/bin", "/sbin", "/etc", "/opt/homebrew", "/tmp", `${home}/.openclaw`, `${configDir}`],
-      allowWrite: [`${home}/.openclaw`, `${configDir}/data`, "/tmp"],
-      denyRead: [
-        // Credentials & keys
-        `${home}/.ssh`,
-        `${home}/.aws`,
-        `${home}/.gnupg`,
-        `${home}/.netrc`,
-        `${home}/.npmrc`,
-        `${home}/.docker`,
-        `${home}/.kube`,
-        `${home}/.config/gh`,
-        `${home}/.config/gcloud`,
-        `${home}/.config/op`,      // 1Password CLI
-        `${home}/.password-store`,
-        // Shell configs (can leak env vars / secrets)
-        `${home}/.bashrc`,
-        `${home}/.zshrc`,
-        `${home}/.bash_profile`,
-        `${home}/.zprofile`,
-        `${home}/.profile`,
-        `${home}/.bash_history`,
-        `${home}/.zsh_history`,
-        `${home}/.gitconfig`,
-        // Sharkcage internals
-        `${configDir}/approvals`,
-        `${configDir}/gateway-sandbox.json`,
-      ],
-      denyWrite: [],
-    },
-    generatedAt: new Date().toISOString(),
-  };
-
-  writeFileSync(outPath, JSON.stringify(sandboxConfig, null, 2) + "\n");
-}
-
 // --- Helpers ---
 
 function commandExists(name: string): boolean {
@@ -479,6 +351,10 @@ function isProcessRunning(pid: number): boolean {
 }
 
 function safeKill(proc: ChildProcess): void {
+  if (!proc.pid) return;
+  // Kill the process group (detached processes are group leaders)
+  try { process.kill(-proc.pid, "SIGTERM"); } catch { /* dead */ }
+  // Fallback: kill just the process
   try { proc.kill("SIGTERM"); } catch { /* dead */ }
 }
 

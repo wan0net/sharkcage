@@ -9,7 +9,9 @@
  */
 
 import { createServer, type Socket } from "node:net";
-import { chmodSync, mkdirSync, unlinkSync } from "node:fs";
+import { chmodSync, mkdirSync, unlinkSync, existsSync, openSync, readSync, writeSync, closeSync, constants } from "node:fs";
+import { open } from "node:fs/promises";
+import { execSync } from "node:child_process";
 import type { ToolCallRequest, ToolCallResponse } from "./types.js";
 import { ApprovalStore } from "./approvals.js";
 import { AuditLog } from "./audit.js";
@@ -127,27 +129,6 @@ function startServer(): Promise<void> {
   });
 }
 
-// --- TCP IPC server (fallback for sandboxed clients) ---
-function startTcpServer(port: number): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const server = createServer((conn: Socket) => {
-      handleConnection(conn).catch((err) =>
-        console.error("tcp connection error:", err)
-      );
-    });
-
-    server.on("error", (err) => {
-      console.error("tcp server error:", err);
-      reject(err);
-    });
-
-    server.listen(port, "127.0.0.1", () => {
-      console.log(`IPC (TCP fallback) listening on 127.0.0.1:${port}`);
-      resolve();
-    });
-  });
-}
-
 async function handleConnection(conn: Socket): Promise<void> {
   let buffer = "";
 
@@ -222,10 +203,6 @@ async function main(): Promise<void> {
 
   // Start IPC server
   await startServer();
-
-  // Start TCP IPC fallback (for sandboxed clients that can't use Unix sockets)
-  const ipcPort = parseInt(process.env.SHARKCAGE_IPC_PORT ?? "18801", 10);
-  await startTcpServer(ipcPort);
 
   // Start dashboard API
   const apiPort = parseInt(process.env.SHARKCAGE_API_PORT ?? "18790", 10);

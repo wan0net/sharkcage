@@ -2,17 +2,22 @@
 
 OpenClaw, but you trust it.
 
-Sharkcage registers as OpenClaw's **sandbox backend**, replacing Docker with kernel-level ASRT isolation. Every bash command, file read/write, and skill execution goes through `srt`. Capabilities approved once at install, enforced always at the kernel level.
+Sharkcage registers as OpenClaw's **sandbox backend**, wrapping every AI-directed tool call with `srt` (Anthropic Sandbox Runtime). Every bash command, file read/write, and skill execution is kernel-sandboxed. Capabilities approved once at install, enforced always.
 
 ## Security Model
 
 ```
 OpenClaw + sharkcage plugin
   │
-  ├── ASRT sandbox backend (registered via registerSandboxBackend)
-  │   Every exec/bash call → srt --settings <policy> /bin/sh -c <cmd>
-  │   Every file read/write → srt --settings <policy> /bin/sh -c <script>
-  │   Per-session policy: workspace access, deny ~/.ssh etc.
+  ├── Per-tool ASRT sandboxing (sandbox backend)
+  │   Every bash/exec/file tool call the AI makes:
+  │     srt --settings <session-policy> /bin/sh -c <cmd>
+  │   Kernel-enforced filesystem + network restrictions per command
+  │
+  ├── Per-skill ASRT sandboxing (supervisor)
+  │   Each skill runs in its own srt sandbox:
+  │     srt --settings <skill-policy> node <skill>
+  │   Scoped to approved capabilities only
   │
   ├── Capability enforcement (before_tool_call hook)
   │   Unapproved skill? → native channel approval (AI cannot see it)
@@ -25,9 +30,10 @@ OpenClaw + sharkcage plugin
       Every tool call logged, blocked or allowed
 ```
 
-- **Sandbox backend** — OpenClaw calls sharkcage's `buildExecSpec` for every command and `runShellCommand` for every file operation. All go through `srt` with per-session ASRT policies.
-- **Skill sandboxing** — each skill gets its own ASRT config derived from approved capabilities. Skills cannot reach each other's hosts.
+- **Per-tool sandboxing** — the sandbox backend wraps every AI-directed command with `srt`. The AI's bash commands and file operations run inside per-session ASRT policies with restricted filesystem and network access. The gateway process itself runs unsandboxed — it only serves deterministic chat server code.
+- **Per-skill sandboxing** — each skill gets its own ASRT config derived from approved capabilities. Skills cannot reach each other's hosts or files.
 - **Approval flow** — uses OpenClaw's native `requireApproval` so the human sees approval prompts in their chat channel but the AI never does.
+- **Approve once, enforce always** — capabilities are approved at install time and enforced at the kernel level from then on. No runtime permission prompts, no fatigue.
 
 ## Quick Start
 

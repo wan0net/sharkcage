@@ -28,7 +28,6 @@ interface ToolCallResponse {
 
 export class SupervisorClient {
   private socketPath: string;
-  private tcpPort: number = 18801;
   private conn: Socket | null = null;
   private buffer = "";
   private pending = new Map<string, {
@@ -38,27 +37,11 @@ export class SupervisorClient {
   }>();
   private nextId = 0;
 
-  constructor(socketPath: string, tcpPort = 18801) {
+  constructor(socketPath: string) {
     this.socketPath = socketPath;
-    this.tcpPort = tcpPort;
   }
 
   connect(): Promise<void> {
-    return this.tryUnixSocket().catch(() => this.tryTcp());
-  }
-
-  /**
-   * Connect via an inherited file descriptor (passed by sc start as FD 3).
-   * Used inside the srt sandbox where socket() is blocked by BPF —
-   * the FD was created before sandboxing and survives through exec.
-   */
-  connectViaFd(fd: number): void {
-    this.conn = new Socket({ fd, readable: true, writable: true });
-    console.log(`[sharkcage-plugin] connected to supervisor via inherited FD ${fd}`);
-    this.setupHandlers();
-  }
-
-  private tryUnixSocket(): Promise<void> {
     return new Promise((resolve, reject) => {
       this.conn = connect({ path: this.socketPath }, () => {
         console.log(`[sharkcage-plugin] connected to supervisor at ${this.socketPath}`);
@@ -69,20 +52,6 @@ export class SupervisorClient {
       this.conn.on("error", (err) => {
         this.conn = null;
         reject(err);
-      });
-    });
-  }
-
-  private tryTcp(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      this.conn = connect({ host: "127.0.0.1", port: this.tcpPort }, () => {
-        console.log(`[sharkcage-plugin] connected to supervisor via TCP 127.0.0.1:${this.tcpPort}`);
-        this.setupHandlers();
-        resolve();
-      });
-
-      this.conn.on("error", (err) => {
-        if (this.pending.size === 0) reject(err);
       });
     });
   }

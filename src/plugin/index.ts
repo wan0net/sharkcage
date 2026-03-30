@@ -168,25 +168,10 @@ export function register(api: OpenClawPluginApi): void {
   // Load skill→tool mapping
   skillMap.load(pluginDir);
 
-  // Connect to supervisor — prefer inherited FD (works inside srt sandbox),
-  // fall back to Unix socket / TCP for non-sandboxed environments.
-  const ipcFd = process.env.SHARKCAGE_IPC_FD ? parseInt(process.env.SHARKCAGE_IPC_FD, 10) : null;
-  if (ipcFd !== null && !Number.isNaN(ipcFd)) {
-    try {
-      supervisor.connectViaFd(ipcFd);
-    } catch (err) {
-      console.error("[sharkcage] failed to connect via inherited FD, falling back to socket:", err);
-      supervisor.connect().catch((err2) => {
-        console.error("[sharkcage] failed to connect to supervisor:", err2);
-        console.error("[sharkcage] is `sharkcage start` running?");
-      });
-    }
-  } else {
-    supervisor.connect().catch((err) => {
-      console.error("[sharkcage] failed to connect to supervisor:", err);
-      console.error("[sharkcage] is `sharkcage start` running?");
-    });
-  }
+  supervisor.connect().catch((err) => {
+    console.error("[sharkcage] failed to connect to supervisor:", err);
+    console.error("[sharkcage] is `sharkcage start` running?");
+  });
 
   // --- Shadow tools: one per skill tool, routes execution to supervisor ---
   // The AI calls these directly. No interceptor needed for routing.
