@@ -134,34 +134,34 @@ function buildSessionPolicy(
     },
     filesystem: {
       allowRead: [
+        // System binaries and libraries
         "/usr",
         "/lib",
         "/lib64",
         "/bin",
         "/sbin",
         "/etc",
-        "/home",
         "/opt/homebrew",
-        "/tmp",
-        "/var/folders",
-        "/proc",
-        "/dev",
         "/Library/Frameworks/Python.framework",
-        "/usr/bin/python3",
-        "/private/var/run", // mDNSResponder for DNS
+        "/private/var/run", // mDNSResponder for DNS (macOS)
+        "/var/folders",     // macOS temp
+        // User home — scoped to this user only, not /home
+        home,
+        // Workspace dirs (passed by OpenClaw)
         workspaceDir,
         agentWorkspaceDir,
         `${home}/.openclaw/workspace`,
         `${home}/.openclaw/sandboxes`,
-        `${home}/.sharkcage`,
+        // Runtime dependencies
         `${home}/.node_modules`,
         `${home}/.npm`,
         `${home}/.nvm`,
         `${home}/.local`,
       ],
       allowWrite: [
-        "/tmp",
-        "/var/folders",
+        // Private tmp inside home — not shared /tmp
+        `${home}/.openclaw/tmp`,
+        "/var/folders",     // macOS temp
         workspaceDir,
         agentWorkspaceDir,
         `${home}/.openclaw/workspace`,
@@ -184,6 +184,9 @@ async function createAsrtBackend(params: {
 }): Promise<SandboxBackendHandle> {
   const { sessionKey, scopeKey, workspaceDir, agentWorkspaceDir } = params;
 
+  // Ensure private tmp dir exists (not shared /tmp)
+  mkdirSync(`${home}/.openclaw/tmp`, { recursive: true });
+
   const policy = buildSessionPolicy(workspaceDir, agentWorkspaceDir);
   const policyPath = writeSessionPolicy(scopeKey, policy);
 
@@ -197,7 +200,7 @@ async function createAsrtBackend(params: {
       const shell = usePty ? "/bin/bash" : "/bin/sh";
       return {
         argv: ["srt", "--settings", policyPath, shell, "-c", command],
-        env: { ...process.env, ...env, HOME: process.env.HOME ?? "" },
+        env: { ...process.env, ...env, HOME: process.env.HOME ?? "", TMPDIR: `${home}/.openclaw/tmp` },
         stdinMode: usePty ? ("pipe-open" as const) : ("pipe-closed" as const),
       };
     },
@@ -213,7 +216,7 @@ async function createAsrtBackend(params: {
       return new Promise((resolve, reject) => {
         const child = spawn("srt", srtArgs, {
           stdio: ["pipe", "pipe", "pipe"],
-          env: { ...process.env, HOME: process.env.HOME ?? "" },
+          env: { ...process.env, HOME: process.env.HOME ?? "", TMPDIR: `${home}/.openclaw/tmp` },
           signal: signal ?? undefined,
         });
 

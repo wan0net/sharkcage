@@ -28,8 +28,9 @@ export const MANDATORY_DENY_READ: string[] = [
   `${HOME}/.bash_history`,
   `${HOME}/.zsh_history`,
   `${HOME}/.gitconfig`,
-  // Sharkcage internals (approvals are write-gated, not read-gated —
-  // the AI can see its constraints but can't modify them)
+  // Sharkcage — AI doesn't need to read the security implementation
+  `${HOME}/.sharkcage`,
+  `${HOME}/.config/sharkcage`,
 ];
 
 /** IPC request from OpenClaw plugin to supervisor */
