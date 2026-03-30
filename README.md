@@ -33,20 +33,12 @@ OpenClaw + sharkcage plugin
 
 ```bash
 # 1. Clone
-git clone --recursive https://github.com/wan0net/sharkcage.git
-cd sharkcage
+# One-line install
+curl -fsSL https://raw.githubusercontent.com/wan0net/sharkcage/main/install.sh | bash
 
-# 2. Bootstrap (installs packages, optionally installs OpenClaw + srt)
-./bootstrap.sh
-
-# 3. Add sc to PATH
-export PATH="$PWD/bin:$PATH"
-
-# 4. Set your API key
-export OPENROUTER_API_KEY=your-key-here
-
-# 5. Run the setup wizard
-sc init
+# Then
+sc init       # setup wizard (configures OpenClaw + sandbox mode)
+sc start      # start everything
 
 # 6. Start
 sc start
