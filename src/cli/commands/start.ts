@@ -16,7 +16,6 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync } from "
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import crypto from "node:crypto";
-import { createConnection, type Socket } from "node:net";
 import { prefixOutput, log } from "../log-prefix.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -104,19 +103,9 @@ export default async function start() {
   await waitForSocket(socketPath, 10_000);
   log("sc", "Supervisor ready");
 
-  // --- 7b. Connect to supervisor socket for FD-inherited IPC ---
-  // The plugin inside srt can't create new sockets (BPF blocks socket()),
-  // so we connect here and pass the connected FD to the sandboxed process.
-  const ipcConn = createConnection({ path: socketPath });
-  await new Promise<void>((resolve, reject) => {
-    ipcConn.on("connect", resolve);
-    ipcConn.on("error", reject);
-  });
-  log("sc", "IPC connection established for FD inheritance");
-
   // --- 8. Start OpenClaw ---
   log("sc", "Starting OpenClaw...");
-  const openclawProc = startOpenClaw(sandboxConfigPath, ipcConn);
+  const openclawProc = startOpenClaw();
   log("sc", `OpenClaw PID ${openclawProc.pid}`);
 
   await waitForHttp("http://127.0.0.1:18789", 30_000);
@@ -247,8 +236,7 @@ function startSupervisor(): ChildProcess {
 // Module-level so it's accessible after startup for printing
 let gatewayToken = "";
 
-function startOpenClaw(sandboxConfigPath: string, ipcSocket?: Socket): ChildProcess {
-  const hasSrt = commandExists("srt");
+function startOpenClaw(): ChildProcess {
   // Use OpenClaw's configured token if available, then env var, then generate
   gatewayToken = process.env.OPENCLAW_GATEWAY_TOKEN ?? "";
   if (!gatewayToken) {
@@ -262,38 +250,13 @@ function startOpenClaw(sandboxConfigPath: string, ipcSocket?: Socket): ChildProc
   }
   const args = ["gateway", "run", "--port", "18789", "--auth", "token", "--token", gatewayToken];
 
-  // Node options for sandboxed OpenClaw:
-  // --dns-result-order=ipv4first: prevent IPv6 ::1 for localhost (breaks bind check)
-  // --use-env-proxy: route fetch() through srt's HTTP/SOCKS proxy (required for DNS)
-  const flags = ["--dns-result-order=ipv4first", "--use-env-proxy"];
-  let nodeOptions = process.env.NODE_OPTIONS ?? "";
-  for (const flag of flags) {
-    if (!nodeOptions.includes(flag)) nodeOptions = `${nodeOptions} ${flag}`.trim();
-  }
-  const env: Record<string, string | undefined> = { ...process.env, NODE_OPTIONS: nodeOptions };
-
-  // FD inheritance: pass the pre-connected supervisor socket as FD 3.
-  // srt/bwrap preserves inherited FDs (not marked CLOEXEC), so the plugin
-  // can use it even inside the sandbox where socket() is blocked by BPF.
-  const stdio: Array<"pipe" | Socket> = ["pipe", "pipe", "pipe"];
-  if (ipcSocket) {
-    stdio.push(ipcSocket); // FD 3 in the child
-    env.SHARKCAGE_IPC_FD = "3";
-  }
-
-  if (hasSrt) {
-    log("sc", "Outer ASRT sandbox enabled");
-    const proc = spawn("srt", ["--settings", sandboxConfigPath, "openclaw", ...args], {
-      stdio,
-      env: env as NodeJS.ProcessEnv,
-      detached: false,
-    });
-    prefixOutput(proc, "openclaw");
-    return proc;
-  }
+  // No outer srt sandbox — the gateway process runs unsandboxed.
+  // Security is enforced per-tool-call: every bash/file operation the AI
+  // executes goes through `srt --settings <policy>` via the sandbox backend.
+  // Skills get per-skill srt sandboxes. The gateway itself just serves chat.
   const proc = spawn("openclaw", args, {
-    stdio,
-    env: env as NodeJS.ProcessEnv,
+    stdio: ["pipe", "pipe", "pipe"],
+    env: process.env,
     detached: false,
   });
   prefixOutput(proc, "openclaw");
