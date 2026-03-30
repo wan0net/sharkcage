@@ -3,7 +3,7 @@
  * Newline-delimited JSON protocol (JSONL).
  */
 
-import { connect, type Socket } from "node:net";
+import { connect, Socket } from "node:net";
 
 interface ToolCallRequest {
   id: string;
@@ -45,6 +45,17 @@ export class SupervisorClient {
 
   connect(): Promise<void> {
     return this.tryUnixSocket().catch(() => this.tryTcp());
+  }
+
+  /**
+   * Connect via an inherited file descriptor (passed by sc start as FD 3).
+   * Used inside the srt sandbox where socket() is blocked by BPF —
+   * the FD was created before sandboxing and survives through exec.
+   */
+  connectViaFd(fd: number): void {
+    this.conn = new Socket({ fd, readable: true, writable: true });
+    console.log(`[sharkcage-plugin] connected to supervisor via inherited FD ${fd}`);
+    this.setupHandlers();
   }
 
   private tryUnixSocket(): Promise<void> {
