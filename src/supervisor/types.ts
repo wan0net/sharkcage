@@ -29,9 +29,10 @@ export const MANDATORY_DENY_READ: string[] = [
   `${HOME}/.bash_history`,
   `${HOME}/.zsh_history`,
   `${HOME}/.gitconfig`,
-  // Sharkcage internals
+  // Sharkcage internals (prevent AI from reading sandbox policies or approvals)
   `${CONFIG_DIR}/approvals`,
-  `${CONFIG_DIR}/gateway-sandbox.json`,
+  `${CONFIG_DIR}/data/sessions`,
+  `${CONFIG_DIR}/gateway.json`,
 ];
 
 /** IPC request from OpenClaw plugin to supervisor */

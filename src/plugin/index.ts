@@ -139,7 +139,11 @@ export default {
   register,
 };
 
+let registered = false;
+
 export function register(api: OpenClawPluginApi): void {
+  if (registered) return;
+  registered = true;
   console.log("[sharkcage] registering plugin...");
 
   // Register ASRT as a sandbox backend (if srt is available) — fire and forget
