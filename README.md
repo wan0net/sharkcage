@@ -59,6 +59,7 @@ sc status                           Show sandbox state, uptime, skill stats
 sc skill add <url|path>             Install a skill
 sc skill list                       List installed skills
 sc skill remove <name>              Remove a skill
+sc skill infer <name>             Infer capabilities from skill source
 sc approve <name>                   Review and approve skill capabilities
 
 sc verify <path>                    Scan a skill for issues
@@ -71,6 +72,8 @@ sc config remove-service <host>     Remove a host from allowed services
 sc audit                            Show recent audit log entries
 sc audit --skill <name>             Filter by skill
 sc audit --blocked                  Show only blocked calls
+sc audit --tool <name>            Filter by tool name
+sc audit --tail <n>               Show last N entries
 
 sc user copy-in <path> [--mode]     Copy files into dedicated user's home
 sc user shell                       Open shell as the dedicated user
@@ -89,7 +92,7 @@ When you install a skill, sharkcage:
 
 1. Downloads it
 2. Scans for dangerous patterns and missing fields
-3. Generates a capability manifest (via AI inference if the skill has none)
+3. Generates a capability manifest (via static analysis if the skill has none)
 4. Shows requested capabilities with risk levels
 5. Asks you to approve
 

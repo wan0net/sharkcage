@@ -41,6 +41,10 @@ export class SkillMap {
       try {
         const raw = readFileSync(manifestPath, "utf-8");
         const manifest = JSON.parse(raw) as SkillManifest;
+        if (!manifest.name || !/^[a-zA-Z0-9_-]+$/.test(manifest.name)) {
+          console.warn(`[sharkcage-plugin] skipping skill at ${fullPath}: invalid name in plugin.json`);
+          continue;
+        }
         if (manifest.tools) {
           for (const tool of manifest.tools) {
             this.toolToSkill.set(tool, manifest.name);

@@ -9,7 +9,7 @@ description: Wraps every AI-directed tool call with kernel-level sandboxing. Per
 A trust and sandboxing layer for OpenClaw. Every AI-directed tool call runs through kernel-level sandboxing via `srt`. Every skill also runs in its own kernel-enforced per-skill sandbox. Capabilities approved once at install. Compatible with the entire OpenClaw ecosystem on day one — AI infers capability manifests for existing skills automatically.
 
 Version: 2.0.0
-Date: 2026-03-29
+Date: 2026-03-31
 
 ---
 

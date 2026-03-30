@@ -401,7 +401,7 @@ export function register(api: OpenClawPluginApi): void {
     const installMatch = text.match(/^sc\s+(?:skill\s+add|install)\s+(.+)$/i);
     if (installMatch) {
       const source = installMatch[1].trim();
-      if (!source.match(/^https?:\/\//) && !source.match(/^[a-zA-Z0-9@_-][a-zA-Z0-9@/_.-]*$/)) {
+      if (!source.match(/^https:\/\/[^\s]+$/) && !source.match(/^[a-zA-Z0-9][a-zA-Z0-9@_-]*$/)) {
         console.log(`[sharkcage] rejected install source: ${source}`);
         return { handled: true };
       }
