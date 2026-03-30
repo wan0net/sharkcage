@@ -56,9 +56,9 @@ sc stop                             Stop everything
 sc init                             First-time setup wizard
 sc status                           Show sandbox state, uptime, skill stats
 
-sc plugin add <url|path>            Install a skill
-sc plugin list                      List installed skills
-sc plugin remove <name>             Remove a skill
+sc skill add <url|path>             Install a skill
+sc skill list                       List installed skills
+sc skill remove <name>              Remove a skill
 sc approve <name>                   Review and approve skill capabilities
 
 sc verify <path>                    Scan a skill for issues
@@ -71,6 +71,14 @@ sc config remove-service <host>     Remove a host from allowed services
 sc audit                            Show recent audit log entries
 sc audit --skill <name>             Filter by skill
 sc audit --blocked                  Show only blocked calls
+
+sc user copy-in <path> [--mode]     Copy files into dedicated user's home
+sc user shell                       Open shell as the dedicated user
+sc user home                        Print dedicated user home directory
+sc user info                        Show dedicated user details
+
+sc trust <fingerprint>              Trust a skill signer
+sc upgrade                          Safely upgrade OpenClaw with rollback
 ```
 
 ## Capability Model

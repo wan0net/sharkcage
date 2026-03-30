@@ -80,16 +80,16 @@ If accessing via HTTPS (recommended), configure your reverse proxy (Traefik, Cad
 
 ```bash
 # From a git URL
-sc plugin add https://github.com/wan0net/sharkcage-plugin-meals
+sc skill add https://github.com/wan0net/sharkcage-plugin-meals
 
 # From a local path (creates a symlink)
-sc plugin add ./my-skill
+sc skill add ./my-skill
 
 # List installed skills
-sc plugin list
+sc skill list
 
 # Remove
-sc plugin remove meals
+sc skill remove meals
 ```
 
 When you install a skill, sharkcage:

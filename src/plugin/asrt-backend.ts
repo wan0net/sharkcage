@@ -130,7 +130,7 @@ function buildSessionPolicy(
       allowedDomains: [],
       deniedDomains: [],
       allowLocalBinding: true,
-      allowUnixSockets: [`${home}/.config/sharkcage/data/supervisor.sock`],
+      allowUnixSockets: [],
     },
     filesystem: {
       allowRead: [
@@ -151,7 +151,8 @@ function buildSessionPolicy(
         "/private/var/run", // mDNSResponder for DNS
         workspaceDir,
         agentWorkspaceDir,
-        `${home}/.openclaw`,
+        `${home}/.openclaw/workspace`,
+        `${home}/.openclaw/sandboxes`,
         `${home}/.sharkcage`,
         `${home}/.node_modules`,
         `${home}/.npm`,

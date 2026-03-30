@@ -389,6 +389,11 @@ export function register(api: OpenClawPluginApi): void {
   }, { priority: 50 });
 
   // --- Hook 4: inbound_claim (priority 200) — handle sc commands from chat ---
+  // Security note: inbound_claim only fires on messages from the chat channel
+  // (user-originated), NOT on AI-generated output. The AI cannot trigger skill
+  // installs via this hook. The only risk is social engineering the human user
+  // into typing "sc skill add <malicious-url>" — which is out of scope (same
+  // threat class as "user runs malicious command in terminal").
   api.on("inbound_claim", async (event: InboundClaimEvent, _ctx: HookContext) => {
     const text = (event.content ?? "").trim();
 
@@ -479,7 +484,14 @@ export function register(api: OpenClawPluginApi): void {
         }
         chunks.push(chunk);
       }
-      const body = JSON.parse(Buffer.concat(chunks).toString());
+      let body: unknown;
+      try {
+        body = JSON.parse(Buffer.concat(chunks).toString());
+      } catch {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Invalid JSON" }));
+        return;
+      }
       console.log("[sharkcage] fleet webhook:", JSON.stringify(body).slice(0, 200));
       // TODO: route to appropriate channel for notification
       res.writeHead(200, { "Content-Type": "application/json" });

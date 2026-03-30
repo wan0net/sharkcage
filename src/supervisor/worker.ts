@@ -195,6 +195,7 @@ export async function executeInSandbox(
       durationMs: duration,
     };
   } catch (err) {
+    try { unlinkSync(configPath); } catch { /* already gone */ }
     return {
       id: request.id,
       result: "",

@@ -9,9 +9,7 @@
  */
 
 import { createServer, type Socket } from "node:net";
-import { chmodSync, mkdirSync, unlinkSync, existsSync, openSync, readSync, writeSync, closeSync, constants } from "node:fs";
-import { open } from "node:fs/promises";
-import { execSync } from "node:child_process";
+import { chmodSync, mkdirSync, unlinkSync } from "node:fs";
 import type { ToolCallRequest, ToolCallResponse } from "./types.js";
 import { ApprovalStore } from "./approvals.js";
 import { AuditLog } from "./audit.js";
@@ -50,6 +48,16 @@ function getSkillEnv(): Record<string, string> {
 
 // --- Handle a tool call request ---
 async function handleRequest(request: ToolCallRequest): Promise<ToolCallResponse> {
+  // Validate skill/tool names — prevent path traversal via crafted IPC messages
+  if (!/^[a-zA-Z0-9_-]+$/.test(request.skill) || !/^[a-zA-Z0-9_-]+$/.test(request.tool)) {
+    return {
+      id: request.id,
+      result: "",
+      error: `Invalid skill or tool name: ${request.skill}/${request.tool}`,
+      durationMs: 0,
+    };
+  }
+
   const timestamp = new Date().toISOString();
 
   // Check approval — if not approved, return error.
@@ -187,9 +195,6 @@ async function main(): Promise<void> {
     console.warn("Install @anthropic-ai/sandbox-runtime for full protection");
   }
 
-  // Start SOCKS5 localhost proxy
-  startLocalhostProxy(18800, tokenRegistry, audit, getSkillEnv());
-
   // Ensure directories
   for (const dir of [configDir, dataDir, pluginDir, `${configDir}/approvals`]) {
     try { mkdirSync(dir, { recursive: true }); } catch { /* exists */ }
@@ -200,6 +205,9 @@ async function main(): Promise<void> {
 
   // Open audit log
   await audit.open();
+
+  // Start SOCKS5 localhost proxy
+  startLocalhostProxy(18800, tokenRegistry, audit, getSkillEnv());
 
   // Start IPC server
   await startServer();

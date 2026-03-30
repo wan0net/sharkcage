@@ -87,7 +87,7 @@ export default async function start() {
 
   // --- 7. Start supervisor ---
   log("sc", "Starting supervisor...");
-  const supervisorProc = startSupervisor();
+  let supervisorProc = startSupervisor();
   log("sc", `Supervisor PID ${supervisorProc.pid}`);
 
   await waitForSocket(socketPath, 10_000);
@@ -152,8 +152,8 @@ export default async function start() {
     console.error(`[sc] Supervisor exited (code ${code}). Restarting in 2s...`);
     setTimeout(() => {
       if (!shuttingDown) {
-        const p = startSupervisor();
-        console.log(`[sc] Supervisor restarted: PID ${p.pid}`);
+        supervisorProc = startSupervisor();
+        console.log(`[sc] Supervisor restarted: PID ${supervisorProc.pid}`);
       }
     }, 2000);
   });

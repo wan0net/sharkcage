@@ -125,7 +125,7 @@ export function checkTarget(
   port: number
 ): { allowed: boolean; capability?: string } {
   // Normalise localhost aliases to 127.0.0.1
-  const normHost = host === "localhost" ? "127.0.0.1" : host;
+  const normHost = (host === "localhost" || host === "::1") ? "127.0.0.1" : host;
 
   for (const target of allowed) {
     const normTarget = target.host === "localhost" ? "127.0.0.1" : target.host;

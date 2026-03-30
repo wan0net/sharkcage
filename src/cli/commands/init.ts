@@ -177,7 +177,7 @@ export default async function init() {
           });
 
           if (!p.isCancel(addSudoers) && addSudoers) {
-            const sudoersRule = `${process.env.USER} ALL=(${username}) NOPASSWD: ALL\n`;
+            const sudoersRule = `${process.env.USER} ALL=(${username}) NOPASSWD: /usr/bin/openclaw, /usr/local/bin/openclaw\n`;
             execFileSync("sudo", ["tee", `/etc/sudoers.d/sharkcage-${username}`], {
               input: sudoersRule, stdio: ["pipe", "pipe", "pipe"],
             });

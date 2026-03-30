@@ -361,7 +361,7 @@ Existing OpenClaw skills and ClawHub skills don't have capability manifests. Sha
 ### 7.1 How It Works
 
 ```bash
-sc plugin add some-clawhub-skill
+sc skill add some-clawhub-skill
   │
   ├── Download skill
   ├── No capability manifest found
@@ -403,7 +403,7 @@ sc plugin add some-clawhub-skill
 If the AI over-infers (requests too much) or under-infers (misses something), the user can edit:
 
 ```bash
-sc plugin capabilities edit some-skill
+sc skill capabilities edit some-skill
 # Opens manifest in editor
 # Changes are validated by scanner
 # Re-signed if user has signing key
@@ -444,7 +444,7 @@ Ed25519. Trust levels: `full` (auto-load), `prompt` (ask before loading), `audit
 ### 8.3 Install Flow
 
 ```bash
-sc plugin add https://github.com/user/some-skill
+sc skill add https://github.com/user/some-skill
 
   Cloning... Scanning...
   No manifest found — running AI capability inference...
@@ -482,7 +482,7 @@ HA Assist → OpenClaw → Pi → tool call: ha_call_service
 ### Flow 3: Existing ClawHub skill installed
 
 ```
-sc plugin add clawhub-skill
+sc skill add clawhub-skill
   → download → no manifest → AI reads SKILL.md
   → infers: network.external: ["some-api.com"], system.exec: ["curl"]
   → scanner validates inferred manifest
@@ -665,7 +665,7 @@ sharkcage-skill-*                  (sdk for types — meals DONE, rest NOT START
 ### Phase 4: AI Capability Inference
 
 - [ ] `sharkcage-inference`: read SKILL.md, send to LLM, extract capabilities
-- [ ] `sc plugin add`: clone → infer → scan → approve → install
+- [ ] `sc skill add`: clone → infer → scan → approve → install
 - [ ] Test with 5 popular ClawHub skills
 - [ ] Validates day-one OpenClaw ecosystem compatibility
 
@@ -675,7 +675,7 @@ sharkcage-skill-*                  (sdk for types — meals DONE, rest NOT START
 - [ ] `sc config`: add/remove services, re-sign gateway config
 - [ ] `sc audit`: query audit log
 - [ ] `sc sign`: Ed25519 signing
-- [ ] `sc plugin list/remove`: plugin management
+- [ ] `sc skill list/remove`: plugin management
 - [ ] SSH and AWS as opt-in capabilities (controlled access, not blanket deny)
 
 ### Phase 6: Dashboard + Signing
