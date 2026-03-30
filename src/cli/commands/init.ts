@@ -150,8 +150,11 @@ export default async function init() {
       }
 
       if (!userExists) {
-        p.log.info(`Creating user "${username}"...`);
+        p.log.info(`Creating user "${username}" (requires sudo)...`);
         try {
+          // Request sudo — user enters password here
+          execFileSync("sudo", ["-v"], { stdio: "inherit" });
+
           execFileSync("sudo", [
             "useradd",
             "--system",
@@ -167,10 +170,20 @@ export default async function init() {
           execFileSync("sudo", ["cp", "-r", `${home}/.sharkcage/.`, `/home/${username}/.sharkcage/`], { stdio: "pipe" });
           execFileSync("sudo", ["chown", "-R", `${username}:${username}`, `/home/${username}`], { stdio: "pipe" });
 
+          // Also set up passwordless sudo for running openclaw as the dedicated user
+          const sudoersRule = `${process.env.USER} ALL=(${username}) NOPASSWD: ALL\n`;
+          execFileSync("sudo", ["tee", `/etc/sudoers.d/sharkcage-${username}`], {
+            input: sudoersRule, stdio: ["pipe", "pipe", "pipe"],
+          });
+          execFileSync("sudo", ["chmod", "440", `/etc/sudoers.d/sharkcage-${username}`], { stdio: "pipe" });
+
           p.log.success(`User "${username}" created. OpenClaw will run as this user.`);
         } catch (err) {
           p.log.error(`Failed to create user: ${err instanceof Error ? err.message : err}`);
           p.log.warning("Continuing without dedicated user.");
+        } finally {
+          // Drop sudo immediately — don't leave cached credentials
+          try { execFileSync("sudo", ["-k"], { stdio: "pipe" }); } catch { /* ok */ }
         }
       }
 
