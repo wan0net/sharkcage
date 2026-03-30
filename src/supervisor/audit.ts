@@ -24,7 +24,11 @@ export class AuditLog {
 
   async log(entry: AuditEntry): Promise<void> {
     const line = JSON.stringify(entry) + "\n";
-    appendFileSync(this.path, line);
+    try {
+      appendFileSync(this.path, line);
+    } catch (err) {
+      process.stderr.write(`[audit] failed to write log entry: ${err}\n`);
+    }
   }
 
   async logProxy(entry: {
@@ -36,7 +40,11 @@ export class AuditLog {
     capability: string | null;
   }): Promise<void> {
     const line = JSON.stringify({ type: "proxy", ...entry }) + "\n";
-    appendFileSync(this.path, line);
+    try {
+      appendFileSync(this.path, line);
+    } catch (err) {
+      process.stderr.write(`[audit] failed to write proxy log entry: ${err}\n`);
+    }
   }
 
   close(): void {

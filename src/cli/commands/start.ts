@@ -12,6 +12,7 @@
 
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync } from "node:fs";
+import { connect } from "node:net";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import crypto from "node:crypto";
@@ -384,9 +385,13 @@ function waitForSocket(path: string, timeoutMs: number): Promise<void> {
   return new Promise((resolve, reject) => {
     const t0 = Date.now();
     const check = () => {
-      if (existsSync(path)) return resolve();
-      if (Date.now() - t0 > timeoutMs) return reject(new Error(`Timeout: ${path}`));
-      setTimeout(check, 200);
+      const sock = connect({ path });
+      sock.on("connect", () => { sock.destroy(); resolve(); });
+      sock.on("error", () => {
+        sock.destroy();
+        if (Date.now() - t0 > timeoutMs) return reject(new Error(`Timeout: ${path}`));
+        setTimeout(check, 200);
+      });
     };
     check();
   });

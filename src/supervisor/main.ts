@@ -214,7 +214,8 @@ async function main(): Promise<void> {
 
   // Start dashboard API
   const apiPort = parseInt(process.env.SHARKCAGE_API_PORT ?? "18790", 10);
-  startDashboardApi(apiPort, configDir, pluginDir, approvals, hasAsrt);
+  const gatewayPort = parseInt(process.env.OPENCLAW_GATEWAY_PORT ?? "18789", 10);
+  startDashboardApi(apiPort, configDir, pluginDir, approvals, hasAsrt, `http://127.0.0.1:${gatewayPort}`);
 }
 
 // --- Shutdown ---

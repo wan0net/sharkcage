@@ -15,12 +15,18 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { SandboxViolation } from "../supervisor/types.js";
 import { SupervisorClient } from "./ipc.js";
 import { SkillMap } from "./skill-map.js";
 import { registerDashboardRoutes } from "./dashboard.js";
 import { registerAsrtBackend } from "./asrt-backend.js";
 import { scanSecrets, scanPII, scanCommand, isSensitiveFile, redact } from "./security-scanner.js";
+
+// --- File location (used to resolve repo root regardless of cwd) ---
+const __pluginDir = dirname(fileURLToPath(import.meta.url));
+const repoRoot = resolve(__pluginDir, "../..");
 
 // --- Config ---
 const home = process.env.HOME ?? ".";
@@ -408,7 +414,7 @@ export function register(api: OpenClawPluginApi): void {
       console.log(`[sharkcage] plugin install from chat: ${source}`);
       const { execFileSync } = await import("node:child_process");
       try {
-        execFileSync("npx", ["tsx", `${process.cwd()}/src/cli/main.ts`, "plugin", "add", source], {
+        execFileSync("npx", ["tsx", `${repoRoot}/src/cli/main.ts`, "plugin", "add", source], {
           stdio: "pipe",
           timeout: 60_000,
         });

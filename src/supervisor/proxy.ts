@@ -103,11 +103,29 @@ export function buildAllowedTargets(
       continue;
     }
 
+    if (c === "network.external") {
+      if (!cap.scope || cap.scope.length === 0) {
+        // Unrestricted outbound — wildcard sentinel
+        targets.push({ host: "*", port: 0, capability: c });
+      } else {
+        for (const entry of cap.scope) {
+          const { host, port } = parseHostPort(entry, 443);
+          targets.push({ host, port, capability: c });
+        }
+      }
+      continue;
+    }
+
     if (c === "network.internal") {
-      // scope contains explicit host:port pairs
-      for (const entry of (cap.scope ?? [])) {
-        const { host, port } = parseHostPort(entry, 80);
-        targets.push({ host, port, capability: c });
+      if (!cap.scope || cap.scope.length === 0) {
+        // Unrestricted internal — wildcard sentinel
+        targets.push({ host: "*", port: 0, capability: c });
+      } else {
+        // scope contains explicit host:port pairs
+        for (const entry of cap.scope) {
+          const { host, port } = parseHostPort(entry, 80);
+          targets.push({ host, port, capability: c });
+        }
       }
       continue;
     }
@@ -128,6 +146,10 @@ export function checkTarget(
   const normHost = (host === "localhost" || host === "::1") ? "127.0.0.1" : host;
 
   for (const target of allowed) {
+    // Wildcard sentinel — allow any host/port
+    if (target.host === "*") {
+      return { allowed: true, capability: target.capability };
+    }
     const normTarget = target.host === "localhost" ? "127.0.0.1" : target.host;
     if (normTarget === normHost && target.port === port) {
       return { allowed: true, capability: target.capability };

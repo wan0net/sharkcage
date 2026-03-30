@@ -15,7 +15,7 @@ function isValidName(name: string): boolean {
   return /^[a-zA-Z0-9_-]+$/.test(name);
 }
 
-const CORS_HEADERS = {
+let activeCorsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "http://127.0.0.1:18789",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
@@ -26,8 +26,14 @@ export function startDashboardApi(
   configDir: string,
   pluginDir: string,
   approvals: ApprovalStore,
-  hasAsrt: boolean
+  hasAsrt: boolean,
+  gatewayOrigin = "http://127.0.0.1:18789",
 ): void {
+  activeCorsHeaders = {
+    "Access-Control-Allow-Origin": gatewayOrigin,
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+  };
   const dataDir = `${configDir}/data`;
   const auditPath = `${dataDir}/audit.jsonl`;
   const approvalsDir = `${configDir}/approvals`;
@@ -35,7 +41,7 @@ export function startDashboardApi(
   const server = createServer((req: IncomingMessage, res: ServerResponse) => {
     // CORS preflight
     if (req.method === "OPTIONS") {
-      res.writeHead(204, CORS_HEADERS);
+      res.writeHead(204, activeCorsHeaders);
       res.end();
       return;
     }
@@ -215,6 +221,8 @@ function getAuditEntries(
 ): AuditEntry[] {
   if (!existsSync(auditPath)) return [];
 
+  const maxTail = Math.min(tail, 10000);
+
   const raw = readFileSync(auditPath, "utf-8");
   let entries: AuditEntry[] = [];
 
@@ -226,11 +234,20 @@ function getAuditEntries(
   if (skillFilter) entries = entries.filter((e) => e.skill === skillFilter);
   if (blockedOnly) entries = entries.filter((e) => e.blocked);
 
-  return entries.slice(-tail).map(sanitizeAuditEntry) as unknown as AuditEntry[];
+  return entries.slice(-maxTail).map(sanitizeAuditEntry) as unknown as AuditEntry[];
 }
 
 function getAuditStats(auditPath: string): Record<string, unknown> {
   if (!existsSync(auditPath)) return { total: 0, blocked: 0, errors: 0, bySkill: {} };
+
+  try {
+    const stat = statSync(auditPath);
+    if (stat.size > 100 * 1024 * 1024) {
+      return { total: 0, blocked: 0, errors: 0, bySkill: {}, error: "Audit log too large for stats" };
+    }
+  } catch {
+    return { total: 0, blocked: 0, errors: 0, bySkill: {} };
+  }
 
   const raw = readFileSync(auditPath, "utf-8");
   const lines = raw.trim().split("\n").filter(Boolean);
@@ -265,6 +282,6 @@ function safeReadJson(path: string): Record<string, unknown> | null {
 }
 
 function respond(res: ServerResponse, status: number, body: unknown): void {
-  res.writeHead(status, { "Content-Type": "application/json", ...CORS_HEADERS });
+  res.writeHead(status, { "Content-Type": "application/json", ...activeCorsHeaders });
   res.end(JSON.stringify(body));
 }
