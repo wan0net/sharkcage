@@ -1045,6 +1045,60 @@
         letter-spacing: 0.01em;
         white-space: nowrap;
         flex-shrink: 0;
+        position: relative;
+        cursor: help;
+        transition: transform 0.15s, box-shadow 0.15s;
+      }
+      .fd-box:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      }
+      .fd-box[data-tip]:hover::after {
+        content: attr(data-tip);
+        position: absolute;
+        bottom: calc(100% + 8px);
+        left: 50%;
+        transform: translateX(-50%);
+        background: var(--bg-card);
+        border: 1px solid var(--border-strong);
+        color: var(--text);
+        padding: 6px 10px;
+        border-radius: 6px;
+        font-size: 0.6rem;
+        font-weight: 400;
+        white-space: normal;
+        width: max-content;
+        max-width: 220px;
+        z-index: 100;
+        box-shadow: var(--shadow-md);
+        pointer-events: none;
+        line-height: 1.4;
+      }
+      .fd-box[data-tip]:hover::before {
+        content: '';
+        position: absolute;
+        bottom: calc(100% + 2px);
+        left: 50%;
+        transform: translateX(-50%);
+        border: 5px solid transparent;
+        border-top-color: var(--border-strong);
+        z-index: 101;
+      }
+      .fd-box.filter::before {
+        content: '🛡';
+        position: absolute;
+        top: -8px;
+        right: -8px;
+        font-size: 0.55rem;
+        line-height: 1;
+      }
+      .fd-box.blocked::before {
+        content: '🚫';
+        position: absolute;
+        top: -8px;
+        right: -8px;
+        font-size: 0.55rem;
+        line-height: 1;
       }
       .fd-box.green {
         background: color-mix(in srgb, var(--green) 14%, transparent);
@@ -1268,37 +1322,37 @@
         <div class="flow-diagram-body">
           <!-- Forward path row 1 -->
           <div class="fd-row">
-            <div class="fd-box green">User</div>
+            <div class="fd-box green" data-tip="The human — talks via Signal, Telegram, web chat, etc.">User</div>
             <div class="fd-arrow-h green" style="flex:1"><div class="fd-line"></div><div class="fd-head"></div></div>
-            <div class="fd-box green">AI</div>
+            <div class="fd-box green" data-tip="The LLM model (Claude, GPT, etc.) running inside OpenClaw">AI</div>
             <div class="fd-arrow-h green" style="flex:1"><div class="fd-line"></div><div class="fd-head"></div></div>
-            <div class="fd-box muted">OpenClaw</div>
+            <div class="fd-box muted" data-tip="AI agent gateway — routes messages, manages sessions, runs tools">OpenClaw</div>
             <div class="fd-arrow-h green" style="flex:1"><div class="fd-line"></div><div class="fd-head"></div></div>
-            <div class="fd-box muted">Plugin</div>
+            <div class="fd-box muted" data-tip="Sharkcage plugin — hooks into OpenClaw to intercept all tool calls">🛡 Plugin</div>
           </div>
           <div style="display:flex;justify-content:flex-end">
             <div class="fd-arrow-v green" style="margin-right:18px"><div class="fd-vline" style="min-height:10px"></div><div class="fd-vhead"></div></div>
           </div>
           <!-- Forward path row 2 -->
           <div class="fd-row" style="flex-direction:row-reverse">
-            <div class="fd-box muted">Supervisor</div>
+            <div class="fd-box muted" data-tip="Sharkcage supervisor — manages skill sandboxing, IPC, proxy, audit log">Supervisor</div>
             <div class="fd-arrow-h green" style="flex:1;transform:scaleX(-1)"><div class="fd-line"></div><div class="fd-head"></div></div>
-            <div class="fd-box muted">srt</div>
+            <div class="fd-box muted" data-tip="Anthropic Sandbox Runtime — kernel-level enforcement (Seatbelt on macOS, bubblewrap on Linux)">🔒 srt</div>
             <div class="fd-arrow-h green" style="flex:1;transform:scaleX(-1)"><div class="fd-line"></div><div class="fd-head"></div></div>
-            <div class="fd-box green">Skill</div>
+            <div class="fd-box green" data-tip="Third-party skill code — runs in its own ASRT sandbox with only approved capabilities">Skill</div>
           </div>
           <div style="display:flex;justify-content:flex-start">
             <div class="fd-arrow-v green" style="margin-left:18px"><div class="fd-vline" style="min-height:10px"></div><div class="fd-vhead"></div></div>
           </div>
           <!-- Return path -->
           <div class="fd-row">
-            <div class="fd-box green">User</div>
+            <div class="fd-box green" data-tip="The human — talks via Signal, Telegram, web chat, etc.">User</div>
             <div class="fd-arrow-h green" style="flex:1;transform:scaleX(-1)"><div class="fd-line"></div><div class="fd-head"></div></div>
-            <div class="fd-box green">AI</div>
+            <div class="fd-box green" data-tip="The LLM model (Claude, GPT, etc.) running inside OpenClaw">AI</div>
             <div class="fd-arrow-h green" style="flex:1;transform:scaleX(-1)"><div class="fd-line"></div><div class="fd-head"></div></div>
-            <div class="fd-box muted">OpenClaw</div>
+            <div class="fd-box muted" data-tip="AI agent gateway — routes messages, manages sessions, runs tools">OpenClaw</div>
             <div class="fd-arrow-h green" style="flex:1;transform:scaleX(-1)"><div class="fd-line"></div><div class="fd-head"></div></div>
-            <div class="fd-box muted">Plugin</div>
+            <div class="fd-box muted" data-tip="Sharkcage plugin — hooks into OpenClaw to intercept all tool calls">🛡 Plugin</div>
           </div>
         </div>
       </div>
@@ -1311,27 +1365,27 @@
         </div>
         <div class="flow-diagram-body">
           <div class="fd-row fd-row-center">
-            <div class="fd-box blue">AI</div>
+            <div class="fd-box blue" data-tip="The LLM model (Claude, GPT, etc.) running inside OpenClaw">AI</div>
             <div class="fd-arrow-h yellow" style="flex:1"><div class="fd-line"></div><div class="fd-head"></div></div>
-            <div class="fd-box muted">Plugin</div>
+            <div class="fd-box muted" data-tip="Sharkcage plugin — hooks into OpenClaw to intercept all tool calls">🛡 Plugin</div>
             <div class="fd-arrow-h red" style="flex:1"><div class="fd-line"></div><div class="fd-head"></div></div>
-            <div class="fd-decision">no approval</div>
+            <div class="fd-decision" data-tip="No approval file found at ~/.config/sharkcage/approvals/ — skill hasn't been approved yet">no approval</div>
           </div>
           <div class="fd-arrow-v yellow" style="align-self:flex-end;margin-right:6px"><div class="fd-vline"></div><div class="fd-vhead"></div></div>
           <div class="fd-row fd-row-center" style="justify-content:flex-end">
             <div class="fd-invisible-badge">AI&nbsp;CANNOT&nbsp;SEE</div>
             <div class="fd-arrow-h yellow" style="width:24px;transform:scaleX(-1);flex-shrink:0"><div class="fd-line" style="min-width:18px"></div><div class="fd-head"></div></div>
-            <div class="fd-box yellow">requireApproval</div>
+            <div class="fd-box yellow" data-tip="OpenClaw's native approval mechanism — prompts the user through their chat channel">requireApproval</div>
           </div>
           <div class="fd-arrow-v yellow" style="align-self:center"><div class="fd-vline"></div><div class="fd-vhead"></div></div>
           <div class="fd-row fd-row-center">
-            <div class="fd-box green">User approves</div>
+            <div class="fd-box green" data-tip="User responds in their chat channel. The AI never sees this message.">User approves</div>
           </div>
           <div class="fd-arrow-v green" style="align-self:center"><div class="fd-vline"></div><div class="fd-vhead"></div></div>
           <div class="fd-row fd-row-center">
-            <div class="fd-box green">approval file written</div>
+            <div class="fd-box green" data-tip="Written to ~/.config/sharkcage/approvals/skill.json — persisted, so user is only asked once">approval file written</div>
             <div class="fd-arrow-h green" style="flex:1"><div class="fd-line"></div><div class="fd-head"></div></div>
-            <div class="fd-box green">next call succeeds</div>
+            <div class="fd-box green" data-tip="The tool call is retried automatically. This time the approval file exists.">next call succeeds</div>
           </div>
         </div>
       </div>
@@ -1352,7 +1406,7 @@
           <div class="fd-row" style="justify-content:flex-end">
             <div class="fd-box red">violation</div>
             <div class="fd-arrow-h red" style="width:32px;transform:scaleX(-1);flex-shrink:0"><div class="fd-line" style="min-width:22px"></div><div class="fd-head"></div></div>
-            <div class="fd-box muted">Supervisor</div>
+            <div class="fd-box muted" data-tip="Sharkcage supervisor — manages skill sandboxing, IPC, proxy, audit log">Supervisor</div>
           </div>
           <div class="fd-arrow-v yellow" style="align-self:center"><div class="fd-vline"></div><div class="fd-vhead"></div></div>
           <div class="fd-row fd-row-center" style="gap:8px">
@@ -1391,7 +1445,7 @@
           </div>
           <div class="fd-arrow-v red" style="align-self:center"><div class="fd-vline"></div><div class="fd-vhead"></div></div>
           <div class="fd-row fd-row-center">
-            <div class="fd-box muted">pattern match</div>
+            <div class="fd-box muted" data-tip="Checked against security-patterns.json — 14 secret patterns, 15 dangerous commands, 15 sensitive files">🛡 pattern match</div>
             <div class="fd-arrow-h red" style="flex:1"><div class="fd-line"></div><div class="fd-head"></div></div>
             <div class="fd-blocked">BLOCKED</div>
           </div>
@@ -1563,22 +1617,22 @@
   <section id="quickstart">
     <div class="reveal">
       <div class="section-label">Quick Start</div>
-      <h2 class="section-heading">Three commands. Running.</h2>
-      <p class="section-desc">Clone, bootstrap, start. The bootstrap script detects your platform, installs the sandbox backend, and generates initial configs.</p>
+      <h2 class="section-heading">One line. Running.</h2>
+      <p class="section-desc">Installs sharkcage, OpenClaw, and srt. Sets up the sandbox. Adds <code>sc</code> to your PATH.</p>
     </div>
     <div class="code-block reveal delay-1">
       <div class="code-header">
         <div class="dots"><span></span><span></span><span></span></div>
         <span class="filename">terminal</span>
       </div>
-      <pre><code><span class="comment"># Clone the repo</span>
-<span class="cmd">git clone</span> <span class="str">https://github.com/wan0net/sharkcage.git</span>
+      <pre><code><span class="comment"># One-line install</span>
+<span class="cmd">curl</span> <span class="arg">-fsSL</span> <span class="str">https://raw.githubusercontent.com/wan0net/sharkcage/main/install.sh</span> | <span class="cmd">bash</span>
 
-<span class="comment"># Bootstrap -- detects platform, installs srt backend</span>
-<span class="cmd">cd</span> <span class="arg">sharkcage</span> && <span class="cmd">./bootstrap.sh</span>
+<span class="comment"># Setup wizard (configures OpenClaw + sandbox mode)</span>
+<span class="cmd">sc init</span>
 
-<span class="comment"># Initialize config and start the supervisor</span>
-<span class="cmd">sc init</span> && <span class="cmd">sc start</span></code></pre>
+<span class="comment"># Start everything</span>
+<span class="cmd">sc start</span></code></pre>
     </div>
   </section>
 
@@ -1617,7 +1671,7 @@
             <td>Show running skills, sandbox state, and active policies</td>
           </tr>
           <tr>
-            <td class="cli-cmd">sc plugin add &lt;url&gt;</td>
+            <td class="cli-cmd">sc skill add &lt;url&gt;</td>
             <td>Install a skill from a repository URL</td>
           </tr>
           <tr>
@@ -1643,6 +1697,18 @@
           <tr>
             <td class="cli-cmd">sc config add-service &lt;host&gt;</td>
             <td>Add an allowed host to the outer sandbox network policy</td>
+          </tr>
+          <tr>
+            <td class="cli-cmd">sc sign &lt;path&gt;</td>
+            <td>Ed25519 sign a skill manifest</td>
+          </tr>
+          <tr>
+            <td class="cli-cmd">sc trust &lt;fingerprint&gt;</td>
+            <td>Trust a skill signer's public key</td>
+          </tr>
+          <tr>
+            <td class="cli-cmd">sc upgrade</td>
+            <td>Safely upgrade OpenClaw with backup and rollback</td>
           </tr>
         </tbody>
       </table>
