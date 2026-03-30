@@ -170,12 +170,22 @@ export default async function init() {
           execFileSync("sudo", ["cp", "-r", `${home}/.sharkcage/.`, `/home/${username}/.sharkcage/`], { stdio: "pipe" });
           execFileSync("sudo", ["chown", "-R", `${username}:${username}`, `/home/${username}`], { stdio: "pipe" });
 
-          // Also set up passwordless sudo for running openclaw as the dedicated user
-          const sudoersRule = `${process.env.USER} ALL=(${username}) NOPASSWD: ALL\n`;
-          execFileSync("sudo", ["tee", `/etc/sudoers.d/sharkcage-${username}`], {
-            input: sudoersRule, stdio: ["pipe", "pipe", "pipe"],
+          // Optionally set up passwordless sudo for running openclaw as the dedicated user
+          const addSudoers = await p.confirm({
+            message: `Add sudoers rule so 'sc start' can run as ${username} without a password?`,
+            initialValue: true,
           });
-          execFileSync("sudo", ["chmod", "440", `/etc/sudoers.d/sharkcage-${username}`], { stdio: "pipe" });
+
+          if (!p.isCancel(addSudoers) && addSudoers) {
+            const sudoersRule = `${process.env.USER} ALL=(${username}) NOPASSWD: ALL\n`;
+            execFileSync("sudo", ["tee", `/etc/sudoers.d/sharkcage-${username}`], {
+              input: sudoersRule, stdio: ["pipe", "pipe", "pipe"],
+            });
+            execFileSync("sudo", ["chmod", "440", `/etc/sudoers.d/sharkcage-${username}`], { stdio: "pipe" });
+            p.log.success(`Sudoers rule added. 'sc start' won't prompt for a password.`);
+          } else {
+            p.log.info(`No sudoers rule added. 'sc start' will require 'sudo sc start'.`);
+          }
 
           p.log.success(`User "${username}" created. OpenClaw will run as this user.`);
         } catch (err) {
