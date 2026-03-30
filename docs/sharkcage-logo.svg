@@ -24,6 +24,6 @@
     <line x1="85" y1="75" x2="105" y2="60" stroke="#3b82f6" stroke-width="2" stroke-linecap="round" opacity="0.2"/>
   </g>
 
-  <!-- "yeet" text -->
-  <text x="100" y="168" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-weight="700" font-size="28" fill="#3b82f6" letter-spacing="-0.03em">yeet</text>
+  <!-- "sharkcage" text -->
+  <text x="100" y="168" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-weight="700" font-size="28" fill="#3b82f6" letter-spacing="-0.03em">sharkcage</text>
 </svg>

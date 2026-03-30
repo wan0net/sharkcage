@@ -1493,36 +1493,65 @@
   <section id="architecture">
     <div class="reveal">
       <div class="section-label">Architecture</div>
-      <h2 class="section-heading">Small surface. Auditable.</h2>
-      <p class="section-desc">The entire security-critical path fits in six files. Every detection pattern lives in a single JSON. No hidden logic.</p>
+      <h2 class="section-heading">Small enough to audit. All of it.</h2>
+      <p class="section-desc">The entire security-critical path is 7 files, ~1,735 lines. A competent reviewer reads the complete enforcement model in half a day.</p>
     </div>
     <div class="stats-grid">
       <div class="stat-card reveal delay-1">
-        <div class="stat-val">29</div>
-        <div class="stat-label">Total files</div>
+        <div class="stat-val">5,839</div>
+        <div class="stat-label">Total lines</div>
       </div>
       <div class="stat-card reveal delay-2">
-        <div class="stat-val">~5,700</div>
-        <div class="stat-label">Lines of code</div>
+        <div class="stat-val">1,735</div>
+        <div class="stat-label">Security-critical lines</div>
       </div>
       <div class="stat-card reveal delay-3">
-        <div class="stat-val">6</div>
-        <div class="stat-label">Security-critical files</div>
+        <div class="stat-val">3</div>
+        <div class="stat-label">Runtime dependencies</div>
       </div>
     </div>
-    <div class="stats-grid" style="margin-top:14px;">
-      <div class="stat-card reveal delay-1">
-        <div class="stat-val">~1,760</div>
-        <div class="stat-label">Lines in audit path</div>
+
+    <div class="reveal delay-1" style="margin-top:32px">
+      <h3 style="font-size:1rem;color:var(--text);margin-bottom:16px">What to audit</h3>
+      <p style="color:var(--text-mid);font-size:0.82rem;margin-bottom:16px">Read these 7 files in order. That's the entire security model.</p>
+      <div style="overflow-x:auto">
+        <table class="comparison-table" style="font-size:0.78rem">
+          <thead><tr><th>File</th><th>Lines</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td><code>security-patterns.json</code></td><td>77</td><td>Every detection pattern — secrets, PII, dangerous commands, sensitive files</td></tr>
+            <tr><td><code>supervisor/sandbox.ts</code></td><td>100</td><td>ASRT config builder — maps capabilities to kernel sandbox policies</td></tr>
+            <tr><td><code>supervisor/proxy.ts</code></td><td>202</td><td>Localhost proxy — token auth, per-skill port enforcement (protocol via library)</td></tr>
+            <tr><td><code>supervisor/worker.ts</code></td><td>221</td><td>Sandbox execution — spawns skills in srt, detects violations</td></tr>
+            <tr><td><code>supervisor/main.ts</code></td><td>224</td><td>IPC server — routes tool calls, reads approvals from disk</td></tr>
+            <tr><td><code>plugin/asrt-backend.ts</code></td><td>327</td><td>OpenClaw sandbox backend — per-session ASRT policies</td></tr>
+            <tr><td><code>plugin/index.ts</code></td><td>584</td><td>Plugin hooks — approval, scanning, redaction, violation flow</td></tr>
+          </tbody>
+        </table>
       </div>
-      <div class="stat-card reveal delay-2">
-        <div class="stat-val">1</div>
-        <div class="stat-label">Pattern config file</div>
+    </div>
+
+    <div class="reveal delay-2" style="margin-top:28px">
+      <h3 style="font-size:1rem;color:var(--text);margin-bottom:16px">Trust chain</h3>
+      <div class="code-block">
+        <div class="code-header"><div class="dots"><span></span><span></span><span></span></div><span class="filename">dependencies</span></div>
+        <pre><code><span class="comment"># Your code (5,839 lines)</span>
+<span class="cmd">src/</span>                         <span class="comment"># 32 files, TypeScript</span>
+
+<span class="comment"># Runtime dependencies (3)</span>
+<span class="cmd">@pondwader/socks5-server</span>     <span class="comment"># ~15KB — SOCKS5 protocol (same lib srt uses)</span>
+<span class="cmd">commander</span>                    <span class="comment"># ~50KB — CLI argument parsing</span>
+<span class="cmd">@clack/prompts</span>               <span class="comment"># ~30KB — setup wizard UI</span>
+
+<span class="comment"># System (not bundled)</span>
+<span class="cmd">node:crypto</span>                  <span class="comment"># Ed25519 signing, SHA-256 hashing</span>
+<span class="cmd">node:net, node:fs</span>            <span class="comment"># IPC, file access</span>
+<span class="cmd">srt</span>                          <span class="comment"># Anthropic Sandbox Runtime — kernel enforcement</span></code></pre>
       </div>
-      <div class="stat-card reveal delay-3">
-        <div class="stat-val">0</div>
-        <div class="stat-label">Hidden dependencies</div>
-      </div>
+    </div>
+
+    <div class="reveal delay-3" style="margin-top:28px">
+      <h3 style="font-size:1rem;color:var(--text);margin-bottom:16px">What's NOT security-critical</h3>
+      <p style="color:var(--text-mid);font-size:0.82rem">The remaining ~4,100 lines are CLI commands (init, start, stop, skill management, signing, upgrade), the dashboard HTML, log formatting, and type definitions. Bugs there affect UX, not security boundaries.</p>
     </div>
   </section>
 

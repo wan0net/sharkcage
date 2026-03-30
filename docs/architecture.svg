@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="-20 -20 1120 740" font-family="system-ui, -apple-system, sans-serif">
   <!-- Title -->
-  <text x="420" y="20" font-size="26" font-weight="bold" text-anchor="middle" fill="#1e1e1e">Yeet — System Architecture</text>
+  <text x="420" y="20" font-size="26" font-weight="bold" text-anchor="middle" fill="#1e1e1e">Sharkcage — System Architecture</text>
   <text x="420" y="42" font-size="14" text-anchor="middle" fill="#757575">Trust layer for OpenClaw</text>
 
   <!-- Outer ASRT Sandbox -->
@@ -50,9 +50,9 @@
 
   <line x1="410" y1="345" x2="410" y2="365" stroke="#8b5cf6" stroke-width="2" marker-end="url(#arr)"/>
 
-  <!-- Yeet Capability Gate -->
+  <!-- Sharkcage Capability Gate -->
   <rect x="180" y="370" width="460" height="50" rx="8" fill="#fff3bf" stroke="#f59e0b" stroke-width="2.5"/>
-  <text x="410" y="392" font-size="16" text-anchor="middle" fill="#1e1e1e" font-weight="600">Yeet Capability Gate</text>
+  <text x="410" y="392" font-size="16" text-anchor="middle" fill="#1e1e1e" font-weight="600">Sharkcage Capability Gate</text>
   <text x="410" y="410" font-size="12" text-anchor="middle" fill="#757575">Approve once at install — enforce always — no runtime prompts</text>
 
   <line x1="410" y1="420" x2="410" y2="440" stroke="#f59e0b" stroke-width="2" marker-end="url(#arr)"/>
@@ -115,12 +115,12 @@
 
   <rect x="860" y="360" width="170" height="70" rx="8" fill="#d3f9d8" stroke="#22c55e" stroke-width="1.5"/>
   <text x="945" y="385" font-size="13" text-anchor="middle" fill="#1e1e1e">Fleet Node</text>
-  <text x="945" y="402" font-size="11" text-anchor="middle" fill="#757575">OpenClaw + yeet</text>
+  <text x="945" y="402" font-size="11" text-anchor="middle" fill="#757575">OpenClaw + sharkcage</text>
   <text x="945" y="416" font-size="11" text-anchor="middle" fill="#757575">+ dual ASRT</text>
 
   <rect x="860" y="440" width="170" height="70" rx="8" fill="#d3f9d8" stroke="#22c55e" stroke-width="1.5"/>
   <text x="945" y="465" font-size="13" text-anchor="middle" fill="#1e1e1e">GPU Node</text>
-  <text x="945" y="482" font-size="11" text-anchor="middle" fill="#757575">OpenClaw + yeet</text>
+  <text x="945" y="482" font-size="11" text-anchor="middle" fill="#757575">OpenClaw + sharkcage</text>
   <text x="945" y="496" font-size="11" text-anchor="middle" fill="#757575">+ dual ASRT</text>
 
   <!-- Fleet arrows -->
@@ -139,7 +139,7 @@
   <rect x="870" y="600" width="12" height="12" fill="#ffc9c9" stroke="#ef4444" stroke-width="1"/>
   <text x="888" y="611" font-size="11" fill="#1e1e1e">ASRT Sandbox (kernel)</text>
   <rect x="870" y="618" width="12" height="12" fill="#fff3bf" stroke="#f59e0b" stroke-width="1"/>
-  <text x="888" y="629" font-size="11" fill="#1e1e1e">Yeet trust layer</text>
+  <text x="888" y="629" font-size="11" fill="#1e1e1e">Sharkcage trust layer</text>
   <rect x="870" y="636" width="12" height="12" fill="#dbe4ff" stroke="#4a9eed" stroke-width="1"/>
   <text x="888" y="647" font-size="11" fill="#1e1e1e">OpenClaw (unmodified)</text>
   <rect x="870" y="654" width="12" height="12" fill="#b2f2bb" stroke="#22c55e" stroke-width="1"/>
