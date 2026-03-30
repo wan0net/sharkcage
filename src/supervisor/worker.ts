@@ -5,19 +5,41 @@ import { buildAsrtConfig, writeAsrtConfig } from "./sandbox.js";
 import type { SkillApproval } from "./types.js";
 import type { TokenRegistry } from "./proxy.js";
 
+/** Strip control characters and newlines from a string, limit to maxLen chars. */
+function sanitiseField(value: string, maxLen = 256): string {
+  // eslint-disable-next-line no-control-regex
+  return value.replace(/[\x00-\x1F\x7F]/g, "").slice(0, maxLen);
+}
+
+/** Return true if the string looks like a valid hostname or IP address. */
+function isValidHostOrIp(value: string): boolean {
+  // IPv4
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(value)) return true;
+  // IPv6 (simplified)
+  if (/^[0-9a-fA-F:]{2,39}$/.test(value)) return true;
+  // Hostname / domain (RFC 952 / 1123 labels, including localhost)
+  if (/^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$/.test(value)) return true;
+  return false;
+}
+
 /**
  * Parse sandbox violation details from subprocess stderr.
  * Returns null if no recognisable violation is found.
  * Detection is best-effort regex — not exhaustive.
  */
 export function parseSandboxViolation(stderr: string): SandboxViolation | null {
+  const sanitisedDetail = sanitiseField(stderr.slice(0, 500), 500);
+
   // Network: ECONNREFUSED / ENOTFOUND — extract hostname
   const networkMatch = stderr.match(/(?:ECONNREFUSED|ENOTFOUND)\s+([^\s:,]+)/);
   if (networkMatch) {
+    const rawTarget = sanitiseField(networkMatch[1]);
+    // Validate: must look like a real hostname or IP, not injected garbage
+    const target = isValidHostOrIp(rawTarget) ? rawTarget : "invalid-target";
     return {
       type: "network",
-      target: networkMatch[1],
-      detail: stderr.slice(0, 500),
+      target,
+      detail: sanitisedDetail,
     };
   }
 
@@ -26,8 +48,8 @@ export function parseSandboxViolation(stderr: string): SandboxViolation | null {
   if (fsMatch) {
     return {
       type: "filesystem",
-      target: fsMatch[1],
-      detail: stderr.slice(0, 500),
+      target: sanitiseField(fsMatch[1]),
+      detail: sanitisedDetail,
     };
   }
 
@@ -37,8 +59,8 @@ export function parseSandboxViolation(stderr: string): SandboxViolation | null {
     const execMatch = stderr.match(/denied[^\n]*?(\/[^\s,'"]+|[a-zA-Z][\w.-]+)/);
     return {
       type: "exec",
-      target: execMatch ? execMatch[1] : "unknown",
-      detail: stderr.slice(0, 500),
+      target: execMatch ? sanitiseField(execMatch[1]) : "unknown",
+      detail: sanitisedDetail,
     };
   }
 

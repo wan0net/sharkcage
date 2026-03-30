@@ -39,8 +39,19 @@ export class ApprovalStore {
     console.log(`loaded ${this.cache.size} approval(s)`);
   }
 
-  /** Get approval for a skill */
+  /** Get approval for a skill — re-reads from disk each call so new approvals written by the plugin are picked up immediately */
   get(skill: string): SkillApproval | null {
+    const filePath = join(this.dir, `${skill}.json`);
+    try {
+      const raw = readFileSync(filePath, "utf-8");
+      const approval = JSON.parse(raw) as SkillApproval;
+      if (approval.skill) {
+        this.cache.set(approval.skill, approval);
+        return approval;
+      }
+    } catch {
+      // File doesn't exist or is unreadable — fall through to cache
+    }
     return this.cache.get(skill) ?? null;
   }
 

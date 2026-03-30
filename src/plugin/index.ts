@@ -32,7 +32,7 @@ const socketPath = process.env.SHARKCAGE_SOCKET ?? `${dataDir}/supervisor.sock`;
 const supervisor = new SupervisorClient(socketPath);
 const skillMap = new SkillMap();
 
-/** Violations awaiting user approval, keyed by skill name */
+/** Violations awaiting user approval, keyed by `${skill}:${toolName}` to reduce collision between concurrent calls */
 const pendingViolations = new Map<string, SandboxViolation>();
 
 // --- Violation helpers ---
@@ -173,7 +173,7 @@ export function register(api: OpenClawPluginApi): void {
           const response = await supervisor.call(skillName, toolName, params);
           if (response.violation) {
             // Store the violation for the before_tool_call hook to surface to the user
-            pendingViolations.set(skillName, response.violation);
+            pendingViolations.set(`${skillName}:${toolName}`, response.violation);
             return `This action requires additional permissions. Requesting approval...`;
           }
           if (response.error) return response.error;
@@ -194,9 +194,9 @@ export function register(api: OpenClawPluginApi): void {
     if (!skill) return undefined; // not a sharkcage-managed skill, pass through
 
     // --- Check for a pending sandbox violation from the previous call ---
-    const pendingViolation = pendingViolations.get(skill);
+    const pendingViolation = pendingViolations.get(`${skill}:${toolName}`);
     if (pendingViolation) {
-      pendingViolations.delete(skill);
+      pendingViolations.delete(`${skill}:${toolName}`);
 
       // If already on the deny list, silently block without prompting
       if (isDenied(skill, pendingViolation)) {
@@ -269,7 +269,7 @@ export function register(api: OpenClawPluginApi): void {
             const approval = {
               skill,
               version,
-              capabilities: capabilities.map((c) => c.capability),
+              capabilities: capabilities,
               approvedAt: new Date().toISOString(),
               approvedVia: "channel",
             };
@@ -293,8 +293,9 @@ export function register(api: OpenClawPluginApi): void {
     const params = event.params ?? {};
     const toolName = event.toolName;
 
-    // Block dangerous commands in exec/bash tool calls
-    if (toolName === "exec" || toolName === "bash" || toolName === "process") {
+    // Block dangerous commands in exec/bash/shell/terminal/run/computer tool calls
+    const COMMAND_TOOL_NAMES = new Set(["exec", "bash", "process", "shell", "run", "terminal", "computer"]);
+    if (COMMAND_TOOL_NAMES.has(toolName)) {
       const cmd = String(params.command ?? params.cmd ?? params.script ?? "");
       if (cmd) {
         const danger = scanCommand(cmd);
@@ -312,7 +313,8 @@ export function register(api: OpenClawPluginApi): void {
     }
 
     // Block access to sensitive files
-    if (toolName === "read" || toolName === "write" || toolName === "edit") {
+    const FILE_TOOL_NAMES = new Set(["read", "write", "edit", "file_read", "file_write", "apply_patch"]);
+    if (FILE_TOOL_NAMES.has(toolName)) {
       const path = String(params.path ?? params.file_path ?? "");
       if (path && isSensitiveFile(path)) {
         console.log(`[sharkcage-security] blocked sensitive file access: ${path}`);
@@ -324,6 +326,8 @@ export function register(api: OpenClawPluginApi): void {
   }, { priority: 200 });
 
   // --- Hook 3: after_tool_call (priority 50) — audit logging ---
+  // Sharkcage-managed skills are audited by the supervisor directly,
+  // so we only log non-sharkcage tool calls here to avoid double-counting.
   api.on("after_tool_call", async (event: AfterToolCallEvent, _ctx: HookContext) => {
     const skill = skillMap.getSkill(event.toolName);
     if (skill) return;
@@ -361,8 +365,9 @@ export function register(api: OpenClawPluginApi): void {
   api.on("before_message_write", (event: BeforeMessageWriteEvent, _ctx: HookContext) => {
     const content = typeof event.message?.content === "string" ? event.message.content : "";
 
-    // Block sharkcage internal messages
-    if (content.includes("[sharkcage]") || content.includes("sc yes ") || content.includes("sc no ")) {
+    // Block sharkcage internal messages — use lowercase + regex to prevent case-based bypass
+    const lc = content.toLowerCase();
+    if (lc.includes("[sharkcage]") || /\bsc\s+yes\b/i.test(content) || /\bsc\s+no\b/i.test(content)) {
       return { block: true };
     }
 
@@ -379,12 +384,22 @@ export function register(api: OpenClawPluginApi): void {
   }, { priority: 100 });
 
   // --- Fleet webhook endpoint ---
+  const FLEET_WEBHOOK_MAX_BYTES = 1 * 1024 * 1024; // 1 MB
   api.registerHttpRoute({
     path: "/sharkcage/fleet/webhook",
     auth: "gateway",
     handler: async (req, res) => {
       const chunks: Buffer[] = [];
-      for await (const chunk of req) chunks.push(chunk);
+      let totalBytes = 0;
+      for await (const chunk of req) {
+        totalBytes += chunk.length;
+        if (totalBytes > FLEET_WEBHOOK_MAX_BYTES) {
+          res.writeHead(413, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Payload too large" }));
+          return;
+        }
+        chunks.push(chunk);
+      }
       const body = JSON.parse(Buffer.concat(chunks).toString());
       console.log("[sharkcage] fleet webhook:", JSON.stringify(body).slice(0, 200));
       // TODO: route to appropriate channel for notification

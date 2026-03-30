@@ -1,18 +1,23 @@
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { homedir } from "node:os";
 import type { AsrtConfig, SkillCapability } from "./types.js";
+
+/** Resolved home directory — used instead of `~` so srt doesn't have to expand it */
+const HOME = homedir();
 
 /** Paths that are ALWAYS denied regardless of capabilities */
 const MANDATORY_DENY_READ = [
-  "~/.ssh",
-  "~/.aws",
-  "~/.gnupg",
-  "~/.config/sharkcage/approvals",
-  "~/.config/sharkcage/gateway-sandbox.json",
-  "~/.bashrc",
-  "~/.zshrc",
-  "~/.gitconfig",
-  "~/.netrc",
-  "~/.npmrc",
+  `${HOME}/.ssh`,
+  `${HOME}/.aws`,
+  `${HOME}/.gnupg`,
+  `${HOME}/.config/sharkcage/approvals`,
+  `${HOME}/.config/sharkcage/gateway-sandbox.json`,
+  `${HOME}/.bashrc`,
+  `${HOME}/.zshrc`,
+  `${HOME}/.gitconfig`,
+  `${HOME}/.netrc`,
+  `${HOME}/.npmrc`,
 ];
 
 /**
@@ -65,11 +70,16 @@ export function buildAsrtConfig(
 }
 
 /**
- * Write ASRT config to a temp file, return the path.
+ * Write ASRT config to a secure user-owned directory, return the path.
+ * Uses a random suffix to prevent a sandboxed skill from predicting or
+ * overwriting its own config file.
  */
 export function writeAsrtConfig(skillName: string, config: AsrtConfig): string {
-  const tmpDir = process.env.TMPDIR ?? "/tmp";
-  const path = `${tmpDir}/sharkcage-sandbox-${skillName}.json`;
-  writeFileSync(path, JSON.stringify(config, null, 2));
+  const configDir = process.env.SHARKCAGE_CONFIG_DIR ?? `${HOME}/.config/sharkcage`;
+  const sandboxConfigDir = `${configDir}/data/sandbox-configs`;
+  mkdirSync(sandboxConfigDir, { recursive: true });
+  const suffix = randomBytes(8).toString("hex");
+  const path = `${sandboxConfigDir}/sandbox-${skillName}-${suffix}.json`;
+  writeFileSync(path, JSON.stringify(config, null, 2), { mode: 0o600 });
   return path;
 }

@@ -18,7 +18,6 @@ const REP_HOST_UNREACHABLE = 0x04;
 const REP_CMD_NOT_SUPPORTED = 0x07;
 const REP_ATYP_NOT_SUPPORTED = 0x08;
 
-const SUPERVISOR_API_PORT = 18790;
 const PROXY_PORT = 18800;
 const TOKEN_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
@@ -91,8 +90,8 @@ export function buildAllowedTargets(
 ): AllowedTarget[] {
   const targets: AllowedTarget[] = [];
 
-  // Always allow loopback connections to the supervisor API and proxy itself
-  targets.push({ host: "127.0.0.1", port: SUPERVISOR_API_PORT, capability: "internal" });
+  // Allow loopback connections to the proxy itself (needed for the SOCKS5 handshake).
+  // The supervisor API (18790) is intentionally NOT allowed — skills must not reach it.
   targets.push({ host: "127.0.0.1", port: PROXY_PORT, capability: "internal" });
 
   for (const cap of capabilities) {

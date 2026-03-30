@@ -9,7 +9,7 @@
  */
 
 import { createServer, type Socket } from "node:net";
-import { mkdirSync, unlinkSync } from "node:fs";
+import { chmodSync, mkdirSync, unlinkSync } from "node:fs";
 import type { ToolCallRequest, ToolCallResponse } from "./types.js";
 import { ApprovalStore } from "./approvals.js";
 import { AuditLog } from "./audit.js";
@@ -119,6 +119,8 @@ function startServer(): Promise<void> {
     });
 
     server.listen(socketPath, () => {
+      // Restrict socket to owner-only so other local users cannot connect
+      try { chmodSync(socketPath, 0o600); } catch { /* best-effort */ }
       console.log(`listening on ${socketPath}`);
       resolve();
     });
