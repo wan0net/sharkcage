@@ -1,7 +1,6 @@
 import { homedir } from "node:os";
 
 const HOME = homedir();
-const CONFIG_DIR = process.env.SHARKCAGE_CONFIG_DIR ?? `${HOME}/.config/sharkcage`;
 
 /**
  * Paths that are ALWAYS denied regardless of capabilities or session config.
@@ -29,10 +28,8 @@ export const MANDATORY_DENY_READ: string[] = [
   `${HOME}/.bash_history`,
   `${HOME}/.zsh_history`,
   `${HOME}/.gitconfig`,
-  // Sharkcage internals (prevent AI from reading sandbox policies or approvals)
-  `${CONFIG_DIR}/approvals`,
-  `${CONFIG_DIR}/data/sessions`,
-  `${CONFIG_DIR}/gateway.json`,
+  // Sharkcage internals (approvals are write-gated, not read-gated —
+  // the AI can see its constraints but can't modify them)
 ];
 
 /** IPC request from OpenClaw plugin to supervisor */
