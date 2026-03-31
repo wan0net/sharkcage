@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>sharkcage — Kernel-level sandboxing for AI agents</title>
-<meta name="description" content="OpenClaw, but you trust it. Kernel-level sandboxing for AI agents. Every command, file access, and network call enforced at the OS level.">
+<title>sharkcage — Built-in OS kernel sandboxing for AI agents</title>
+<meta name="description" content="OpenClaw, but you trust it. Built-in OS kernel sandboxing for AI agents using proven primitives (bubblewrap, seccomp, Seatbelt). Every command, file access, and network call enforced at the OS level.">
 <script>(function(){var t=localStorage.getItem('theme')||'dark';document.documentElement.setAttribute('data-theme',t)})();</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -896,7 +896,7 @@
     </div>
     <h1>shark<span class="accent">cage</span></h1>
     <p class="tagline">OpenClaw, but you trust it.</p>
-    <p class="oneliner">Kernel-level sandboxing for AI agents. Every command, file access, and network call enforced at the OS level.</p>
+    <p class="oneliner">Built-in OS kernel sandboxing for AI agents. Same proven primitives as Flatpak, Snap, and Chrome &mdash; bubblewrap + seccomp on Linux, Seatbelt on macOS. Every command, file access, and network call enforced at the OS level.</p>
     <div class="hero-buttons">
       <a href="https://github.com/wan0net/sharkcage" class="btn btn-primary">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
@@ -905,6 +905,12 @@
       <a href="unified-platform" class="btn btn-secondary">Documentation</a>
     </div>
   </header>
+
+  <div style="max-width:680px;margin:0 auto;padding:0 24px;">
+    <p style="color:var(--text-mid);font-size:0.9rem;line-height:1.6;border-left:2px solid var(--border-strong);padding-left:16px;margin:32px 0;">
+      Built by a security engineer who got tired of <code>--dangerously-skip-permissions</code>. Vibe coded with AI, hardened by a human who kept asking "but what if..." until the sandbox actually held up. Multiple automated security review passes, Trivy and Semgrep on every build. The security model was discovered bottom-up &mdash; by trying things, watching them break, and deciding what actually matters.
+    </p>
+  </div>
 
   <hr class="divider">
 
@@ -1671,7 +1677,7 @@
           </tr>
           <tr>
             <td class="cli-cmd">sc config add-service &lt;host&gt;</td>
-            <td>Add an allowed host to the outer sandbox network policy</td>
+            <td>Add an allowed host to the sandbox network policy</td>
           </tr>
           <tr>
             <td class="cli-cmd">sc sign &lt;path&gt;</td>
