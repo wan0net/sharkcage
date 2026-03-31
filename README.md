@@ -2,7 +2,7 @@
 
 OpenClaw, but you trust it.
 
-Sharkcage registers as OpenClaw's **sandbox backend**, wrapping every AI-directed tool call with `srt` (Anthropic Sandbox Runtime). Every bash command, file read/write, and skill execution is kernel-sandboxed. Capabilities approved once at install, enforced always.
+Sharkcage registers as OpenClaw's **sandbox backend**, wrapping every AI-directed tool call with `srt` (Anthropic Sandbox Runtime). Every bash command, file read/write, and skill execution is sandboxed using built-in OS kernel primitives. Capabilities approved once at install, enforced always.
 
 > **No new sandboxing tech.** Sharkcage uses the same battle-tested OS primitives that Flatpak, Snap, and Chrome have relied on for years: [bubblewrap](https://github.com/containers/bubblewrap) + seccomp on Linux, Seatbelt (sandbox-exec) on macOS. Wrapped by Anthropic's [srt](https://github.com/anthropic-experimental/sandbox-runtime). These are proven, kernel-enforced boundaries — not a custom sandbox or a JS shim.
 >
