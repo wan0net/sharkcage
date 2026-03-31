@@ -99,11 +99,9 @@ interface OpenClawPluginApiWithSandbox {
 
 // --- Policy path helpers ---
 
-const home = process.env.HOME;
-if (!home) throw new Error("[sharkcage] HOME environment variable is not set — cannot configure sandbox");
+const installDir = process.env.SHARKCAGE_DIR ?? "/opt/sharkcage";
 const sessionPolicyDir = join(
-  process.env.SHARKCAGE_DATA_DIR ??
-    `${home}/.config/sharkcage/data`,
+  process.env.SHARKCAGE_DATA_DIR ?? `${installDir}/var`,
   "sessions"
 );
 
@@ -153,23 +151,23 @@ function buildSessionPolicy(
         workspaceDir,
         agentWorkspaceDir,
         // Scoped home subdirs — not the bare home dir
-        `${home}/.openclaw/workspace`,
-        `${home}/.openclaw/sandboxes`,
-        `${home}/.openclaw/tmp`,
+        `${installDir}/.openclaw/workspace`,
+        `${installDir}/.openclaw/sandboxes`,
+        `${installDir}/.openclaw/tmp`,
         // Runtime dependencies
-        `${home}/.node_modules`,
-        `${home}/.npm`,
-        `${home}/.nvm`,
-        `${home}/.local`,
+        `${installDir}/.node_modules`,
+        `${installDir}/.npm`,
+        `${installDir}/.nvm`,
+        `${installDir}/.local`,
       ],
       allowWrite: [
         // Private tmp inside home — not shared /tmp
-        `${home}/.openclaw/tmp`,
+        `${installDir}/.openclaw/tmp`,
         "/var/folders",     // macOS temp
         workspaceDir,
         agentWorkspaceDir,
-        `${home}/.openclaw/workspace`,
-        `${home}/.openclaw/sandboxes`,
+        `${installDir}/.openclaw/workspace`,
+        `${installDir}/.openclaw/sandboxes`,
       ],
       denyRead: MANDATORY_DENY_READ,
       denyWrite: [],
@@ -189,7 +187,7 @@ async function createAsrtBackend(params: {
   const { sessionKey, scopeKey, workspaceDir, agentWorkspaceDir } = params;
 
   // Ensure private tmp dir exists (not shared /tmp)
-  mkdirSync(`${home}/.openclaw/tmp`, { recursive: true });
+  mkdirSync(`${installDir}/.openclaw/tmp`, { recursive: true });
 
   const policy = buildSessionPolicy(workspaceDir, agentWorkspaceDir);
   const policyPath = writeSessionPolicy(scopeKey, policy);
@@ -204,7 +202,7 @@ async function createAsrtBackend(params: {
       const shell = usePty ? "/bin/bash" : "/bin/sh";
       return {
         argv: ["srt", "--settings", policyPath, shell, "-c", command],
-        env: { ...process.env, ...env, HOME: process.env.HOME ?? "", TMPDIR: `${home}/.openclaw/tmp` },
+        env: { ...process.env, ...env, HOME: process.env.HOME ?? "", TMPDIR: `${installDir}/.openclaw/tmp` },
         stdinMode: usePty ? ("pipe-open" as const) : ("pipe-closed" as const),
       };
     },
@@ -220,7 +218,7 @@ async function createAsrtBackend(params: {
       return new Promise((resolve, reject) => {
         const child = spawn("srt", srtArgs, {
           stdio: ["pipe", "pipe", "pipe"],
-          env: { ...process.env, HOME: process.env.HOME ?? "", TMPDIR: `${home}/.openclaw/tmp` },
+          env: { ...process.env, HOME: process.env.HOME ?? "", TMPDIR: `${installDir}/.openclaw/tmp` },
           signal: signal ?? undefined,
         });
 

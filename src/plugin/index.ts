@@ -29,10 +29,10 @@ const __pluginDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__pluginDir, "../..");
 
 // --- Config ---
-const home = process.env.HOME ?? ".";
-const configDir = process.env.SHARKCAGE_CONFIG_DIR ?? `${home}/.config/sharkcage`;
-const dataDir = process.env.SHARKCAGE_DATA_DIR ?? `${configDir}/data`;
-const pluginDir = process.env.SHARKCAGE_PLUGIN_DIR ?? `${configDir}/plugins`;
+const installDir = process.env.SHARKCAGE_DIR ?? "/opt/sharkcage";
+const configDir = process.env.SHARKCAGE_CONFIG_DIR ?? `${installDir}/etc`;
+const dataDir = process.env.SHARKCAGE_DATA_DIR ?? `${installDir}/var`;
+const pluginDir = process.env.SHARKCAGE_PLUGIN_DIR ?? `${dataDir}/plugins`;
 const socketPath = process.env.SHARKCAGE_SOCKET ?? `${dataDir}/supervisor.sock`;
 
 // --- State ---
