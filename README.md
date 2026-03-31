@@ -4,6 +4,8 @@ OpenClaw, but you trust it.
 
 Sharkcage registers as OpenClaw's **sandbox backend**, wrapping every AI-directed tool call with `srt` (Anthropic Sandbox Runtime). Every bash command, file read/write, and skill execution is kernel-sandboxed. Capabilities approved once at install, enforced always.
 
+> Built by a security engineer who got tired of `--dangerously-skip-permissions`. Vibe coded with AI, hardened by a human who kept asking "but what if..." until the sandbox actually held up. Three automated security review passes, Trivy and Semgrep on every build, every finding discussed before fixing. The security model wasn't designed top-down — it was discovered bottom-up by trying things, watching them break, and deciding what actually matters.
+
 ## Security Model
 
 ```
