@@ -113,9 +113,12 @@ export default async function start(options: { foreground?: boolean } = {}) {
     if (bind && bind !== "0.0.0.0") {
       gatewayHost = bind;
     } else if (bind === "0.0.0.0") {
-      // Bound to all interfaces — use hostname or LAN IP
+      // Bound to all interfaces — resolve LAN IP
       try {
-        gatewayHost = execFileSync("hostname", ["-I"], { encoding: "utf-8" }).trim().split(" ")[0] || "127.0.0.1";
+        // ip route is the most reliable way to get the primary LAN IP
+        const route = execFileSync("ip", ["route", "get", "1.1.1.1"], { encoding: "utf-8" });
+        const match = route.match(/src\s+(\d+\.\d+\.\d+\.\d+)/);
+        gatewayHost = match?.[1] ?? "0.0.0.0";
       } catch {
         gatewayHost = "0.0.0.0";
       }
