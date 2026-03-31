@@ -106,10 +106,10 @@ const sessionPolicyDir = join(
 );
 
 function policyPathForScope(scopeKey: string): string {
-  if (!/^[a-zA-Z0-9_.-]+$/.test(scopeKey)) {
-    throw new Error(`Invalid scopeKey: ${scopeKey}`);
-  }
-  return join(sessionPolicyDir, `${scopeKey}.json`);
+  // Sanitize scopeKey for use as filename — replace unsafe chars with underscores
+  const safe = scopeKey.replace(/[^a-zA-Z0-9_.-]/g, "_");
+  if (!safe) throw new Error(`Invalid scopeKey: ${scopeKey}`);
+  return join(sessionPolicyDir, `${safe}.json`);
 }
 
 function writeSessionPolicy(scopeKey: string, policy: AsrtSessionPolicy): string {
