@@ -25,8 +25,10 @@ jobs:
       - name: Build plugin
         run: |
           npx tsc -p tsconfig.plugin.json --outDir dist/sharkcage-build
-          mkdir -p dist/sharkcage
+          mkdir -p dist/sharkcage dist/supervisor
           cp dist/sharkcage-build/plugin/* dist/sharkcage/
+          cp dist/sharkcage-build/supervisor/types.js dist/supervisor/ 2>/dev/null || true
+          cp dist/sharkcage-build/supervisor/types.d.ts dist/supervisor/ 2>/dev/null || true
           cp src/plugin/openclaw.plugin.json dist/sharkcage/
           cp src/plugin/security-patterns.json dist/sharkcage/
 
@@ -35,3 +37,33 @@ jobs:
 
       - name: Verify CLI loads
         run: npx tsx src/cli/main.ts help
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: CRITICAL,HIGH
+          exit-code: 1
+
+      - name: Semgrep SAST
+        uses: semgrep/semgrep-action@v1
+        with:
+          config: >-
+            p/javascript
+            p/typescript
+            p/nodejs
+            p/security-audit
+            p/command-injection

@@ -110,7 +110,7 @@ After approval, the skill runs in its own ASRT sandbox scoped to exactly what wa
 
 ## How This Was Built
 
-Yes, this was vibe coded. An AI wrote most of the implementation while a human who understands security kept asking "but what if..." until the answers were honest. Three automated security review passes, every finding discussed before fixing — some were real vulnerabilities, some were the sandbox already doing its job, and knowing the difference mattered more than fixing everything blindly.
+Yes, this was vibe coded. An AI wrote most of the implementation while a human who understands security kept asking "but what if..." until the answers were honest. Multiple automated security review passes, Trivy and Semgrep on every build, every finding discussed before fixing — some were real vulnerabilities, some were the sandbox already doing its job, and knowing the difference mattered more than fixing everything blindly.
 
 The security model wasn't designed top-down. It was discovered bottom-up by trying things, watching them break, understanding why, and deciding what actually matters. The original design had a full outer sandbox wrapping the entire OpenClaw binary. In practice it broke inbound connections, IPC, and FD inheritance. The per-tool model was already doing the real work. That's not a bug in the process — that's how you find out what works.
 
