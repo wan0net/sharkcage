@@ -177,7 +177,14 @@ export default async function init() {
           });
 
           if (!p.isCancel(addSudoers) && addSudoers) {
-            const sudoersRule = `${process.env.USER} ALL=(${username}) NOPASSWD: /usr/bin/openclaw, /usr/local/bin/openclaw\n`;
+            const localBin = `${home}/.sharkcage/node_modules/.bin/openclaw`;
+            const candidates = ["/usr/bin/openclaw", "/usr/local/bin/openclaw", localBin];
+            try {
+              const resolved = execFileSync("which", ["openclaw"], { encoding: "utf-8" }).trim();
+              if (resolved && !candidates.includes(resolved)) candidates.push(resolved);
+            } catch { /* which failed */ }
+            const openclawPaths = candidates.filter(p => existsSync(p)).join(", ") || candidates.join(", ");
+            const sudoersRule = `${process.env.USER} ALL=(${username}) NOPASSWD: ${openclawPaths}\n`;
             execFileSync("sudo", ["tee", `/etc/sudoers.d/sharkcage-${username}`], {
               input: sudoersRule, stdio: ["pipe", "pipe", "pipe"],
             });

@@ -259,8 +259,19 @@ function startOpenClaw(runAsUser?: string): ChildProcess {
   // Security is enforced per-tool-call: every bash/file operation the AI
   // executes goes through `srt --settings <policy>` via the sandbox backend.
   // Skills get per-skill srt sandboxes. The gateway itself just serves chat.
-  const cmd = runAsUser ? "sudo" : "openclaw";
-  const cmdArgs = runAsUser ? ["-u", runAsUser, "openclaw", ...args] : args;
+  // Resolve openclaw binary — use the target user's sharkcage install if running via sudo
+  let openclawBin = "openclaw";
+  const targetHome = runAsUser ? `/home/${runAsUser}` : home;
+  const localBin = `${targetHome}/.sharkcage/node_modules/.bin/openclaw`;
+  if (existsSync(localBin)) {
+    openclawBin = localBin;
+  } else {
+    try {
+      openclawBin = execFileSync("which", ["openclaw"], { encoding: "utf-8" }).trim();
+    } catch { /* fall back to bare name */ }
+  }
+  const cmd = runAsUser ? "sudo" : openclawBin;
+  const cmdArgs = runAsUser ? ["-u", runAsUser, openclawBin, ...args] : args;
   const proc = spawn(cmd, cmdArgs, {
     stdio: ["pipe", "pipe", "pipe"],
     env: process.env,
