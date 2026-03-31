@@ -68,6 +68,28 @@ interface SandboxBackendHandle {
   createFsBridge?(params: { sandbox: unknown }): unknown;
 }
 
+interface SandboxResolvedPath {
+  hostPath?: string;
+  relativePath: string;
+  containerPath: string;
+}
+
+interface SandboxFsStat {
+  type: "file" | "directory" | "other";
+  size: number;
+  mtimeMs: number;
+}
+
+interface SandboxFsBridge {
+  resolvePath(params: { filePath: string; cwd?: string }): SandboxResolvedPath;
+  readFile(params: { filePath: string; cwd?: string; signal?: AbortSignal }): Promise<Buffer>;
+  writeFile(params: { filePath: string; cwd?: string; data: Buffer | string; encoding?: BufferEncoding; mkdir?: boolean; signal?: AbortSignal }): Promise<void>;
+  mkdirp(params: { filePath: string; cwd?: string; signal?: AbortSignal }): Promise<void>;
+  remove(params: { filePath: string; cwd?: string; recursive?: boolean; force?: boolean; signal?: AbortSignal }): Promise<void>;
+  rename(params: { from: string; to: string; cwd?: string; signal?: AbortSignal }): Promise<void>;
+  stat(params: { filePath: string; cwd?: string; signal?: AbortSignal }): Promise<SandboxFsStat | null>;
+}
+
 interface BackendManager {
   describeRuntime(params: {
     entry: { containerName: string };
@@ -264,6 +286,103 @@ async function createAsrtBackend(params: {
 
         child.on("error", reject);
       });
+    },
+
+    createFsBridge() {
+      function resolveFilePath(filePath: string, cwd?: string): string {
+        if (filePath.startsWith("/")) return filePath;
+        const base = cwd ?? agentWorkspaceDir;
+        return `${base}/${filePath}`;
+      }
+
+      function runSrt(script: string, opts?: { stdin?: Buffer | string; allowFailure?: boolean; signal?: AbortSignal }): Promise<{ stdout: Buffer; stderr: Buffer; code: number }> {
+        return new Promise((resolve, reject) => {
+          const srtArgs = ["--settings", policyPath, "/bin/sh", "-c", script];
+          const child = spawn(`${installDir}/node_modules/.bin/srt`, srtArgs, {
+            stdio: ["pipe", "pipe", "pipe"],
+            cwd: agentWorkspaceDir,
+            env: { ...process.env, HOME: process.env.HOME ?? "", TMPDIR: `${installDir}/.openclaw/tmp` },
+            signal: opts?.signal ?? undefined,
+          });
+          if (opts?.stdin != null) {
+            child.stdin.write(opts.stdin);
+            child.stdin.end();
+          } else {
+            child.stdin.end();
+          }
+          const stdoutChunks: Buffer[] = [];
+          const stderrChunks: Buffer[] = [];
+          child.stdout.on("data", (chunk: Buffer) => stdoutChunks.push(chunk));
+          child.stderr.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
+          child.on("close", (code) => {
+            const result = { stdout: Buffer.concat(stdoutChunks), stderr: Buffer.concat(stderrChunks), code: code ?? 1 };
+            if (code !== 0 && !opts?.allowFailure) {
+              reject(Object.assign(new Error(`srt exited with code ${code}`), result));
+            } else {
+              resolve(result);
+            }
+          });
+          child.on("error", reject);
+        });
+      }
+
+      const bridge: SandboxFsBridge = {
+        resolvePath({ filePath, cwd }) {
+          const resolved = resolveFilePath(filePath, cwd);
+          const relative = resolved.startsWith(agentWorkspaceDir + "/")
+            ? resolved.slice(agentWorkspaceDir.length + 1)
+            : resolved;
+          return { hostPath: resolved, relativePath: relative, containerPath: resolved };
+        },
+
+        async readFile({ filePath, cwd, signal }) {
+          const resolved = resolveFilePath(filePath, cwd);
+          const result = await runSrt(`cat ${JSON.stringify(resolved)}`, { signal });
+          return result.stdout;
+        },
+
+        async writeFile({ filePath, cwd, data, mkdir: doMkdir, signal }) {
+          const resolved = resolveFilePath(filePath, cwd);
+          if (doMkdir) {
+            await runSrt(`mkdir -p "$(dirname ${JSON.stringify(resolved)})"`, { allowFailure: true, signal });
+          }
+          const content = Buffer.isBuffer(data) ? data : Buffer.from(data);
+          await runSrt(`cat > ${JSON.stringify(resolved)}`, { stdin: content, signal });
+        },
+
+        async mkdirp({ filePath, cwd, signal }) {
+          const resolved = resolveFilePath(filePath, cwd);
+          await runSrt(`mkdir -p ${JSON.stringify(resolved)}`, { signal });
+        },
+
+        async remove({ filePath, cwd, recursive, force, signal }) {
+          const resolved = resolveFilePath(filePath, cwd);
+          const flags = [recursive && "-r", force && "-f"].filter(Boolean).join("");
+          await runSrt(`rm ${flags ? flags + " " : ""}${JSON.stringify(resolved)}`, { allowFailure: true, signal });
+        },
+
+        async rename({ from, to, cwd, signal }) {
+          const resolvedFrom = resolveFilePath(from, cwd);
+          const resolvedTo = resolveFilePath(to, cwd);
+          await runSrt(`mv ${JSON.stringify(resolvedFrom)} ${JSON.stringify(resolvedTo)}`, { signal });
+        },
+
+        async stat({ filePath, cwd, signal }) {
+          const resolved = resolveFilePath(filePath, cwd);
+          const result = await runSrt(`stat -c '%F %s %Y' ${JSON.stringify(resolved)} 2>/dev/null`, { allowFailure: true, signal });
+          if (result.code !== 0) return null;
+          const output = result.stdout.toString().trim();
+          const parts = output.split(" ");
+          if (parts.length < 3) return null;
+          const typeStr = parts.slice(0, -2).join(" ");
+          const size = parseInt(parts[parts.length - 2], 10);
+          const mtimeS = parseInt(parts[parts.length - 1], 10);
+          const type = typeStr.includes("directory") ? "directory" : typeStr.includes("regular") ? "file" : "other";
+          return { type, size: isNaN(size) ? 0 : size, mtimeMs: isNaN(mtimeS) ? 0 : mtimeS * 1000 };
+        },
+      };
+
+      return bridge;
     },
   };
 
