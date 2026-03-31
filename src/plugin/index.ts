@@ -167,6 +167,7 @@ export function register(api: OpenClawPluginApi): void {
     parameters: { type: "object", properties: {}, required: [] },
     execute: async () => {
       try {
+        // nosemgrep: typescript.react.security.react-insecure-request — localhost-only supervisor health check
         const res = await fetch("http://127.0.0.1:18790/api/status");
         return await res.text();
       } catch {
