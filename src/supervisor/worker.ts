@@ -119,8 +119,10 @@ export async function executeInSandbox(
 
   // srt wraps the process with kernel-level sandbox
   // ASRT handles all filesystem/network restrictions — the runtime flags don't matter
+  const installDir = process.env.SHARKCAGE_DIR ?? "/opt/sharkcage";
+  const srtBin = `${installDir}/node_modules/.bin/srt`;
   const srtCmd = [
-    "srt",
+    srtBin,
     "--settings", configPath,
     ...innerCmd,
   ];
@@ -210,7 +212,8 @@ export async function executeInSandbox(
  */
 export async function checkAsrtAvailable(): Promise<boolean> {
   try {
-    const child = spawn("srt", ["--version"], { stdio: ["ignore", "pipe", "pipe"] });
+    const srtPath = `${process.env.SHARKCAGE_DIR ?? "/opt/sharkcage"}/node_modules/.bin/srt`;
+    const child = spawn(srtPath, ["--version"], { stdio: ["ignore", "pipe", "pipe"] });
     const exitCode = await new Promise<number>((resolve) => {
       child.on("close", (code) => resolve(code ?? 1));
       child.on("error", () => resolve(1));

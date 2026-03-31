@@ -201,7 +201,7 @@ async function createAsrtBackend(params: {
     async buildExecSpec({ command, env, usePty }) {
       const shell = usePty ? "/bin/bash" : "/bin/sh";
       return {
-        argv: ["srt", "--settings", policyPath, shell, "-c", command],
+        argv: [`${installDir}/node_modules/.bin/srt`, "--settings", policyPath, shell, "-c", command],
         env: { ...process.env, ...env, HOME: process.env.HOME ?? "", TMPDIR: `${installDir}/.openclaw/tmp` },
         stdinMode: usePty ? ("pipe-open" as const) : ("pipe-closed" as const),
       };
@@ -216,7 +216,7 @@ async function createAsrtBackend(params: {
       const srtArgs = ["--settings", policyPath, "/bin/sh", ...shellArgs];
 
       return new Promise((resolve, reject) => {
-        const child = spawn("srt", srtArgs, {
+        const child = spawn(`${installDir}/node_modules/.bin/srt`, srtArgs, {
           stdio: ["pipe", "pipe", "pipe"],
           env: { ...process.env, HOME: process.env.HOME ?? "", TMPDIR: `${installDir}/.openclaw/tmp` },
           signal: signal ?? undefined,
@@ -292,7 +292,7 @@ const asrtBackendManager: BackendManager = {
 export async function registerAsrtBackend(api: any): Promise<void> {
   let hasSrt = false;
   try {
-    execFileSync("srt", ["--version"], { stdio: "pipe" });
+    execFileSync(`${installDir}/node_modules/.bin/srt`, ["--version"], { stdio: "pipe" });
     hasSrt = true;
   } catch {
     // srt not installed
