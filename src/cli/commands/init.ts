@@ -1,30 +1,44 @@
 /**
  * sc init
  *
- * 1. Run openclaw onboard (if not already configured) — handles model, API keys, channels
- * 2. Verify the model actually works
- * 3. Choose sharkcage sandbox mode
- * 4. Write sharkcage config
+ * Post-install configuration wizard:
+ * 1. Read install manifest (written by install.sh)
+ * 2. Run openclaw onboard if needed
+ * 3. Choose sandbox mode
+ * 4. Dedicated user setup (Linux only)
+ * 5. Systemd service install (Linux only)
+ * 6. Write gateway.json
+ * 7. Print summary
  */
 
-import { mkdirSync, existsSync, writeFileSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { spawnSync, execFileSync } from "node:child_process";
+import { dirname } from "node:path";
 import * as p from "@clack/prompts";
+import {
+  requireManifest,
+  writeManifest,
+  getGatewayConfigPath,
+  ensureDataDirs,
+} from "../lib/paths.ts";
 
 type Mode = "full" | "skills-only";
 
-interface SharkcageConfig {
+interface GatewayConfig {
   mode: Mode;
   runAsUser?: string;
 }
 
 const home = process.env.HOME ?? ".";
-const configDir = `${home}/.config/sharkcage`;
 
 export default async function init() {
-  p.intro("sharkcage — OpenClaw, but you trust it.");
+  p.intro("sharkcage init");
 
-  // --- 1. Check if OpenClaw is configured ---
+  // --- 1. Read install manifest ---
+  const manifest = requireManifest(); // exits if missing
+  p.log.info(`Install directory: ${manifest.installDir}`);
+
+  // --- 2. OpenClaw onboard ---
   const ocConfigPath = `${home}/.openclaw/openclaw.json`;
   let needsOnboard = true;
 
@@ -34,34 +48,42 @@ export default async function init() {
       if (ocConfig.gateway?.mode) {
         needsOnboard = false;
       }
-    } catch { /* can't read */ }
+    } catch {
+      /* can't read */
+    }
   }
 
   if (needsOnboard) {
     p.note(
       "OpenClaw needs to be set up first.\n" +
-      "This wizard will configure your model, API key, channels, and gateway.\n" +
-      "After that, sharkcage will configure sandboxing.",
-      "OpenClaw Setup"
+        "This wizard will configure your model, API key, channels, and gateway.\n" +
+        "After that, sharkcage will configure sandboxing.",
+      "OpenClaw Setup",
     );
 
-    const runOnboard = await p.confirm({ message: "Run OpenClaw setup wizard now?" });
+    const runOnboard = await p.confirm({
+      message: "Run OpenClaw setup wizard now?",
+    });
     if (p.isCancel(runOnboard) || !runOnboard) {
-      p.cancel("Run 'openclaw onboard' manually, then re-run 'sc init'.");
+      p.cancel(
+        `Run '${manifest.openclawBin} onboard' manually, then re-run 'sc init'.`,
+      );
       process.exit(0);
     }
 
     console.log("");
     console.log("┌──────────────────────────────────────────────┐");
-    console.log("│  🦞 OpenClaw Setup (not sharkcage)           │");
+    console.log("│  OpenClaw Setup (not sharkcage)              │");
     console.log("│  Everything below is OpenClaw's own wizard.  │");
     console.log("│  Sharkcage setup continues after.            │");
     console.log("└──────────────────────────────────────────────┘");
     console.log("");
 
-    const result = spawnSync("openclaw", ["onboard", "--no-install-daemon", "--skip-skills"], {
-      stdio: "inherit",
-    });
+    const result = spawnSync(
+      manifest.openclawBin,
+      ["onboard", "--no-install-daemon", "--skip-skills"],
+      { stdio: "inherit" },
+    );
 
     if (result.status !== 0) {
       p.log.error("OpenClaw setup failed. Fix the issue and re-run 'sc init'.");
@@ -70,39 +92,39 @@ export default async function init() {
 
     console.log("");
     console.log("┌──────────────────────────────────────────────┐");
-    console.log("│  🦈 Back to Sharkcage                        │");
+    console.log("│  Back to Sharkcage                           │");
     console.log("└──────────────────────────────────────────────┘");
     console.log("");
   } else {
     p.log.success("OpenClaw already configured.");
   }
 
-  // --- 2. Verify model ---
+  // Parse model from openclaw config
   try {
     const ocConfig = JSON.parse(readFileSync(ocConfigPath, "utf-8"));
     const model = ocConfig.agents?.defaults?.model;
-    const modelStr = typeof model === "string" ? model : model?.primary ?? "unknown";
+    const modelStr =
+      typeof model === "string" ? model : (model?.primary ?? "unknown");
     p.log.info(`Model: ${modelStr}`);
-
-    // Quick check: is the model available?
-    try {
-      const listOutput = execFileSync("openclaw", ["models", "list"], {
-        encoding: "utf-8", timeout: 15_000, stdio: "pipe",
-      });
-      if (listOutput.includes(modelStr) && listOutput.includes("missing")) {
-        p.log.warning(`Model "${modelStr}" shows as missing. It may not work.`);
-        p.log.warning("Run 'openclaw models auth login' to set up auth, or change the model.");
-      }
-    } catch {
-      // models list failed — not critical
-    }
   } catch {
     p.log.warning("Could not read OpenClaw config to verify model.");
   }
 
   // --- 3. Sandbox mode ---
+  // Load existing gateway config for defaults
+  const gatewayPath = getGatewayConfigPath();
+  let existingConfig: GatewayConfig | null = null;
+  if (existsSync(gatewayPath)) {
+    try {
+      existingConfig = JSON.parse(readFileSync(gatewayPath, "utf-8"));
+    } catch {
+      /* ignore */
+    }
+  }
+
   const mode = await p.select({
     message: "How should sharkcage sandbox OpenClaw?",
+    initialValue: existingConfig?.mode ?? ("full" as Mode),
     options: [
       {
         value: "full" as Mode,
@@ -117,27 +139,34 @@ export default async function init() {
     ],
   });
 
-  if (p.isCancel(mode)) { p.cancel("Cancelled."); process.exit(0); }
+  if (p.isCancel(mode)) {
+    p.cancel("Cancelled.");
+    process.exit(0);
+  }
 
-  // --- 3b. Optional: dedicated user for hardened deployments ---
-  let runAsUser: string | undefined;
+  // --- 4. Dedicated user setup (Linux only) ---
+  let runAsUser: string | undefined = existingConfig?.runAsUser;
 
   if (process.platform === "linux") {
     const useHardening = await p.confirm({
-      message: "Create a dedicated user to run OpenClaw? (recommended for servers)",
-      initialValue: false,
+      message:
+        "Create a dedicated user to run OpenClaw? (recommended for servers)",
+      initialValue: !!runAsUser,
     });
 
     if (!p.isCancel(useHardening) && useHardening) {
       const username = await p.text({
         message: "Username for the dedicated user:",
-        initialValue: "openclaw",
+        initialValue: runAsUser ?? "openclaw",
         validate: (v) => {
           if (!v || !/^[a-z_][a-z0-9_-]{0,31}$/.test(v)) return "Invalid username";
         },
       });
 
-      if (p.isCancel(username)) { p.cancel("Cancelled."); process.exit(0); }
+      if (p.isCancel(username)) {
+        p.cancel("Cancelled.");
+        process.exit(0);
+      }
 
       // Check if user exists
       let userExists = false;
@@ -150,48 +179,66 @@ export default async function init() {
       }
 
       try {
-        // Request sudo — user enters password here
+        // Request sudo -- user enters password here
         execFileSync("sudo", ["-v"], { stdio: "inherit" });
 
         if (!userExists) {
           p.log.info(`Creating user "${username}" (requires sudo)...`);
-          execFileSync("sudo", [
-            "useradd",
-            "--system",
-            "--create-home",
-            "--home-dir", `/home/${username}`,
-            "--shell", "/usr/sbin/nologin",
-            "--comment", "OpenClaw sandbox user",
-            username,
-          ], { stdio: "inherit" });
+          execFileSync(
+            "sudo",
+            [
+              "useradd",
+              "--system",
+              "--create-home",
+              "--home-dir",
+              `/home/${username}`,
+              "--shell",
+              "/usr/sbin/nologin",
+              username,
+            ],
+            { stdio: "inherit" },
+          );
+          p.log.success(`User "${username}" created.`);
         }
 
-        // Copy sharkcage install to the dedicated user's home
-        execFileSync("sudo", ["mkdir", "-p", `/home/${username}/.sharkcage`], { stdio: "pipe" });
-        execFileSync("sudo", ["cp", "-r", `${home}/.sharkcage/.`, `/home/${username}/.sharkcage/`], { stdio: "pipe" });
-        execFileSync("sudo", ["chown", "-R", `${username}:${username}`, `/home/${username}`], { stdio: "pipe" });
-        p.log.success(`Synced sharkcage install to /home/${username}/.sharkcage`);
+        // chown the install dir to the dedicated user (no copying)
+        p.log.info(
+          `Setting ownership of ${manifest.installDir} to ${username}...`,
+        );
+        execFileSync(
+          "sudo",
+          ["chown", "-R", `${username}:${username}`, manifest.installDir],
+          { stdio: "pipe" },
+        );
+        p.log.success(`Install directory owned by ${username}.`);
 
         // Set up passwordless sudo for running openclaw as the dedicated user
-        const localBin = `/home/${username}/.sharkcage/node_modules/.bin/openclaw`;
-        const candidates = ["/usr/bin/openclaw", "/usr/local/bin/openclaw", localBin];
-        try {
-          const resolved = execFileSync("which", ["openclaw"], { encoding: "utf-8" }).trim();
-          if (resolved && !candidates.includes(resolved)) candidates.push(resolved);
-        } catch { /* which failed */ }
-        const openclawPaths = candidates.filter(p => existsSync(p)).join(", ") || candidates.join(", ");
-        const sudoersRule = `${process.env.USER} ALL=(${username}) NOPASSWD: ${openclawPaths}\n`;
-        execFileSync("sudo", ["tee", `/etc/sudoers.d/sharkcage-${username}`], {
-          input: sudoersRule, stdio: ["pipe", "pipe", "pipe"],
+        const sudoersRule = `${manifest.installedBy} ALL=(${username}) NOPASSWD: ${manifest.openclawBin}\n`;
+        const sudoersFile = `/etc/sudoers.d/sharkcage-${username}`;
+        execFileSync("sudo", ["tee", sudoersFile], {
+          input: sudoersRule,
+          stdio: ["pipe", "pipe", "pipe"],
         });
-        execFileSync("sudo", ["chmod", "440", `/etc/sudoers.d/sharkcage-${username}`], { stdio: "pipe" });
-        p.log.success(`Sudoers rule updated for ${username}.`);
+        execFileSync("sudo", ["chmod", "440", sudoersFile], {
+          stdio: "pipe",
+        });
+        p.log.success(`Sudoers rule written to ${sudoersFile}.`);
+
+        // Update manifest with serviceUser
+        manifest.serviceUser = username;
+        writeManifest(manifest);
       } catch (err) {
-        p.log.error(`Failed to set up user: ${err instanceof Error ? err.message : err}`);
+        p.log.error(
+          `Failed to set up user: ${err instanceof Error ? err.message : err}`,
+        );
         p.log.warning("Continuing without dedicated user.");
       } finally {
-        // Drop sudo immediately — don't leave cached credentials
-        try { execFileSync("sudo", ["-k"], { stdio: "pipe" }); } catch { /* ok */ }
+        // Drop sudo immediately
+        try {
+          execFileSync("sudo", ["-k"], { stdio: "pipe" });
+        } catch {
+          /* ok */
+        }
       }
 
       // Verify the user exists before committing to config
@@ -204,37 +251,137 @@ export default async function init() {
     }
   }
 
-  // --- 4. Write config ---
-  mkdirSync(configDir, { recursive: true });
-  const configPath = `${configDir}/gateway.json`;
+  // --- 5. Systemd service (Linux only) ---
+  let serviceInstalled = false;
+  let serviceEnabled = false;
+  let serviceStarted = false;
 
-  if (existsSync(configPath)) {
-    const overwrite = await p.confirm({ message: "Sharkcage config already exists. Overwrite?" });
-    if (p.isCancel(overwrite) || !overwrite) {
-      p.outro("Keeping existing config.");
-      return;
+  if (process.platform === "linux") {
+    const installService = await p.confirm({
+      message: "Install systemd service for sharkcage?",
+      initialValue: false,
+    });
+
+    if (!p.isCancel(installService) && installService) {
+      const templatePath = `${manifest.installDir}/sharkcage.service`;
+
+      if (!existsSync(templatePath)) {
+        p.log.error(`Service template not found at ${templatePath}`);
+      } else {
+        try {
+          let serviceContent = readFileSync(templatePath, "utf-8");
+          const serviceUser = runAsUser ?? manifest.installedBy;
+
+          serviceContent = serviceContent.replace(
+            /\{\{INSTALL_DIR\}\}/g,
+            manifest.installDir,
+          );
+          serviceContent = serviceContent.replace(
+            /\{\{SERVICE_USER\}\}/g,
+            serviceUser,
+          );
+
+          // Request sudo if not already cached
+          execFileSync("sudo", ["-v"], { stdio: "inherit" });
+
+          // Write service file
+          const serviceDest = "/etc/systemd/system/sharkcage.service";
+          execFileSync("sudo", ["tee", serviceDest], {
+            input: serviceContent,
+            stdio: ["pipe", "pipe", "pipe"],
+          });
+          p.log.success(`Service file written to ${serviceDest}.`);
+          serviceInstalled = true;
+
+          // Reload systemd
+          execFileSync("sudo", ["systemctl", "daemon-reload"], {
+            stdio: "pipe",
+          });
+
+          // Enable?
+          const enableIt = await p.confirm({
+            message: "Enable sharkcage service (start on boot)?",
+            initialValue: true,
+          });
+          if (!p.isCancel(enableIt) && enableIt) {
+            execFileSync("sudo", ["systemctl", "enable", "sharkcage"], {
+              stdio: "pipe",
+            });
+            serviceEnabled = true;
+            p.log.success("Service enabled.");
+          }
+
+          // Start now?
+          const startNow = await p.confirm({
+            message: "Start sharkcage service now?",
+            initialValue: false,
+          });
+          if (!p.isCancel(startNow) && startNow) {
+            execFileSync("sudo", ["systemctl", "start", "sharkcage"], {
+              stdio: "pipe",
+            });
+            serviceStarted = true;
+            p.log.success("Service started.");
+          }
+        } catch (err) {
+          p.log.error(
+            `Failed to install service: ${err instanceof Error ? err.message : err}`,
+          );
+        } finally {
+          try {
+            execFileSync("sudo", ["-k"], { stdio: "pipe" });
+          } catch {
+            /* ok */
+          }
+        }
+      }
     }
   }
 
-  const config: SharkcageConfig = {
+  // --- 6. Write gateway.json ---
+  ensureDataDirs();
+  // Ensure the etc directory exists for gateway.json
+  const gatewayDir = dirname(gatewayPath);
+  mkdirSync(gatewayDir, { recursive: true });
+
+  const config: GatewayConfig = {
     mode,
     ...(runAsUser && { runAsUser }),
   };
 
-  writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
+  writeFileSync(gatewayPath, JSON.stringify(config, null, 2) + "\n");
+  p.log.success(`Config written to ${gatewayPath}`);
 
-  // Create directories
-  for (const dir of [`${configDir}/data`, `${configDir}/plugins`, `${configDir}/approvals`, `${configDir}/denied`]) {
-    mkdirSync(dir, { recursive: true });
+  // --- 7. Summary ---
+  const summaryLines: string[] = [
+    `Install directory:  ${manifest.installDir}`,
+    `OpenClaw binary:    ${manifest.openclawBin}`,
+    `srt binary:         ${manifest.srtBin}`,
+    `sc binary:          ${manifest.scBin}`,
+    `Sandbox mode:       ${mode}`,
+  ];
+
+  if (runAsUser) {
+    summaryLines.push(`Service user:       ${runAsUser}`);
   }
 
-  // --- 5. Next steps ---
-  p.note(
-    `Start sharkcage:\n  sc start\n\n` +
-    `Install skills:\n  sc skill add <url>\n\n` +
-    `Dashboard will be available after start.`,
-    "Next steps"
-  );
+  if (serviceInstalled) {
+    const status = serviceStarted
+      ? "installed, enabled, running"
+      : serviceEnabled
+        ? "installed, enabled"
+        : "installed";
+    summaryLines.push(`Systemd service:    ${status}`);
+  }
 
-  p.outro("Setup complete.");
+  summaryLines.push("");
+  summaryLines.push("Next steps:");
+  if (!serviceStarted) {
+    summaryLines.push("  sc start");
+  }
+  summaryLines.push("  sc skill add <url>");
+
+  p.note(summaryLines.join("\n"), "Setup complete");
+
+  p.outro("Done.");
 }

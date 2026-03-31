@@ -4,12 +4,7 @@
 
 import { readFileSync, unlinkSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-
-const home = process.env.HOME ?? ".";
-const configDir = process.env.SHARKCAGE_CONFIG_DIR ?? `${home}/.config/sharkcage`;
-const dataDir = `${configDir}/data`;
-const pidFile = `${dataDir}/sharkcage.pid`;
-const socketPath = `${dataDir}/supervisor.sock`;
+import { getPidFile, getSocketPath, getDataDir } from "../lib/paths.ts";
 
 function killProcessTree(name: string, pid: number): boolean {
   try {
@@ -66,6 +61,19 @@ function killByPort(port: number): void {
 
 export default async function stop() {
   let killed = false;
+  const pidFile = getPidFile();
+  const socketPath = getSocketPath();
+
+  // --- 0. Try systemd first (Linux) ---
+  if (process.platform === "linux") {
+    try {
+      execFileSync("systemctl", ["is-active", "sharkcage"], { stdio: "pipe" });
+      console.log("Stopping sharkcage service...");
+      execFileSync("sudo", ["systemctl", "stop", "sharkcage"], { stdio: "inherit" });
+      console.log("Service stopped.");
+      return;
+    } catch { /* not a systemd service, fall through to manual kill */ }
+  }
 
   // --- 1. Try PID file first ---
   if (existsSync(pidFile)) {

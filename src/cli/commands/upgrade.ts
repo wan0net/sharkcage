@@ -14,11 +14,12 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, copyFileSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import * as p from "@clack/prompts";
+import { loadManifest, writeManifest, getConfigDir, getDataDir } from "../lib/paths.ts";
 
 const home = process.env.HOME ?? ".";
 const ocConfigPath = `${home}/.openclaw/openclaw.json`;
-const scConfigDir = `${home}/.config/sharkcage`;
-const backupDir = `${scConfigDir}/backups`;
+const scConfigDir = getConfigDir();
+const backupDir = `${getDataDir()}/backups`;
 
 export default async function upgrade() {
   p.intro("sc upgrade — safe OpenClaw upgrade with rollback");
@@ -103,8 +104,11 @@ export default async function upgrade() {
 
   // --- 5. Upgrade ---
   p.log.info("Installing new version...");
-  const installResult = spawnSync("npm", ["install", "-g", `openclaw@${latestVersion}`], {
+  const manifest = loadManifest();
+  const cwd = manifest?.installDir ?? process.cwd();
+  const installResult = spawnSync("npm", ["install", "--save", `openclaw@${latestVersion}`], {
     stdio: "inherit",
+    cwd,
     timeout: 120_000,
   });
 
@@ -153,7 +157,17 @@ export default async function upgrade() {
     process.exit(1);
   }
 
-  // --- 7. Regenerate sandbox config ---
+  // --- 7. Update install manifest ---
+  if (manifest) {
+    writeManifest({
+      ...manifest,
+      version: latestVersion,
+      installedAt: new Date().toISOString(),
+    });
+    p.log.info("Updated install manifest.");
+  }
+
+  // --- 8. Regenerate sandbox config ---
   // Delete the old sandbox config so sc start regenerates with new domain detection
   if (existsSync(scSandboxConfig)) {
     const { unlinkSync } = await import("node:fs");
@@ -178,8 +192,11 @@ async function rollback(backupPath: string, targetVersion: string): Promise<void
   }
 
   // Reinstall old version
-  spawnSync("npm", ["install", "-g", `openclaw@${targetVersion}`], {
+  const m = loadManifest();
+  const rollbackCwd = m?.installDir ?? process.cwd();
+  spawnSync("npm", ["install", "--save", `openclaw@${targetVersion}`], {
     stdio: "inherit",
+    cwd: rollbackCwd,
     timeout: 120_000,
   });
 }

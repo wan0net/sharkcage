@@ -3,14 +3,8 @@
  */
 
 import { readFileSync, existsSync } from "node:fs";
-
-const home = process.env.HOME ?? ".";
-const configDir = process.env.SHARKCAGE_CONFIG_DIR ?? `${home}/.config/sharkcage`;
-const dataDir = `${configDir}/data`;
-const pidFile = `${dataDir}/sharkcage.pid`;
-const socketPath = `${dataDir}/supervisor.sock`;
-const gatewayConfigPath = `${configDir}/gateway.json`;
-const auditLogPath = `${dataDir}/audit.jsonl`;
+import { execFileSync } from "node:child_process";
+import { getPidFile, getSocketPath, getDataDir, getConfigDir, getAuditLogPath, getGatewayConfigPath } from "../lib/paths.ts";
 
 interface PidData {
   supervisor: number;
@@ -41,6 +35,23 @@ function formatUptime(startedAt: string): string {
 
 export default async function status() {
   console.log("\nsharkcage status\n");
+
+  const pidFile = getPidFile();
+  const socketPath = getSocketPath();
+  const gatewayConfigPath = getGatewayConfigPath();
+  const auditLogPath = getAuditLogPath();
+
+  // Check systemd service status (Linux)
+  if (process.platform === "linux") {
+    try {
+      const svcState = execFileSync("systemctl", ["is-active", "sharkcage"], {
+        encoding: "utf-8", stdio: "pipe",
+      }).trim();
+      console.log(`Service:     ${svcState} (systemd)`);
+    } catch {
+      console.log("Service:     not managed by systemd");
+    }
+  }
 
   if (!existsSync(pidFile)) {
     console.log("sharkcage is not running\n");

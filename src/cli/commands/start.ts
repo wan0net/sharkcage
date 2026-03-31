@@ -11,23 +11,20 @@
  */
 
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
-import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, unlinkSync } from "node:fs";
 import { connect } from "node:net";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import crypto from "node:crypto";
 import { prefixOutput, log } from "../log-prefix.ts";
+import { getInstallDir, getSocketPath, getPidFile, getPluginDir, getGatewayConfigPath, loadManifest, ensureDataDirs } from "../lib/paths.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "../../..");
 
 const home = process.env.HOME ?? ".";
-const configDir = process.env.SHARKCAGE_CONFIG_DIR ?? `${home}/.config/sharkcage`;
-const dataDir = `${configDir}/data`;
-const socketPath = `${dataDir}/supervisor.sock`;
-const pidFile = `${dataDir}/sharkcage.pid`;
 
-export default async function start() {
+export default async function start(options: { foreground?: boolean } = {}) {
   log("sc", "sharkcage starting");
 
   // --- 1. Check dependencies ---
@@ -41,30 +38,28 @@ export default async function start() {
   }
 
   // --- 2. Check config ---
-  if (!existsSync(`${configDir}/gateway.json`)) {
+  if (!existsSync(getGatewayConfigPath())) {
     log("sc", "No config found — running setup wizard");
     const init = await import("./init.js");
     await init.default();
   }
 
   // --- 3. Ensure directories ---
-  for (const dir of [dataDir, `${configDir}/plugins`, `${configDir}/approvals`]) {
-    mkdirSync(dir, { recursive: true });
-  }
+  ensureDataDirs();
 
   // --- 4. Register sharkcage plugin with OpenClaw ---
   ensureOpenClawPluginRegistered();
 
   // --- 5. Check if already running ---
-  if (existsSync(pidFile)) {
+  if (existsSync(getPidFile())) {
     try {
-      const pids = JSON.parse(readFileSync(pidFile, "utf-8"));
+      const pids = JSON.parse(readFileSync(getPidFile(), "utf-8"));
       if (isProcessRunning(pids.supervisor) || isProcessRunning(pids.openclaw)) {
         log("sc", "Already running — run 'sc stop' first");
         process.exit(1);
       }
     } catch { /* corrupt pid file */ }
-    try { unlinkSync(pidFile); } catch { /* gone */ }
+    try { unlinkSync(getPidFile()); } catch { /* gone */ }
   }
 
   // --- 6. Pre-sync CLI auth credentials before sandboxing ---
@@ -88,16 +83,16 @@ export default async function start() {
 
   // --- 7. Start supervisor ---
   log("sc", "Starting supervisor...");
-  let supervisorProc = startSupervisor();
+  let supervisorProc = startSupervisor(options);
   log("sc", `Supervisor PID ${supervisorProc.pid}`);
 
-  await waitForSocket(socketPath, 10_000);
+  await waitForSocket(getSocketPath(), 10_000);
   log("sc", "Supervisor ready");
 
   // --- 8. Start OpenClaw ---
   let runAsUser: string | undefined;
   try {
-    const scConfig = JSON.parse(readFileSync(`${configDir}/gateway.json`, "utf-8"));
+    const scConfig = JSON.parse(readFileSync(getGatewayConfigPath(), "utf-8"));
     runAsUser = scConfig.runAsUser;
   } catch { /* no config or missing field */ }
 
@@ -105,18 +100,20 @@ export default async function start() {
     log("sc", `Running OpenClaw as user: ${runAsUser}`);
   }
   log("sc", "Starting OpenClaw...");
-  const openclawProc = startOpenClaw(runAsUser);
+  const openclawProc = startOpenClaw(runAsUser, options);
   log("sc", `OpenClaw PID ${openclawProc.pid}`);
 
   await waitForHttp("http://127.0.0.1:18789", 30_000);
   log("sc", "OpenClaw ready");
 
   // --- 9. Write PID file ---
-  writeFileSync(pidFile, JSON.stringify({
-    supervisor: supervisorProc.pid,
-    openclaw: openclawProc.pid,
-    startedAt: new Date().toISOString(),
-  }));
+  if (!options.foreground) {
+    writeFileSync(getPidFile(), JSON.stringify({
+      supervisor: supervisorProc.pid,
+      openclaw: openclawProc.pid,
+      startedAt: new Date().toISOString(),
+    }));
+  }
 
   // --- 10. Running ---
   log("sc", "━━━ sharkcage running ━━━");
@@ -134,8 +131,8 @@ export default async function start() {
     log("sc", "Shutting down...");
     safeKill(openclawProc);
     safeKill(supervisorProc);
-    try { unlinkSync(pidFile); } catch { /* gone */ }
-    try { unlinkSync(socketPath); } catch { /* gone */ }
+    try { unlinkSync(getPidFile()); } catch { /* gone */ }
+    try { unlinkSync(getSocketPath()); } catch { /* gone */ }
     // Give processes time to die, then force kill and exit
     setTimeout(() => {
       forceKill(openclawProc);
@@ -153,7 +150,7 @@ export default async function start() {
     console.error(`[sc] Supervisor exited (code ${code}). Restarting in 2s...`);
     setTimeout(() => {
       if (!shuttingDown) {
-        supervisorProc = startSupervisor();
+        supervisorProc = startSupervisor(options);
         console.log(`[sc] Supervisor restarted: PID ${supervisorProc.pid}`);
       }
     }, 2000);
@@ -193,13 +190,19 @@ async function installMissing(deps: DepStatus): Promise<void> {
     process.exit(1);
   }
 
+  const manifest = loadManifest();
+  const installCwd = manifest?.installDir ?? getInstallDir();
+
   if (!deps.openclaw) {
     console.log("  Installing OpenClaw...");
     try {
-      execFileSync("npm", ["install", "-g", "openclaw"], { stdio: "inherit" });
+      execFileSync("npm", ["install", "--save", "openclaw"], {
+        stdio: "inherit",
+        cwd: installCwd,
+      });
       console.log("  [ok] OpenClaw installed");
     } catch {
-      console.error("  Failed. Install manually: npm install -g openclaw");
+      console.error("  Failed. Install manually: npm install --save openclaw");
       process.exit(1);
     }
   }
@@ -207,7 +210,10 @@ async function installMissing(deps: DepStatus): Promise<void> {
   if (!deps.srt) {
     console.log("  Installing srt...");
     try {
-      execFileSync("npm", ["install", "-g", "@anthropic-ai/sandbox-runtime"], { stdio: "inherit" });
+      execFileSync("npm", ["install", "--save", "@anthropic-ai/sandbox-runtime"], {
+        stdio: "inherit",
+        cwd: installCwd,
+      });
       console.log("  [ok] srt installed");
     } catch {
       console.warn("  WARNING: srt not installed. Running WITHOUT kernel sandbox.");
@@ -217,10 +223,11 @@ async function installMissing(deps: DepStatus): Promise<void> {
 
 // --- Process management ---
 
-function startSupervisor(): ChildProcess {
+function startSupervisor(options: { foreground?: boolean } = {}): ChildProcess {
+  const manifest = loadManifest();
   const supervisorPath = findPath([
     process.env.SHARKCAGE_SUPERVISOR_PATH,
-    `${configDir}/supervisor/src/main.ts`,
+    manifest ? resolve(manifest.installDir, "src/supervisor/main.ts") : undefined,
     resolve(repoRoot, "src/supervisor/main.ts"),
   ]);
 
@@ -232,7 +239,7 @@ function startSupervisor(): ChildProcess {
   const proc = spawn("npx", ["tsx", supervisorPath], {
     stdio: ["pipe", "pipe", "pipe"],
     env: passEnvVars(),
-    detached: true,
+    ...(options.foreground ? {} : { detached: true }),
   });
   prefixOutput(proc, "supervisor");
   return proc;
@@ -241,7 +248,7 @@ function startSupervisor(): ChildProcess {
 // Module-level so it's accessible after startup for printing
 let gatewayToken = "";
 
-function startOpenClaw(runAsUser?: string): ChildProcess {
+function startOpenClaw(runAsUser?: string, options: { foreground?: boolean } = {}): ChildProcess {
   // Use OpenClaw's configured token if available, then env var, then generate
   gatewayToken = process.env.OPENCLAW_GATEWAY_TOKEN ?? "";
   if (!gatewayToken) {
@@ -259,23 +266,24 @@ function startOpenClaw(runAsUser?: string): ChildProcess {
   // Security is enforced per-tool-call: every bash/file operation the AI
   // executes goes through `srt --settings <policy>` via the sandbox backend.
   // Skills get per-skill srt sandboxes. The gateway itself just serves chat.
-  // Resolve openclaw binary — use the target user's sharkcage install if running via sudo
-  let openclawBin = "openclaw";
-  const targetHome = runAsUser ? `/home/${runAsUser}` : home;
-  const localBin = `${targetHome}/.sharkcage/node_modules/.bin/openclaw`;
-  if (existsSync(localBin)) {
-    openclawBin = localBin;
-  } else {
+
+  // Resolve openclaw binary — prefer manifest, then PATH lookup
+  const manifest = loadManifest();
+  let openclawBin = manifest?.openclawBin ?? "openclaw";
+  if (!existsSync(openclawBin)) {
     try {
       openclawBin = execFileSync("which", ["openclaw"], { encoding: "utf-8" }).trim();
     } catch { /* fall back to bare name */ }
   }
-  const cmd = runAsUser ? "sudo" : openclawBin;
-  const cmdArgs = runAsUser ? ["-u", runAsUser, openclawBin, ...args] : args;
+
+  // Smart sudo: only use sudo if current user differs from runAsUser
+  const needsSudo = runAsUser && process.env.USER !== runAsUser;
+  const cmd = needsSudo ? "sudo" : openclawBin;
+  const cmdArgs = needsSudo ? ["-u", runAsUser, openclawBin, ...args] : args;
   const proc = spawn(cmd, cmdArgs, {
     stdio: ["pipe", "pipe", "pipe"],
     env: process.env,
-    detached: true,
+    ...(options.foreground ? {} : { detached: true }),
   });
   prefixOutput(proc, "openclaw");
   return proc;
@@ -298,7 +306,7 @@ function ensureOpenClawPluginRegistered(): void {
 
     const pluginPath = findPath([
       resolve(repoRoot, "dist/sharkcage"),
-      `${configDir}/openclaw-plugin`,
+      resolve(getPluginDir(), "openclaw-plugin"),
     ]);
 
     if (!pluginPath) {
@@ -342,9 +350,14 @@ function ensureOpenClawPluginRegistered(): void {
 
 // --- Helpers ---
 
-function commandExists(name: string): boolean {
+function commandExists(cmd: string): boolean {
+  const manifest = loadManifest();
+  // Check manifest path first
+  if (cmd === "openclaw" && manifest?.openclawBin && existsSync(manifest.openclawBin)) return true;
+  if (cmd === "srt" && manifest?.srtBin && existsSync(manifest.srtBin)) return true;
+  // Fall back to which
   try {
-    execFileSync("which", [name], { stdio: "pipe" });
+    execFileSync("which", [cmd], { stdio: "pipe" });
     return true;
   } catch {
     return false;
@@ -361,7 +374,7 @@ function findPath(candidates: (string | undefined)[]): string | null {
 function passEnvVars(): Record<string, string> {
   const keys = [
     "HOME", "PATH", "NODE_PATH",
-    "SHARKCAGE_CONFIG_DIR", "SHARKCAGE_DATA_DIR", "SHARKCAGE_PLUGIN_DIR", "SHARKCAGE_SOCKET",
+    "SHARKCAGE_DIR", "SHARKCAGE_CONFIG_DIR", "SHARKCAGE_DATA_DIR", "SHARKCAGE_PLUGIN_DIR", "SHARKCAGE_SOCKET",
     "HA_URL", "HA_TOKEN", "MEALS_API_URL", "MEALS_API_TOKEN",
     "NOMAD_ADDR", "NOMAD_TOKEN", "OPENROUTER_API_KEY",
     "BRIEFING_API_URL", "BRIEFING_API_TOKEN",

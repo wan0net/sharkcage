@@ -1,0 +1,24 @@
+[Unit]
+Description=Sharkcage - OpenClaw with kernel sandboxing
+Documentation=https://github.com/wan0net/sharkcage
+After=network.target
+
+[Service]
+Type=simple
+ExecStart={{INSTALL_DIR}}/bin/sc start --foreground
+ExecStop={{INSTALL_DIR}}/bin/sc stop
+Restart=on-failure
+RestartSec=5
+User={{SERVICE_USER}}
+WorkingDirectory={{INSTALL_DIR}}
+Environment=SHARKCAGE_DIR={{INSTALL_DIR}}
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths={{INSTALL_DIR}}/var {{INSTALL_DIR}}/etc
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# For developers. For production installs, use install.sh instead.
+#
 # Sharkcage bootstrap — sets up the monorepo from a fresh clone
 #
 # Usage:
@@ -107,9 +109,10 @@ echo ""
 
 # --- Create config directories ---
 echo "Creating config directories..."
-SHARKCAGE_DIR="${HOME}/.config/sharkcage"
-mkdir -p "$SHARKCAGE_DIR"/{data,plugins,approvals,denied}
-echo "  [ok] $SHARKCAGE_DIR"
+mkdir -p "$SCRIPT_DIR/etc"
+mkdir -p "$SCRIPT_DIR/var"/{plugins,approvals,denied,backups}
+echo "  [ok] $SCRIPT_DIR/etc"
+echo "  [ok] $SCRIPT_DIR/var/{plugins,approvals,denied,backups}"
 echo ""
 
 # --- Link CLI for development ---
@@ -131,6 +134,22 @@ WRAPPER_EOF
   echo "  [ok] $WRAPPER"
   echo "  Add to PATH: export PATH=\"$SCRIPT_DIR/bin:\$PATH\""
 fi
+
+# --- Write etc/install.json ---
+echo "Writing install metadata..."
+node -e "
+  const fs = require('fs');
+  fs.writeFileSync('$SCRIPT_DIR/etc/install.json', JSON.stringify({
+    installDir: '$SCRIPT_DIR',
+    openclawBin: '$SCRIPT_DIR/node_modules/.bin/openclaw',
+    srtBin: '$SCRIPT_DIR/node_modules/.bin/srt',
+    scBin: '$SCRIPT_DIR/bin/sc',
+    installedBy: process.env.USER || 'unknown',
+    version: require('$SCRIPT_DIR/package.json').version,
+    installedAt: new Date().toISOString()
+  }, null, 2) + '\n');
+"
+echo "  [ok] $SCRIPT_DIR/etc/install.json"
 
 echo ""
 echo "╭─────────────────────────────────────╮"

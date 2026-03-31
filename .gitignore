@@ -6,3 +6,5 @@ dist/
 .env
 .playwright-mcp/
 bin/sc
+etc/
+var/

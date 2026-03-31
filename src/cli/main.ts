@@ -10,9 +10,10 @@ program
 program
   .command("start")
   .description("Start sharkcage + sandboxed OpenClaw")
-  .action(async () => {
+  .option("--foreground", "Stay in foreground (for systemd)")
+  .action(async (opts: { foreground?: boolean }) => {
     const m = await import("./commands/start.ts");
-    await m.default();
+    await m.default({ foreground: opts.foreground });
   });
 
 program

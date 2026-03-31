@@ -11,13 +11,11 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { basename, resolve } from "node:path";
-
-const home = process.env.HOME ?? ".";
-const configDir = process.env.SHARKCAGE_CONFIG_DIR ?? `${home}/.config/sharkcage`;
+import { getGatewayConfigPath, getConfigDir, loadManifest } from "../lib/paths.ts";
 
 function getRunAsUser(): string | null {
   try {
-    const config = JSON.parse(readFileSync(`${configDir}/gateway.json`, "utf-8"));
+    const config = JSON.parse(readFileSync(getGatewayConfigPath(), "utf-8"));
     return config.runAsUser ?? null;
   } catch {
     return null;
@@ -133,6 +131,10 @@ function info(username: string) {
   console.log(`Sudoers: ${existsSync(sudoersPath) ? sudoersPath : "not configured"}`);
 
   // Check sharkcage install
-  const scPath = `${userHome}/.sharkcage`;
-  console.log(`Sharkcage: ${existsSync(scPath) ? scPath : "not installed"}`);
+  const manifest = loadManifest();
+  if (manifest) {
+    console.log(`Install:   ${manifest.installDir} (v${manifest.version})`);
+  } else {
+    console.log(`Install:   not found (no install manifest)`);
+  }
 }
