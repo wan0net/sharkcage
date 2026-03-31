@@ -204,8 +204,8 @@ export default async function init() {
         manifest.serviceUser = username;
         writeManifest(manifest);
 
-        // Set up passwordless sudo for running openclaw as the dedicated user
-        const sudoersRule = `${manifest.installedBy} ALL=(${username}) NOPASSWD: ${manifest.openclawBin}\n`;
+        // Set up passwordless sudo for running as the dedicated user
+        const sudoersRule = `${manifest.installedBy} ALL=(${username}) NOPASSWD: ${manifest.scBin}, ${manifest.openclawBin}\n`;
         const sudoersFile = `/etc/sudoers.d/sharkcage-${username}`;
         execFileSync("sudo", ["tee", sudoersFile], {
           input: sudoersRule,

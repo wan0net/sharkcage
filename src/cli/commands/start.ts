@@ -24,6 +24,28 @@ const repoRoot = resolve(__dirname, "../../..");
 
 
 export default async function start(options: { foreground?: boolean } = {}) {
+  // --- 0. Re-exec as dedicated user if needed ---
+  // If a dedicated user is configured and we're not already that user,
+  // re-run the entire sc start command as that user via sudo.
+  // This ensures supervisor, openclaw, and all file access use one user.
+  try {
+    const gwConfig = JSON.parse(readFileSync(getGatewayConfigPath(), "utf-8"));
+    const serviceUser = gwConfig.runAsUser;
+    if (serviceUser && process.env.USER !== serviceUser) {
+      log("sc", `Re-executing as ${serviceUser}...`);
+      const manifest = loadManifest();
+      const scBin = manifest?.scBin ?? `${getInstallDir()}/bin/sc`;
+      const args = ["sudo", "-u", serviceUser, scBin, "start"];
+      if (options.foreground) args.push("--foreground");
+      const result = spawn(args[0], args.slice(1), {
+        stdio: "inherit",
+        env: { ...process.env, HOME: getInstallDir() },
+      });
+      result.on("exit", (code) => process.exit(code ?? 1));
+      return;
+    }
+  } catch { /* no config yet, continue normally */ }
+
   log("sc", "sharkcage starting");
 
   // --- 1. Check dependencies ---
