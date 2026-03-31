@@ -200,16 +200,9 @@ export default async function init() {
           p.log.success(`User "${username}" created.`);
         }
 
-        // chown the install dir to the dedicated user (no copying)
-        p.log.info(
-          `Setting ownership of ${manifest.installDir} to ${username}...`,
-        );
-        execFileSync(
-          "sudo",
-          ["chown", "-R", `${username}:${username}`, manifest.installDir],
-          { stdio: "pipe" },
-        );
-        p.log.success(`Install directory owned by ${username}.`);
+        // Update manifest with serviceUser (before chown, while we still own the dir)
+        manifest.serviceUser = username;
+        writeManifest(manifest);
 
         // Set up passwordless sudo for running openclaw as the dedicated user
         const sudoersRule = `${manifest.installedBy} ALL=(${username}) NOPASSWD: ${manifest.openclawBin}\n`;
@@ -222,10 +215,6 @@ export default async function init() {
           stdio: "pipe",
         });
         p.log.success(`Sudoers rule written to ${sudoersFile}.`);
-
-        // Update manifest with serviceUser
-        manifest.serviceUser = username;
-        writeManifest(manifest);
       } catch (err) {
         p.log.error(
           `Failed to set up user: ${err instanceof Error ? err.message : err}`,
@@ -337,9 +326,8 @@ export default async function init() {
     }
   }
 
-  // --- 6. Write gateway.json ---
+  // --- 6. Write gateway.json (before chown if dedicated user) ---
   ensureDataDirs();
-  // Ensure the etc directory exists for gateway.json
   const gatewayDir = dirname(gatewayPath);
   mkdirSync(gatewayDir, { recursive: true });
 
@@ -350,6 +338,23 @@ export default async function init() {
 
   writeFileSync(gatewayPath, JSON.stringify(config, null, 2) + "\n");
   p.log.success(`Config written to ${gatewayPath}`);
+
+  // --- 6b. chown install dir to dedicated user (must be last file operation) ---
+  if (runAsUser) {
+    try {
+      execFileSync("sudo", ["-v"], { stdio: "inherit" });
+      p.log.info(`Setting ownership of ${manifest.installDir} to ${runAsUser}...`);
+      execFileSync(
+        "sudo",
+        ["chown", "-R", `${runAsUser}:${runAsUser}`, manifest.installDir],
+        { stdio: "pipe" },
+      );
+      p.log.success(`Install directory owned by ${runAsUser}.`);
+      try { execFileSync("sudo", ["-k"], { stdio: "pipe" }); } catch { /* ok */ }
+    } catch (err) {
+      p.log.error(`Failed to chown: ${err instanceof Error ? err.message : err}`);
+    }
+  }
 
   // --- 7. Summary ---
   const summaryLines: string[] = [
