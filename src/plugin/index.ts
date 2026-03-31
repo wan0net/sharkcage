@@ -14,7 +14,8 @@
  * - registerHttpRoute: webhook for fleet dispatch results
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { SandboxViolation } from "../supervisor/types.js";
@@ -209,6 +210,133 @@ export function register(api: OpenClawPluginApi): void {
       },
     });
   }
+
+  // --- Shadow tools for built-in file operations ---
+  // OpenClaw's built-in read/write/edit tools use createFsBridge which sharkcage
+  // doesn't implement. Instead, register shadow tools that execute file ops
+  // through srt sandboxing with the session policy.
+  const srtBin = `${installDir}/node_modules/.bin/srt`;
+  const workspaceDir = `${installDir}/.openclaw/workspace`;
+
+  // Helper: find the current session policy file
+  function getSessionPolicy(): string | null {
+    const sessionsDir = `${dataDir}/sessions`;
+    try {
+      const files = readdirSync(sessionsDir).filter(f => f.endsWith(".json"));
+      if (files.length === 0) return null;
+      // Use the most recently modified policy
+      return files
+        .map(f => ({ name: f, mtime: statSync(`${sessionsDir}/${f}`).mtimeMs }))
+        .sort((a, b) => b.mtime - a.mtime)[0].name
+        ? `${sessionsDir}/${files.sort((a, b) =>
+            statSync(`${sessionsDir}/${b}`).mtimeMs - statSync(`${sessionsDir}/${a}`).mtimeMs
+          )[0]}`
+        : null;
+    } catch { return null; }
+  }
+
+  // Helper: run a command through srt with the session policy
+  function runInSandbox(command: string): Promise<{ stdout: string; stderr: string; code: number }> {
+    return new Promise((resolve) => {
+      const policyPath = getSessionPolicy();
+      const args = policyPath
+        ? ["--settings", policyPath, "/bin/sh", "-c", command]
+        : ["/bin/sh", "-c", command]; // no policy = no sandbox (shouldn't happen)
+
+      const child = spawn(srtBin, args, {
+        stdio: ["pipe", "pipe", "pipe"],
+        cwd: workspaceDir,
+        env: { ...process.env, HOME: installDir, TMPDIR: `${installDir}/.openclaw/tmp` },
+      });
+
+      const stdoutChunks: Buffer[] = [];
+      const stderrChunks: Buffer[] = [];
+      child.stdout.on("data", (chunk: Buffer) => stdoutChunks.push(chunk));
+      child.stderr.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
+      child.on("close", (code) => {
+        resolve({
+          stdout: Buffer.concat(stdoutChunks).toString(),
+          stderr: Buffer.concat(stderrChunks).toString(),
+          code: code ?? 1,
+        });
+      });
+    });
+  }
+
+  // read tool — reads a file and returns its contents
+  api.registerTool({
+    name: "read",
+    description: "Read a file's contents. Provide an absolute path or a path relative to the workspace.",
+    parameters: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "File path to read" },
+        file_path: { type: "string", description: "File path to read (alias)" },
+      },
+    },
+    execute: async (params: Record<string, unknown>) => {
+      const filePath = String(params.path ?? params.file_path ?? "");
+      if (!filePath) return "Error: no file path provided";
+      const result = await runInSandbox(`cat ${JSON.stringify(filePath)}`);
+      if (result.code !== 0) return `Error reading file: ${result.stderr || `exit code ${result.code}`}`;
+      return result.stdout;
+    },
+  });
+
+  // write tool — writes content to a file
+  api.registerTool({
+    name: "write",
+    description: "Write content to a file. Creates the file if it doesn't exist.",
+    parameters: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "File path to write" },
+        file_path: { type: "string", description: "File path to write (alias)" },
+        content: { type: "string", description: "Content to write" },
+      },
+    },
+    execute: async (params: Record<string, unknown>) => {
+      const filePath = String(params.path ?? params.file_path ?? "");
+      const content = String(params.content ?? "");
+      if (!filePath) return "Error: no file path provided";
+      // Use heredoc to safely write content with special characters
+      const escapedContent = content.replace(/'/g, "'\\''");
+      const result = await runInSandbox(`mkdir -p "$(dirname ${JSON.stringify(filePath)})" && printf '%s' '${escapedContent}' > ${JSON.stringify(filePath)}`);
+      if (result.code !== 0) return `Error writing file: ${result.stderr || `exit code ${result.code}`}`;
+      return `Written to ${filePath}`;
+    },
+  });
+
+  // edit tool — applies edits to a file (find and replace)
+  api.registerTool({
+    name: "edit",
+    description: "Edit a file by replacing old text with new text.",
+    parameters: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "File path to edit" },
+        file_path: { type: "string", description: "File path to edit (alias)" },
+        old_text: { type: "string", description: "Text to find and replace" },
+        new_text: { type: "string", description: "Replacement text" },
+      },
+    },
+    execute: async (params: Record<string, unknown>) => {
+      const filePath = String(params.path ?? params.file_path ?? "");
+      const oldText = String(params.old_text ?? params.oldText ?? "");
+      const newText = String(params.new_text ?? params.newText ?? "");
+      if (!filePath) return "Error: no file path provided";
+      if (!oldText) return "Error: no old_text provided";
+      // Read the file, replace, write back
+      const readResult = await runInSandbox(`cat ${JSON.stringify(filePath)}`);
+      if (readResult.code !== 0) return `Error reading file: ${readResult.stderr}`;
+      const updated = readResult.stdout.replace(oldText, newText);
+      if (updated === readResult.stdout) return `Error: old_text not found in ${filePath}`;
+      const escapedContent = updated.replace(/'/g, "'\\''");
+      const writeResult = await runInSandbox(`printf '%s' '${escapedContent}' > ${JSON.stringify(filePath)}`);
+      if (writeResult.code !== 0) return `Error writing file: ${writeResult.stderr}`;
+      return `Edited ${filePath}`;
+    },
+  });
 
   // --- Hook 1: before_tool_call (priority 150) — approval gate ---
   // If the skill has no approval file, prompt the user natively via their channel.
