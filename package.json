@@ -31,14 +31,13 @@
     "bootstrap.sh",
     "install.sh",
     "policies/",
-    "tsconfig.build.json",
     "tsconfig.plugin.json",
     "README.md",
     "INSTALL.md"
   ],
   "scripts": {
     "dev": "npx tsx src/cli/main.ts",
-    "build": "tsc -p tsconfig.build.json",
+    "build": "bash bootstrap.sh",
     "check": "tsc --noEmit",
     "supervisor": "npx tsx src/supervisor/main.ts",
     "prepublishOnly": "npm run check"
