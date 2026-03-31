@@ -10,46 +10,66 @@ enforcement is at the individual tool call level. No permission prompts at runti
 ## Prerequisites
 
 - **Node.js 22+** — [nodejs.org](https://nodejs.org/)
-- **Git** — for cloning skills
+- **Git** — for cloning and updating
 - **macOS or Linux** — ASRT uses Seatbelt (macOS) or bubblewrap (Linux)
 
-### Linux-specific prerequisites
-
-```bash
-# Required packages (Ubuntu/Debian)
-sudo apt-get install -y ripgrep bubblewrap socat
-
-# AppArmor profile for bubblewrap (Ubuntu 24.04+ / Noble)
-# Without this, bwrap fails with "Permission denied" on user namespaces
-echo 'abi <abi/4.0>,
-include <tunables/global>
-profile bwrap /usr/bin/bwrap flags=(unconfined) {
-  userns,
-}' | sudo tee /etc/apparmor.d/bwrap
-sudo apparmor_parser -r /etc/apparmor.d/bwrap
-```
+> OpenClaw and srt are installed automatically by the install script. You do not need to install them separately.
 
 ## Quick Start
 
 ```bash
-# 1. Clone
-git clone --recursive https://github.com/wan0net/sharkcage.git
-cd sharkcage
+# 1. Install to /opt/sharkcage
+curl -fsSL https://raw.githubusercontent.com/wan0net/sharkcage/main/install.sh | bash
 
-# 2. Bootstrap (installs packages, optionally installs OpenClaw + srt)
-./bootstrap.sh
-
-# 3. Add sc to PATH
-export PATH="$PWD/bin:$PATH"
-
-# 4. Set your API key
+# 2. Set your API key
 export OPENROUTER_API_KEY=your-key-here
 
-# 5. Run the setup wizard
+# 3. Run the setup wizard
 sc init
 
-# 6. Start
+# 4. Start
 sc start
+```
+
+The install script handles everything: cloning, dependency installation (including OpenClaw and srt),
+creating a dedicated system user, setting up directory layout, and adding `sc` to your PATH.
+
+## Directory Layout
+
+```
+/opt/sharkcage/
+├── bin/            # sc CLI (added to PATH)
+├── etc/            # configuration (sharkcage.json, policies)
+├── var/            # runtime data (audit logs, skill state)
+├── skills/         # installed skills
+├── bootstrap.sh    # dependency installer
+└── ...             # source code
+```
+
+## Dedicated User
+
+The install script creates a dedicated `sharkcage` system user. AI-directed commands run as this
+user inside their sandbox, providing an additional isolation layer beyond kernel-enforced sandboxing.
+
+```bash
+# Copy files into the dedicated user's home
+sc user copy-in ./my-data.json
+
+# Open a shell as the dedicated user
+sc user shell
+
+# Show user details
+sc user info
+```
+
+## Systemd Service (Linux)
+
+After installation, enable sharkcage as a system service:
+
+```bash
+sudo cp /opt/sharkcage/etc/sharkcage.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now sharkcage
 ```
 
 ## Network configuration
@@ -58,10 +78,10 @@ By default, OpenClaw binds to `127.0.0.1` (localhost only). For remote access vi
 
 ```bash
 # After sc init, update the bind address:
-jq '.gateway.bind = "lan"' ~/.openclaw/openclaw.json > /tmp/oc.json && mv /tmp/oc.json ~/.openclaw/openclaw.json
+jq '.gateway.bind = "lan"' /opt/sharkcage/etc/openclaw.json > /tmp/oc.json && mv /tmp/oc.json /opt/sharkcage/etc/openclaw.json
 
 # Allow all origins (if terminating TLS at a reverse proxy):
-jq '.gateway.controlUi.allowedOrigins = ["*"]' ~/.openclaw/openclaw.json > /tmp/oc.json && mv /tmp/oc.json ~/.openclaw/openclaw.json
+jq '.gateway.controlUi.allowedOrigins = ["*"]' /opt/sharkcage/etc/openclaw.json > /tmp/oc.json && mv /tmp/oc.json /opt/sharkcage/etc/openclaw.json
 ```
 
 If accessing via HTTPS (recommended), configure your reverse proxy (Traefik, Caddy, nginx) to terminate TLS and forward to `http://localhost:18789`.
@@ -173,6 +193,16 @@ Changes require confirmation and restart.
 
 ```bash
 sc stop
+```
+
+## Updating
+
+```bash
+cd /opt/sharkcage
+sudo git fetch --tags
+sudo git checkout v1.1.0        # or the version you want
+sudo bash bootstrap.sh          # reinstall dependencies
+sc stop && sc start             # restart with the new version
 ```
 
 ## Architecture
