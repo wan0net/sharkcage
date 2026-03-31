@@ -105,6 +105,23 @@ export default async function start(options: { foreground?: boolean } = {}) {
   const openclawProc = startOpenClaw(runAsUser, options);
   log("sc", `OpenClaw PID ${openclawProc.pid}`);
 
+  // Determine gateway bind address for URLs
+  let gatewayHost = "127.0.0.1";
+  try {
+    const ocConfig = JSON.parse(readFileSync(`${getInstallDir()}/.openclaw/openclaw.json`, "utf-8"));
+    const bind = ocConfig.gateway?.bind;
+    if (bind && bind !== "0.0.0.0") {
+      gatewayHost = bind;
+    } else if (bind === "0.0.0.0") {
+      // Bound to all interfaces — use hostname or LAN IP
+      try {
+        gatewayHost = execFileSync("hostname", ["-I"], { encoding: "utf-8" }).trim().split(" ")[0] || "127.0.0.1";
+      } catch {
+        gatewayHost = "0.0.0.0";
+      }
+    }
+  } catch { /* use default */ }
+
   await waitForHttp("http://127.0.0.1:18789", 30_000);
   log("sc", "OpenClaw ready");
 
@@ -119,9 +136,9 @@ export default async function start(options: { foreground?: boolean } = {}) {
 
   // --- 10. Running ---
   log("sc", "━━━ sharkcage running ━━━");
-  log("sc", `Web UI:    http://127.0.0.1:18789/#token=${gatewayToken}`);
-  log("sc", `Dashboard: http://127.0.0.1:18789/sharkcage/?token=${gatewayToken}`);
-  log("sc", `API:       http://127.0.0.1:18790/api/status`);
+  log("sc", `Web UI:    http://${gatewayHost}:18789/#token=${gatewayToken}`);
+  log("sc", `Dashboard: http://${gatewayHost}:18789/sharkcage/?token=${gatewayToken}`);
+  log("sc", `API:       http://${gatewayHost}:18790/api/status`);
   log("sc", "Press Ctrl+C to stop");
 
   // --- 11. Monitor + shutdown ---
