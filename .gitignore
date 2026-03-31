@@ -5,3 +5,4 @@ dist/
 *.d.ts
 .env
 .playwright-mcp/
+bin/sc

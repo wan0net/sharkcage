@@ -1,2 +1,0 @@
-#!/usr/bin/env bash
-exec npx tsx "/Users/icd/Workspace/sharkcage/src/cli/main.ts" "$@"
