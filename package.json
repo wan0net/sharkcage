@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Per-tool kernel sandboxing for OpenClaw — every AI command runs through srt with approve-once capability enforcement",
   "type": "module",
-  "license": "MIT",
+  "license": "BSD-3-Clause",
   "repository": {
     "type": "git",
     "url": "https://github.com/wan0net/sharkcage.git"
