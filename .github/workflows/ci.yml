@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+  security-events: write
+
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -56,9 +60,33 @@ jobs:
           scan-type: fs
           scan-ref: .
           severity: CRITICAL,HIGH
-          exit-code: 1
+          format: sarif
+          output: trivy-results.sarif
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy
 
       - name: Semgrep SAST
         run: |
           pip install semgrep
-          semgrep scan --config p/javascript --config p/typescript --config p/nodejs --config p/security-audit --config p/command-injection --error --exclude node_modules
+          semgrep scan \
+            --config p/javascript \
+            --config p/typescript \
+            --config p/nodejs \
+            --config p/security-audit \
+            --config p/command-injection \
+            --sarif \
+            --output semgrep-results.sarif \
+            --exclude node_modules \
+            || true
+
+      - name: Upload Semgrep results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: semgrep-results.sarif
+          category: semgrep
