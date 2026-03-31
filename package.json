@@ -1,6 +1,6 @@
 {
   "name": "sharkcage",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Per-tool kernel sandboxing for OpenClaw — every AI command runs through srt with approve-once capability enforcement",
   "type": "module",
   "license": "BSD-3-Clause",
