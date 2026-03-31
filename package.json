@@ -24,7 +24,8 @@
     "sc": "dist/cli/main.js"
   },
   "files": [
-    "dist/",
+    "dist/sharkcage/",
+    "dist/supervisor/",
     "bin/",
     "src/",
     "bootstrap.sh",
