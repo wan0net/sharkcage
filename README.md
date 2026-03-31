@@ -6,7 +6,7 @@ Sharkcage registers as OpenClaw's **sandbox backend**, wrapping every AI-directe
 
 > **No new sandboxing tech.** Sharkcage uses the same battle-tested OS primitives that Flatpak, Snap, and Chrome have relied on for years: [bubblewrap](https://github.com/containers/bubblewrap) + seccomp on Linux, Seatbelt (sandbox-exec) on macOS. Wrapped by Anthropic's [srt](https://github.com/anthropic-experimental/sandbox-runtime). These are proven, kernel-enforced boundaries — not a custom sandbox or a JS shim.
 >
-> Built by a security engineer who got tired of `--dangerously-skip-permissions`. Vibe coded with AI, hardened by a human who kept asking "but what if..." until the sandbox actually held up. Three automated security review passes, Trivy and Semgrep on every build, every finding discussed before fixing. The security model wasn't designed top-down — it was discovered bottom-up by trying things, watching them break, and deciding what actually matters.
+> Built by an unprofessional security engineer who got tired of `--dangerously-skip-permissions`. Vibe coded with AI, hardened by a human who kept asking "but what if..." until the sandbox actually held up. Three automated security review passes, Trivy and Semgrep on every build, every finding discussed before fixing. The security model wasn't designed top-down — it was discovered bottom-up by trying things, watching them break, and deciding what actually matters.
 
 ## Security Model
 
