@@ -143,10 +143,12 @@ function buildSessionPolicy(
         "/bin",
         "/sbin",
         "/etc",
+        "/tmp",
         "/opt/homebrew",
         "/Library/Frameworks/Python.framework",
         "/private/var/run", // mDNSResponder for DNS (macOS)
         "/var/folders",     // macOS temp
+        "/var/tmp",
         // Workspace dirs (passed by OpenClaw)
         workspaceDir,
         agentWorkspaceDir,
@@ -159,11 +161,16 @@ function buildSessionPolicy(
         `${installDir}/.npm`,
         `${installDir}/.nvm`,
         `${installDir}/.local`,
+        // Install dir itself (for node_modules binaries)
+        `${installDir}/node_modules`,
       ],
       allowWrite: [
-        // Private tmp inside home — not shared /tmp
+        // Temp dirs
         `${installDir}/.openclaw/tmp`,
+        "/tmp",
+        "/var/tmp",
         "/var/folders",     // macOS temp
+        // Workspace dirs
         workspaceDir,
         agentWorkspaceDir,
         `${installDir}/.openclaw/workspace`,
@@ -198,11 +205,13 @@ async function createAsrtBackend(params: {
     runtimeLabel: `asrt:${sessionKey}`,
     workdir: agentWorkspaceDir,
 
-    async buildExecSpec({ command, env, usePty }) {
+    async buildExecSpec({ command, workdir, env, usePty }) {
       const shell = usePty ? "/bin/bash" : "/bin/sh";
+      const cwd = workdir ?? agentWorkspaceDir;
+      // srt doesn't support --cwd, so cd into the workdir before running the command
+      const wrappedCommand = `cd ${JSON.stringify(cwd)} && ${command}`;
       return {
-        argv: [`${installDir}/node_modules/.bin/srt`, "--settings", policyPath, shell, "-c", command],
-        cwd: agentWorkspaceDir,
+        argv: [`${installDir}/node_modules/.bin/srt`, "--settings", policyPath, shell, "-c", wrappedCommand],
         env: { ...process.env, ...env, HOME: process.env.HOME ?? "", TMPDIR: `${installDir}/.openclaw/tmp` },
         stdinMode: usePty ? ("pipe-open" as const) : ("pipe-closed" as const),
       };
