@@ -238,7 +238,8 @@ function startSupervisor(options: { foreground?: boolean } = {}): ChildProcess {
     process.exit(1);
   }
 
-  const proc = spawn("npx", ["tsx", supervisorPath], {
+  const tsxBin = manifest ? resolve(manifest.installDir, "node_modules/.bin/tsx") : "tsx";
+  const proc = spawn(tsxBin, [supervisorPath], {
     stdio: ["pipe", "pipe", "pipe"],
     env: passEnvVars(),
     ...(options.foreground ? {} : { detached: true }),

@@ -181,7 +181,7 @@ cat > "$INSTALL_DIR/bin/sc" << WRAPPER_EOF
 export NVM_DIR="\${NVM_DIR:-\$HOME/.nvm}"
 [ -s "\$NVM_DIR/nvm.sh" ] && . "\$NVM_DIR/nvm.sh"
 export PATH="$INSTALL_DIR/node_modules/.bin:\$PATH"
-exec npx tsx "$INSTALL_DIR/src/cli/main.ts" "\$@"
+exec "$INSTALL_DIR/node_modules/.bin/tsx" "$INSTALL_DIR/src/cli/main.ts" "\$@"
 WRAPPER_EOF
 chmod +x "$INSTALL_DIR/bin/sc"
 echo "  [ok] $INSTALL_DIR/bin/sc"

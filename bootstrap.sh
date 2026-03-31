@@ -128,7 +128,7 @@ export NVM_DIR="\${NVM_DIR:-\$HOME/.nvm}"
 [ -s "\$NVM_DIR/nvm.sh" ] && . "\$NVM_DIR/nvm.sh"
 # Add local binaries to PATH
 export PATH="$SCRIPT_DIR/node_modules/.bin:\$PATH"
-exec npx tsx "$SCRIPT_DIR/src/cli/main.ts" "\$@"
+exec "$SCRIPT_DIR/node_modules/.bin/tsx" "$SCRIPT_DIR/src/cli/main.ts" "\$@"
 WRAPPER_EOF
   chmod +x "$WRAPPER"
   echo "  [ok] $WRAPPER"
