@@ -14,10 +14,9 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, copyFileSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import * as p from "@clack/prompts";
-import { loadManifest, writeManifest, getConfigDir, getDataDir } from "../lib/paths.ts";
+import { loadManifest, writeManifest, getInstallDir, getConfigDir, getDataDir } from "../lib/paths.ts";
 
-const home = process.env.HOME ?? ".";
-const ocConfigPath = `${home}/.openclaw/openclaw.json`;
+const ocConfigPath = `${getInstallDir()}/.openclaw/openclaw.json`;
 const scConfigDir = getConfigDir();
 const backupDir = `${getDataDir()}/backups`;
 

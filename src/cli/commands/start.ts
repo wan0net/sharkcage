@@ -22,7 +22,6 @@ import { getInstallDir, getSocketPath, getPidFile, getPluginDir, getGatewayConfi
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "../../..");
 
-const home = process.env.HOME ?? ".";
 
 export default async function start(options: { foreground?: boolean } = {}) {
   log("sc", "sharkcage starting");
@@ -62,26 +61,7 @@ export default async function start(options: { foreground?: boolean } = {}) {
     try { unlinkSync(getPidFile()); } catch { /* gone */ }
   }
 
-  // --- 6. Pre-sync CLI auth credentials before sandboxing ---
-  // CLI-based auth (Claude CLI, Codex CLI, etc.) stores credentials in the
-  // keychain. The sandbox blocks keychain access, but the file-based fallback
-  // works. Ensure the file fallback exists by reading keychain BEFORE sandbox.
-  const credFile = `${home}/.claude/.credentials.json`;
-  if (!existsSync(credFile)) {
-    try {
-      const raw = execFileSync("security", [
-        "find-generic-password", "-s", "Claude Code-credentials", "-w"
-      ], { encoding: "utf-8", timeout: 10_000 }).trim();
-      if (raw) {
-        writeFileSync(credFile, raw, { mode: 0o600 });
-        log("sc", "CLI credentials exported for sandbox");
-      }
-    } catch {
-      // No keychain entry or user declined — not all providers use keychain
-    }
-  }
-
-  // --- 7. Start supervisor ---
+  // --- 6. Start supervisor ---
   log("sc", "Starting supervisor...");
   let supervisorProc = startSupervisor(options);
   log("sc", `Supervisor PID ${supervisorProc.pid}`);
@@ -253,7 +233,7 @@ function startOpenClaw(runAsUser?: string, options: { foreground?: boolean } = {
   gatewayToken = process.env.OPENCLAW_GATEWAY_TOKEN ?? "";
   if (!gatewayToken) {
     try {
-      const ocConfig = JSON.parse(readFileSync(`${home}/.openclaw/openclaw.json`, "utf-8"));
+      const ocConfig = JSON.parse(readFileSync(`${getInstallDir()}/.openclaw/openclaw.json`, "utf-8"));
       gatewayToken = ocConfig.gateway?.auth?.token ?? "";
     } catch { /* no config */ }
   }
@@ -282,7 +262,7 @@ function startOpenClaw(runAsUser?: string, options: { foreground?: boolean } = {
   const cmdArgs = needsSudo ? ["-u", runAsUser, openclawBin, ...args] : args;
   const proc = spawn(cmd, cmdArgs, {
     stdio: ["pipe", "pipe", "pipe"],
-    env: process.env,
+    env: { ...process.env, HOME: getInstallDir() },
     ...(options.foreground ? {} : { detached: true }),
   });
   prefixOutput(proc, "openclaw");
@@ -292,7 +272,7 @@ function startOpenClaw(runAsUser?: string, options: { foreground?: boolean } = {
 // --- OpenClaw plugin registration ---
 
 function ensureOpenClawPluginRegistered(): void {
-  const ocConfigPath = `${home}/.openclaw/openclaw.json`;
+  const ocConfigPath = `${getInstallDir()}/.openclaw/openclaw.json`;
   if (!existsSync(ocConfigPath)) {
     console.log("  [skip] OpenClaw config not found yet\n");
     return;

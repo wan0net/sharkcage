@@ -29,8 +29,6 @@ interface GatewayConfig {
   runAsUser?: string;
 }
 
-const home = process.env.HOME ?? ".";
-
 export default async function init() {
   p.intro("sharkcage init");
 
@@ -39,7 +37,8 @@ export default async function init() {
   p.log.info(`Install directory: ${manifest.installDir}`);
 
   // --- 2. OpenClaw onboard ---
-  const ocConfigPath = `${home}/.openclaw/openclaw.json`;
+  // OpenClaw config lives inside the install dir so the dedicated user can read it
+  const ocConfigPath = `${manifest.installDir}/.openclaw/openclaw.json`;
   let needsOnboard = true;
 
   if (existsSync(ocConfigPath)) {
@@ -82,7 +81,7 @@ export default async function init() {
     const result = spawnSync(
       manifest.openclawBin,
       ["onboard", "--no-install-daemon", "--skip-skills"],
-      { stdio: "inherit" },
+      { stdio: "inherit", env: { ...process.env, HOME: manifest.installDir } },
     );
 
     if (result.status !== 0) {
@@ -189,9 +188,9 @@ export default async function init() {
             [
               "useradd",
               "--system",
-              "--create-home",
+              "--no-create-home",
               "--home-dir",
-              `/home/${username}`,
+              manifest.installDir,
               "--shell",
               "/usr/sbin/nologin",
               username,
