@@ -59,11 +59,6 @@ jobs:
           exit-code: 1
 
       - name: Semgrep SAST
-        uses: semgrep/semgrep-action@v1
-        with:
-          config: >-
-            p/javascript
-            p/typescript
-            p/nodejs
-            p/security-audit
-            p/command-injection
+        run: |
+          pip install semgrep
+          semgrep scan --config p/javascript --config p/typescript --config p/nodejs --config p/security-audit --config p/command-injection --error --exclude node_modules
