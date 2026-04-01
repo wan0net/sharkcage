@@ -30,7 +30,10 @@ test("real worker path can execute the fixture skill when the host supports srt"
       {}
     );
 
-    if (response.error?.includes("listen EPERM: operation not permitted 127.0.0.1")) {
+    if (
+      response.error?.includes("listen EPERM: operation not permitted 127.0.0.1")
+      || response.error?.includes("bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted")
+    ) {
       t.skip("Host sandbox blocks the localhost bind that srt requires internally");
       return;
     }
