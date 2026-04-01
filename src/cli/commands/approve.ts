@@ -8,11 +8,10 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { createInterface } from "node:readline";
+import { getApprovalsDir, getPluginDir } from "../lib/paths.ts";
 
-const home = process.env.HOME ?? ".";
-const configDir = process.env.SHARKCAGE_CONFIG_DIR ?? `${home}/.config/sharkcage`;
-const pluginDir = `${configDir}/plugins`;
-const approvalsDir = `${configDir}/approvals`;
+const pluginDir = getPluginDir();
+const approvalsDir = getApprovalsDir();
 
 interface Capability {
   capability: string;

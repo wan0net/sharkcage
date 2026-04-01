@@ -124,7 +124,7 @@ srt --settings /opt/sharkcage/var/sessions/<session-id>.json /bin/sh -c <cmd>
 
 **Policy is scoped to the session** — the sandbox backend generates a fresh policy per session based on the active skill's approved capabilities. No session-wide config file is signed or locked; enforcement is per-invocation at the kernel level.
 
-**Immutable audit trail:** every tool call appended to `audit.jsonl` with timestamp, tool, args, result, skill, and capability.
+**Tamper-evident local audit trail:** every tool call is written to a hash-chained, rotated local audit log with timestamp, tool, args, result, skill, and capability metadata.
 
 ## Sharkcage Sits Above the Agent
 

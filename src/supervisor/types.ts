@@ -75,11 +75,15 @@ export interface SkillCapability {
 export interface AsrtConfig {
   network: {
     allowedDomains: string[];
-    allowUnixSockets?: boolean;
+    deniedDomains: string[];
+    allowLocalBinding?: boolean;
+    allowUnixSockets: string[];
   };
   filesystem: {
+    allowRead?: string[];
     allowWrite: string[];
     denyRead: string[];
+    denyWrite: string[];
   };
 }
 

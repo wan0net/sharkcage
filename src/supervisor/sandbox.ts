@@ -1,11 +1,8 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
-import { homedir } from "node:os";
 import type { AsrtConfig, SkillCapability } from "./types.js";
 import { MANDATORY_DENY_READ } from "./types.js";
-
-/** Resolved home directory — used instead of `~` so srt doesn't have to expand it */
-const HOME = homedir();
+import { getSandboxConfigDir } from "../shared/paths.js";
 
 /** Hosts that must never appear in allowedDomains — SSRF / cloud-metadata targets. */
 const BLOCKED_HOSTS = new Set([
@@ -14,7 +11,9 @@ const BLOCKED_HOSTS = new Set([
   "metadata",
   "100.100.100.100",
   "127.0.0.1",
+  "0.0.0.0",
   "::1",
+  "::",
   "localhost",
 ]);
 
@@ -26,12 +25,15 @@ const BLOCKED_PREFIXES = [
 ];
 
 function isDangerousHost(host: string): boolean {
-  const h = host.toLowerCase().replace(/:\d+$/, ""); // strip port if present
+  // strip port if present (handles IPv4 and IPv6 [::1]:8080)
+  const h = host.toLowerCase().replace(/\]?:\d+$/, "").replace(/^\[/, "");
   if (BLOCKED_HOSTS.has(h)) return true;
   return BLOCKED_PREFIXES.some((prefix) => h.startsWith(prefix));
 }
 
 // MANDATORY_DENY_READ is imported from ./types.js — canonical list lives there.
+
+import { CAPABILITY_RESOURCE_MAP } from "./capabilities.js";
 
 /**
  * Generate an ASRT config from a skill's approved capabilities.
@@ -46,43 +48,48 @@ export function buildAsrtConfig(
 
   for (const cap of capabilities) {
     const scope = cap.scope ?? [];
-    switch (cap.capability) {
-      case "network.external":
-      case "network.internal":
-        scope.forEach((h) => domains.add(h));
-        break;
-      case "home.read":
-      case "home.control":
-      case "home.automation": {
-        const ha = (env?.["HA_URL"] ?? "homeassistant.local:8123").replace(/^https?:\/\//, "");
-        domains.add(ha);
-        break;
+    const resource = CAPABILITY_RESOURCE_MAP[cap.capability];
+
+    // 1. Static domains from map
+    if (resource?.network) {
+      resource.network.forEach(d => domains.add(d));
+    }
+
+    // 2. Dynamic domains from env variables (e.g. HA_URL)
+    if (resource?.networkFromEnv) {
+      const rawUrl = env?.[resource.networkFromEnv];
+      if (rawUrl) {
+        domains.add(rawUrl.replace(/^https?:\/\//, ""));
       }
-      case "data.meals": {
-        const meals = (env?.["MEALS_API_URL"] ?? "localhost:8788").replace(/^https?:\/\//, "");
-        domains.add(meals);
-        break;
+    }
+
+    // 3. Explicitly scoped domains (network.external / internal)
+    if (cap.capability === "network.external" || cap.capability === "network.internal") {
+      scope.forEach((h) => domains.add(h));
+    }
+
+    // 4. File system scopes
+    if (cap.capability === "system.files.write") {
+      for (const p of scope) {
+        if (/^\//.test(p) && !p.includes("..")) allowWrite.push(p);
       }
-      case "fleet.dispatch":
-      case "fleet.read":
-      case "fleet.manage": {
-        const nomad = (env?.["NOMAD_ADDR"] ?? "localhost:4646").replace(/^https?:\/\//, "");
-        domains.add(nomad);
-        break;
-      }
-      case "system.files.write":
-        for (const p of scope) {
-          if (/^\//.test(p) && !p.includes("..")) allowWrite.push(p);
-        }
-        break;
     }
   }
 
   const allowedDomains = [...domains].filter((h) => !isDangerousHost(h));
 
   return {
-    network: { allowedDomains, allowUnixSockets: false },
-    filesystem: { allowWrite, denyRead: [...MANDATORY_DENY_READ] },
+    network: {
+      allowedDomains,
+      deniedDomains: [],
+      allowLocalBinding: false,
+      allowUnixSockets: [],
+    },
+    filesystem: {
+      allowWrite,
+      denyRead: [...MANDATORY_DENY_READ],
+      denyWrite: [],
+    },
   };
 }
 
@@ -92,8 +99,7 @@ export function buildAsrtConfig(
  * overwriting its own config file.
  */
 export function writeAsrtConfig(skillName: string, config: AsrtConfig): string {
-  const configDir = process.env.SHARKCAGE_CONFIG_DIR ?? `${HOME}/.config/sharkcage`;
-  const sandboxConfigDir = `${configDir}/data/sandbox-configs`;
+  const sandboxConfigDir = getSandboxConfigDir();
   mkdirSync(sandboxConfigDir, { recursive: true });
   const suffix = randomBytes(8).toString("hex");
   const path = `${sandboxConfigDir}/sandbox-${skillName}-${suffix}.json`;

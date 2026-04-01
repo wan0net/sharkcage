@@ -10,35 +10,34 @@
 
 import { createServer, type Socket } from "node:net";
 import { chmodSync, mkdirSync, unlinkSync } from "node:fs";
+import { dirname } from "node:path";
 import type { ToolCallRequest, ToolCallResponse } from "./types.js";
 import { ApprovalStore } from "./approvals.js";
 import { AuditLog } from "./audit.js";
 import { executeInSandbox, checkAsrtAvailable } from "./worker.js";
 import { startDashboardApi } from "./api.js";
 import { TokenRegistry, startLocalhostProxy } from "./proxy.js";
+import { resolveSandboxStartupDecision } from "./startup.js";
+import { getApprovalsDir, getAuditLogPath, getConfigDir, getDataDir, getPluginDir, getSocketPath, getDeniedDir } from "../shared/paths.js";
+import { handleToolCall } from "./core.js";
 
 // --- Config ---
-const installDir = process.env.SHARKCAGE_DIR ?? "/opt/sharkcage";
-const configDir = process.env.SHARKCAGE_CONFIG_DIR ?? `${installDir}/etc`;
-const dataDir = process.env.SHARKCAGE_DATA_DIR ?? `${installDir}/var`;
-const pluginDir = process.env.SHARKCAGE_PLUGIN_DIR ?? `${dataDir}/plugins`;
-const socketPath = process.env.SHARKCAGE_SOCKET ?? `${dataDir}/supervisor.sock`;
+const configDir = getConfigDir();
+const dataDir = getDataDir();
+const pluginDir = getPluginDir();
+const socketPath = getSocketPath();
 
 // --- State ---
-const approvals = new ApprovalStore(`${dataDir}/approvals`);
-const audit = new AuditLog(`${dataDir}/audit.jsonl`);
+const approvals = new ApprovalStore(getApprovalsDir());
+const audit = new AuditLog(getAuditLogPath());
 const tokenRegistry = new TokenRegistry();
 
 // --- Env vars to pass to skills (resolved once at startup) ---
+import { getAllServiceEnvVars } from "./capabilities.js";
+
 function getSkillEnv(): Record<string, string> {
   const env: Record<string, string> = {};
-  const passthrough = [
-    "HA_URL", "HA_TOKEN",
-    "MEALS_API_URL", "MEALS_API_TOKEN",
-    "NOMAD_ADDR", "NOMAD_TOKEN",
-    "OPENROUTER_API_KEY",
-    "BRIEFING_API_URL", "BRIEFING_API_TOKEN",
-  ];
+  const passthrough = getAllServiceEnvVars();
   for (const key of passthrough) {
     const val = process.env[key];
     if (val) env[key] = val;
@@ -48,63 +47,14 @@ function getSkillEnv(): Record<string, string> {
 
 // --- Handle a tool call request ---
 async function handleRequest(request: ToolCallRequest): Promise<ToolCallResponse> {
-  // Validate skill/tool names — prevent path traversal via crafted IPC messages
-  if (!/^[a-zA-Z0-9_-]+$/.test(request.skill) || !/^[a-zA-Z0-9_-]+$/.test(request.tool)) {
-    return {
-      id: request.id,
-      result: "",
-      error: `Invalid skill or tool name: ${request.skill}/${request.tool}`,
-      durationMs: 0,
-    };
-  }
-
-  const timestamp = new Date().toISOString();
-
-  // Check approval — if not approved, return error.
-  // Approval is handled by the OpenClaw plugin via native hooks BEFORE the
-  // tool call reaches the supervisor.
-  const approval = approvals.get(request.skill);
-  if (!approval) {
-    const errMsg = `Skill "${request.skill}" is not approved. Approve via your chat channel first.`;
-    const response: ToolCallResponse = {
-      id: request.id,
-      result: "",
-      error: errMsg,
-      durationMs: 0,
-    };
-    await audit.log({
-      timestamp,
-      skill: request.skill,
-      tool: request.tool,
-      args: JSON.stringify(request.args),
-      result: "",
-      error: errMsg,
-      durationMs: 0,
-      blocked: true,
-      blockReason: "not approved",
-    });
-    return response;
-  }
-
-  // Execute in sandbox
-  const skillPath = `${pluginDir}/${request.skill}`;
-  const env = getSkillEnv();
-  const response = await executeInSandbox(request, approval, skillPath, env, tokenRegistry);
-
-  // Audit
-  await audit.log({
-    timestamp,
-    skill: request.skill,
-    tool: request.tool,
-    args: JSON.stringify(request.args),
-    result: response.result.slice(0, 2000), // truncate for audit
-    error: response.error ?? null,
-    durationMs: response.durationMs,
-    blocked: false,
-    blockReason: null,
+  return handleToolCall(request, {
+    approvals,
+    audit,
+    execute: executeInSandbox,
+    pluginDir,
+    getSkillEnv,
+    tokenRegistry,
   });
-
-  return response;
 }
 
 // --- Unix socket server ---
@@ -114,6 +64,17 @@ function startServer(): Promise<void> {
     unlinkSync(socketPath);
   } catch {
     // doesn't exist, fine
+  }
+
+  // Ensure the directory containing the socket is restricted to owner-only.
+  // This prevents other local users from connecting to the socket even
+  // during the tiny window between listen() and chmodSync().
+  try {
+    const socketDir = dirname(socketPath);
+    mkdirSync(socketDir, { recursive: true });
+    chmodSync(socketDir, 0o700);
+  } catch (err) {
+    console.warn(`[sharkcage] failed to restrict socket directory: ${err}`);
   }
 
   return new Promise((resolve, reject) => {
@@ -129,7 +90,7 @@ function startServer(): Promise<void> {
     });
 
     server.listen(socketPath, () => {
-      // Restrict socket to owner-only so other local users cannot connect
+      // Final guard — restrict the socket itself
       try { chmodSync(socketPath, 0o600); } catch { /* best-effort */ }
       console.log(`listening on ${socketPath}`);
       resolve();
@@ -188,15 +149,19 @@ async function main(): Promise<void> {
 
   // Check ASRT
   const hasAsrt = await checkAsrtAvailable();
-  if (hasAsrt) {
+  const sandboxDecision = resolveSandboxStartupDecision(hasAsrt);
+  if (!sandboxDecision.allowed) {
+    console.error(sandboxDecision.message);
+    process.exit(1);
+  }
+  if (sandboxDecision.mode === "secure") {
     console.log("ASRT (srt) available — kernel sandbox enabled");
   } else {
-    console.warn("WARNING: srt not found — running WITHOUT kernel sandbox");
-    console.warn("Install @anthropic-ai/sandbox-runtime for full protection");
+    console.warn(`WARNING: ${sandboxDecision.message}`);
   }
 
   // Ensure directories
-  for (const dir of [configDir, dataDir, pluginDir, `${dataDir}/approvals`, `${dataDir}/denied`]) {
+  for (const dir of [configDir, dataDir, pluginDir, getApprovalsDir(), getDeniedDir()]) {
     try { mkdirSync(dir, { recursive: true }); } catch { /* exists */ }
   }
 
@@ -215,7 +180,7 @@ async function main(): Promise<void> {
   // Start dashboard API
   const apiPort = parseInt(process.env.SHARKCAGE_API_PORT ?? "18790", 10);
   const gatewayPort = parseInt(process.env.OPENCLAW_GATEWAY_PORT ?? "18789", 10);
-  startDashboardApi(apiPort, configDir, pluginDir, approvals, hasAsrt, `http://127.0.0.1:${gatewayPort}`);
+  startDashboardApi(apiPort, configDir, dataDir, pluginDir, approvals, sandboxDecision.mode === "secure", () => audit.getHealth(), `http://127.0.0.1:${gatewayPort}`);
 }
 
 // --- Shutdown ---

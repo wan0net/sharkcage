@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, extname } from "node:path";
-import type { PluginManifest, PluginCapability } from "../sdk/types.js";
+import type { PluginManifest, PluginCapability, CapabilityName } from "../sdk/types.js";
 
 // ============================================================================
 // File collection
@@ -77,6 +77,8 @@ const READ_PATTERNS = [
   "Deno.read" + "File",        // Deno.readFile
 ];
 
+import { CAPABILITY_RESOURCE_MAP } from "./capabilities.js";
+
 function detectCapabilities(
   source: string,
   _files: string[],
@@ -92,7 +94,17 @@ function detectCapabilities(
     signalCount++;
   }
 
-  // ---- Network ----
+  // 1. Generic functional detection from map
+  for (const [name, resource] of Object.entries(CAPABILITY_RESOURCE_MAP)) {
+    if (resource.detection && has(source, ...resource.detection.patterns)) {
+      add({
+        capability: name as CapabilityName,
+        reason: `Source references ${resource.detection.label}`,
+      });
+    }
+  }
+
+  // 2. Special Case: Network (extract host scopes)
   const hasFetch = has(source, "fetch(", "http.get(", "http.request(", "axios", "got(");
   if (hasFetch) {
     const urls = extractUrls(source);
@@ -116,92 +128,24 @@ function detectCapabilities(
         scope,
       });
     }
-
-    if (urls.length === 0) {
-      notes.push("Found fetch/http calls but no URL literals — network capability may be needed");
-    }
   }
 
-  if (!hasFetch && has(source, "127.0.0.1", "localhost")) {
-    notes.push("Found localhost references without fetch — network.internal may be needed");
-  }
-
-  // ---- Home Assistant ----
-  const haRead = has(source, "8123", "HA_URL", "HA_TOKEN", "home-assistant", "/api/states");
-  const haControl = has(source, /\/api\/services\/[\w]+.*POST|fetch.*\/api\/services/);
-  if (haRead || haControl) {
-    add({
-      capability: "home.read",
-      reason: "Source references Home Assistant API (HA_URL/HA_TOKEN or /api/states)",
-    });
-    if (haControl) {
-      add({
-        capability: "home.control",
-        reason: "Source POSTs to /api/services — controls HA devices",
-      });
-    }
-  }
-
-  // ---- Data ----
-  if (has(source, "MEALS_API", "meals", "fridge", "pantry", "recipe")) {
-    add({ capability: "data.meals", reason: "Source references meal/food data (meals, fridge, pantry, recipe)" });
-  }
-  if (has(source, "conversation_history", "history")) {
-    add({ capability: "data.history", reason: "Source accesses conversation history" });
-  }
-  if (has(source, "memory", "remember", "recall")) {
-    add({ capability: "data.memory", reason: "Source references memory/recall operations" });
-  }
-
-  // ---- Fleet ----
-  if (has(source, "NOMAD_ADDR", "nomad", "/v1/jobs", "/v1/allocations")) {
-    add({ capability: "fleet.dispatch", reason: "Source references Nomad API (NOMAD_ADDR or /v1/jobs)" });
-  }
-
-  // ---- System (dangerous) ----
+  // 3. Special Case: System (dangerous)
   if (has(source, ...EXEC_PATTERNS)) {
     const trigger = EXEC_PATTERNS.find((p) => source.includes(p)) ?? "exec";
     add({ capability: "system.exec", reason: `Source uses subprocess execution: ${trigger}` });
   }
 
   if (has(source, ...WRITE_PATTERNS)) {
-    const trigger = WRITE_PATTERNS.find((p) => source.includes(p)) ?? "writeFile";
-    // Check if all write calls are scoped to /tmp
-    const writeCalls = source.match(new RegExp(`(?:${WRITE_PATTERNS.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})[^;]*`, "g")) ?? [];
-    const allTmp = writeCalls.length > 0 && writeCalls.every((c) => c.includes("/tmp"));
-    if (allTmp) {
-      notes.push(`Found ${trigger} but only to /tmp — may not need system.files.write`);
-    }
-    add({ capability: "system.files.write", reason: `Source calls ${trigger} — writes to filesystem` });
+    add({ capability: "system.files.write", reason: `Source writes to filesystem` });
   }
 
   if (has(source, ...READ_PATTERNS)) {
-    const trigger = READ_PATTERNS.find((p) => source.includes(p)) ?? "readFile";
-    add({ capability: "system.files.read", reason: `Source calls ${trigger} — reads from filesystem` });
+    add({ capability: "system.files.read", reason: `Source reads from filesystem` });
   }
 
-  // Broad process.env access
   if (/process\.env(?!\[["'`][A-Z_]+["'`]\])/.test(source) || has(source, "Deno.env.toObject()")) {
-    add({ capability: "system.env", reason: "Source accesses process.env broadly (not scoped to specific variables)" });
-  }
-
-  // ---- Notifications ----
-  if (has(source, "signal", "signal-cli")) {
-    add({ capability: "notify.signal", reason: "Source references Signal messaging (signal-cli)" });
-  }
-  if (has(source, "ntfy", "pushover", /push\s*\(/)) {
-    add({ capability: "notify.push", reason: "Source references push notification service (ntfy/pushover)" });
-  }
-
-  // ---- Cost ----
-  const costKeywords = ["openai", "anthropic", "OPENROUTER", "workers-ai", "gpt", "claude"];
-  if (has(source, ...costKeywords, /\bllm\b/)) {
-    const providers = costKeywords.filter((p) => source.includes(p));
-    add({
-      capability: "cost.api",
-      reason: `Source calls paid AI API: ${providers.join(", ")}`,
-      scope: providers,
-    });
+    add({ capability: "system.env", reason: "Source accesses process.env broadly" });
   }
 
   return { capabilities: caps, signalCount };

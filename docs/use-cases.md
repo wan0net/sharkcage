@@ -35,10 +35,10 @@ Multi-project, multi-model, multi-agent. CI scanning. Audit logs. Cost tracking.
 
 - Skill code is readable: one SKILL.md, no build step
 - Capabilities are explicit: approved by user, persisted as JSON
-- Every tool call logged: timestamp, tool, args, result, skill, capability
+- Every tool call logged: timestamp, tool, args, result, skill, capability, hash-chain metadata
 - Scanner is deterministic: same findings every time
 - No hidden network calls: kernel-enforced per-skill domain allowlists
-- History is queryable: all data in audit.jsonl
+- History is queryable: current log plus rotated archives
 - Dashboard shows provenance: which skill, which capability, when approved
 
 ---

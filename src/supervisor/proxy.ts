@@ -65,6 +65,30 @@ function parseHostPort(raw: string, defaultPort: number): { host: string; port: 
   return { host, port: isNaN(port) ? defaultPort : port };
 }
 
+function isPrivateIpv4(host: string): boolean {
+  const match = /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(host);
+  if (!match) return false;
+  const a = Number(match[1]);
+  const b = Number(match[2]);
+  return a === 10
+    || a === 127
+    || (a === 172 && b >= 16 && b <= 31)
+    || (a === 192 && b === 168);
+}
+
+function isInternalHost(host: string): boolean {
+  const normalized = host.toLowerCase();
+  return normalized === "localhost"
+    || normalized === "127.0.0.1"
+    || normalized === "::1"
+    || normalized.endsWith(".internal")
+    || normalized.endsWith(".local")
+    || normalized.endsWith(".localhost")
+    || normalized.endsWith(".home.arpa")
+    || normalized.endsWith(".consul")
+    || isPrivateIpv4(normalized);
+}
+
 /**
  * Build the set of allowed SOCKS5 proxy targets for a skill based on its
  * approved capabilities and the current env (which contains service URLs).
@@ -151,8 +175,10 @@ export function checkTarget(
   }
 
   for (const target of allowed) {
-    // Wildcard sentinel — allow any host/port
     if (target.host === "*") {
+      if (target.capability === "network.internal" && !isInternalHost(normHost)) {
+        continue;
+      }
       return { allowed: true, capability: target.capability };
     }
     const normTarget = target.host === "localhost" ? "127.0.0.1" : target.host;

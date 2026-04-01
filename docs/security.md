@@ -73,6 +73,12 @@ No prompts at runtime. Violations are logged, not prompted:
 
 Skills run as separate processes in their own per-skill sandboxes. OpenClaw and skills cannot see each other's network scope or filesystem access. The supervisor mediates all communication via IPC.
 
+### Audit Trail
+
+Sharkcage writes tool and proxy events to a local hash-chained JSONL audit log. Each record carries a sequence number, previous-hash pointer, and entry hash so later readers can detect gaps or tampering. The log rotates by size and retains archived segments for review.
+
+This is a **tamper-evident local audit trail**, not immutable storage. If you need stronger guarantees, ship rotated segments to append-only or remote storage.
+
 ---
 
 ## Skill Scanning and Signing
@@ -124,7 +130,7 @@ Layer 2: OpenClaw tool policy (deny groups, exec security)
 Layer 3: Sharkcage capability gate (interceptor — check approval)
 Layer 4: Sharkcage approval flow (first-time dangerous ops → confirm once)
 Layer 5: Per-skill ASRT sandbox (kernel-enforced, out-of-process)
-Layer 6: Supervisor audit logging (every tool call recorded)
+Layer 6: Supervisor audit logging (every tool call recorded, hash-chained, rotated)
 ```
 
 ### Threat Matrix

@@ -1,7 +1,8 @@
 import { spawn } from "node:child_process";
-import { readFileSync, unlinkSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import type { ToolCallRequest, ToolCallResponse, SandboxViolation } from "./types.js";
 import { buildAsrtConfig, writeAsrtConfig } from "./sandbox.js";
+import { CAPABILITY_RESOURCE_MAP } from "./capabilities.js";
 import type { SkillApproval } from "./types.js";
 import type { TokenRegistry } from "./proxy.js";
 
@@ -15,11 +16,23 @@ function sanitiseField(value: string, maxLen = 256): string {
 function isValidHostOrIp(value: string): boolean {
   // IPv4
   if (/^\d{1,3}(\.\d{1,3}){3}$/.test(value)) return true;
-  // IPv6 (simplified)
-  if (/^[0-9a-fA-F:]{2,39}$/.test(value)) return true;
+  // IPv6 (supports bracketed [::1] and raw ::1)
+  const v6 = value.replace(/^\[/, "").replace(/\]$/, "");
+  if (/^[0-9a-fA-F:]{2,39}$/.test(v6)) return true;
   // Hostname / domain (RFC 952 / 1123 labels, including localhost)
   if (/^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$/.test(value)) return true;
   return false;
+}
+
+/** Resolved absolute path to the node binary */
+const NODE_BIN = process.execPath;
+
+/**
+ * Resolve the absolute path to a binary in the sharkcage install directory.
+ */
+function resolveSharkcageBin(binName: string): string {
+  const installDir = process.env.SHARKCAGE_DIR ?? "/opt/sharkcage";
+  return `${installDir}/node_modules/.bin/${binName}`;
 }
 
 /**
@@ -94,33 +107,39 @@ export async function executeInSandbox(
 
   // Determine skill runtime from plugin.json (default: node)
   let runtime = "node";
+  let manifestMain: string | null = null;
   try {
     const manifest = JSON.parse(readFileSync(`${skillDir}/plugin.json`, "utf-8"));
     runtime = manifest.runtime ?? "node";
+    manifestMain = typeof manifest.main === "string" ? manifest.main : null;
   } catch { /* use default */ }
 
   // Build the inner command based on runtime
-  const entryPoint = `${skillDir}/mod.ts`;
+  const entryPoint = manifestMain
+    ? `${skillDir}/${manifestMain}`
+    : existsSync(`${skillDir}/mod.ts`)
+      ? `${skillDir}/mod.ts`
+      : `${skillDir}/mod.js`;
   let innerCmd: string[];
   switch (runtime) {
     case "deno":
+      // Resolve deno path at runtime if possible, else assume it's on PATH
       innerCmd = ["deno", "run", "--allow-all", entryPoint];
       break;
     case "node":
     default:
-      // Use tsx for TypeScript support, or node for .js
+      // Use absolute path for node and tsx
       if (entryPoint.endsWith(".ts")) {
-        innerCmd = ["npx", "tsx", entryPoint];
+        innerCmd = [NODE_BIN, resolveSharkcageBin("tsx"), entryPoint];
       } else {
-        innerCmd = ["node", entryPoint];
+        innerCmd = [NODE_BIN, entryPoint];
       }
       break;
   }
 
   // srt wraps the process with kernel-level sandbox
   // ASRT handles all filesystem/network restrictions — the runtime flags don't matter
-  const installDir = process.env.SHARKCAGE_DIR ?? "/opt/sharkcage";
-  const srtBin = `${installDir}/node_modules/.bin/srt`;
+  const srtBin = resolveSharkcageBin("srt");
   const srtCmd = [
     srtBin,
     "--settings", configPath,
@@ -146,14 +165,37 @@ export async function executeInSandbox(
       }
     : {};
 
+  // Scope environment variables: only pass tokens if the skill has the required capability
+  const scopedEnv: Record<string, string> = {};
+  if (env) {
+    for (const cap of approval.capabilities) {
+      const resource = CAPABILITY_RESOURCE_MAP[cap.capability];
+      
+      // 1. Pass environment variables mapped to this capability
+      if (resource?.env) {
+        for (const varName of resource.env) {
+          if (env[varName]) scopedEnv[varName] = env[varName];
+        }
+      }
+
+      // 2. Special case: system.env capability scope contains explicit variable names
+      if (cap.capability === "system.env" && cap.scope) {
+        for (const varName of cap.scope) {
+          if (env[varName]) scopedEnv[varName] = env[varName];
+        }
+      }
+    }
+  }
+
   try {
     const child = spawn(srtCmd[0], srtCmd.slice(1), {
       stdio: ["pipe", "pipe", "pipe"],
       env: {
-        ...env,
+        ...scopedEnv,
         ...proxyEnv,
         // Don't leak supervisor env vars to the skill
         SHARKCAGE_TOOL_CALL: "1",
+        PATH: process.env.PATH, // keep PATH for subprocesses
       },
     });
 

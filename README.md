@@ -2,7 +2,7 @@
 
 OpenClaw, but you trust it.
 
-Sharkcage registers as OpenClaw's **sandbox backend**, wrapping every AI-directed tool call with `srt` (Anthropic Sandbox Runtime). Every bash command, file read/write, and skill execution is sandboxed using built-in OS kernel primitives. Capabilities approved once at install, enforced always.
+Sharkcage registers as OpenClaw's **sandbox backend**, wrapping every AI-directed tool call with `srt` (Anthropic Sandbox Runtime). Every bash command, file read/write, and skill execution is sandboxed using built-in OS kernel primitives. Capabilities approved once at install become the baseline policy, and later scope expansion is explicit and audited.
 
 > **No new sandboxing tech.** Sharkcage uses the same battle-tested OS primitives that Flatpak, Snap, and Chrome have relied on for years: [bubblewrap](https://github.com/containers/bubblewrap) + seccomp on Linux, Seatbelt (sandbox-exec) on macOS. Wrapped by Anthropic's [srt](https://github.com/anthropic-experimental/sandbox-runtime). These are proven, kernel-enforced boundaries — not a custom sandbox or a JS shim.
 >
@@ -31,13 +31,14 @@ OpenClaw + sharkcage plugin
   │   Per-skill tokens, blocks unapproved localhost access
   │
   └── Audit log
-      Every tool call logged, blocked or allowed
+      Hash-chained local audit log, rotated and health-checked
 ```
 
 - **Per-tool sandboxing** — the sandbox backend wraps every AI-directed command with `srt`. The AI's bash commands and file operations run inside per-session ASRT policies with restricted filesystem and network access. The gateway process itself runs unsandboxed — it only serves deterministic chat server code.
 - **Per-skill sandboxing** — each skill gets its own ASRT config derived from approved capabilities. Skills cannot reach each other's hosts or files.
 - **Approval flow** — uses OpenClaw's native `requireApproval` so the human sees approval prompts in their chat channel but the AI never does.
-- **Approve once, enforce always** — capabilities are approved at install time and enforced at the kernel level from then on. No runtime permission prompts, no fatigue.
+- **Approve once, enforce always** — install-time approvals become the baseline policy, and later scope expansion is explicit, persisted, and audited. No per-action runtime nagging.
+- **Tamper-evident local audit trail** — tool and proxy events are written to a hash-chained local log with rotation and integrity checks.
 
 ## Quick Start
 

@@ -1,5 +1,5 @@
 title: sharkcage
-description: OpenClaw inside a kernel-level sandbox. Per-skill ASRT sandboxing, capability model, approve once enforce always.
+description: OpenClaw inside a kernel-level sandbox. Per-skill ASRT sandboxing, audited approvals, and a tamper-evident local audit trail.
 url: https://wan0.net
 baseurl: /sharkcage
 markdown: kramdown
