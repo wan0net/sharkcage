@@ -35,6 +35,11 @@ test("real worker path can execute the fixture skill when the host supports srt"
       return;
     }
 
+    if (response.error?.includes("Sandbox dependencies not available:")) {
+      t.skip("Host is missing required sandbox runtime dependencies");
+      return;
+    }
+
     assert.equal(response.error, undefined);
     const result = JSON.parse(response.result) as { args: { value: number } };
     assert.equal(result.args.value, 42);

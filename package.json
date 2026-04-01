@@ -39,7 +39,7 @@
     "dev": "npx tsx src/cli/main.ts",
     "build": "bash bootstrap.sh",
     "check": "tsc --noEmit",
-    "test": "node --import tsx --test test/**/*.test.ts",
+    "test": "node --import tsx --test --test-concurrency=1 test/**/*.test.ts",
     "supervisor": "npx tsx src/supervisor/main.ts",
     "prepublishOnly": "npm run check"
   },
