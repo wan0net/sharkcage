@@ -51,7 +51,13 @@ function computeEntryHash(kind: "tool" | "proxy", payload: unknown, seq: number,
 
 function archivePath(path: string): string {
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  return `${path}.${stamp}`;
+  let candidate = `${path}.${stamp}`;
+  let suffix = 1;
+  while (existsSync(candidate)) {
+    candidate = `${path}.${stamp}-${suffix}`;
+    suffix += 1;
+  }
+  return candidate;
 }
 
 export class AuditLog {

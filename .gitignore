@@ -8,3 +8,4 @@ dist/
 bin/sc
 etc/
 var/
+!test/fixtures/**/*.js
