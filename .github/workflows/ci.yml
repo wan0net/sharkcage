@@ -39,6 +39,34 @@ jobs:
       - name: Verify CLI loads
         run: npx tsx src/cli/main.ts help
 
+  sandbox-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install Linux sandbox dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap ripgrep socat
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Show sandbox tool versions
+        run: |
+          rg --version
+          bwrap --version
+          socat -V | head -n 1
+          npx srt --help >/dev/null
+
+      - name: Run real worker smoke test
+        run: node --import tsx --test --test-concurrency=1 test/supervisor-real-worker.test.ts
+
   security:
     runs-on: ubuntu-latest
     steps:
