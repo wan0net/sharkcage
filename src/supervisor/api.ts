@@ -5,10 +5,13 @@
  * Provides read-only access to audit log, skills, approvals, and status.
  */
 
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import type { ApprovalStore } from "./approvals.js";
+import { getAuditEntries, getAuditStats } from "./audit-reader.js";
+import { getApprovalsDir, getAuditLogPath } from "../shared/paths.js";
+import type { AuditHealth } from "./audit.js";
 
 /** Only allow simple alphanumeric skill/approval names — no path components. */
 function isValidName(name: string): boolean {
@@ -21,22 +24,99 @@ let activeCorsHeaders: Record<string, string> = {
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
+interface DashboardApiDeps {
+  configDir: string;
+  pluginDir: string;
+  approvalsDir: string;
+  auditPath: string;
+  hasAsrt: boolean;
+  auditHealth?: AuditHealth | (() => AuditHealth);
+}
+
+interface DashboardApiResult {
+  status: number;
+  body: unknown;
+}
+
+export function handleDashboardApiRequest(
+  method: string,
+  requestUrl: string,
+  deps: DashboardApiDeps
+): DashboardApiResult {
+  const url = new URL(requestUrl, "http://localhost");
+  const path = url.pathname;
+
+  if (method === "GET" && path === "/api/status") {
+    const skills = listSkills(deps.pluginDir, deps.approvalsDir);
+    const auditHealth = typeof deps.auditHealth === "function" ? deps.auditHealth() : deps.auditHealth;
+    return {
+      status: 200,
+      body: {
+        status: "running",
+        asrt: deps.hasAsrt,
+        supervisorPid: process.pid,
+        skills: skills.length,
+        approvedSkills: skills.filter((s) => s.approved).length,
+        uptime: process.uptime(),
+        audit: auditHealth ?? { healthy: true, lastWriteError: null, lastWriteAt: null },
+      },
+    };
+  }
+
+  if (method === "GET" && path === "/api/skills") {
+    return { status: 200, body: listSkills(deps.pluginDir, deps.approvalsDir) };
+  }
+
+  if (method === "GET" && path.startsWith("/api/skills/")) {
+    const name = path.slice("/api/skills/".length);
+    if (!isValidName(name)) return { status: 400, body: { error: "Invalid skill name" } };
+
+    const skill = getSkillDetail(name, deps.pluginDir, deps.approvalsDir);
+    if (!skill) return { status: 404, body: { error: "Skill not found" } };
+
+    return { status: 200, body: skill };
+  }
+
+  if (method === "GET" && path === "/api/audit") {
+    const tail = parseInt(url.searchParams.get("tail") ?? "100", 10);
+    const skill = url.searchParams.get("skill");
+    const blocked = url.searchParams.get("blocked") === "true";
+    return {
+      status: 200,
+      body: getAuditEntries(deps.auditPath, tail, skill, blocked),
+    };
+  }
+
+  if (method === "GET" && path === "/api/audit/stats") {
+    return { status: 200, body: getAuditStats(deps.auditPath) };
+  }
+
+  if (method === "GET" && path === "/api/config") {
+    return { status: 200, body: { configDir: deps.configDir } };
+  }
+
+  return { status: 404, body: { error: "Not found" } };
+}
+
 export function startDashboardApi(
   port: number,
   configDir: string,
+  dataDir: string,
   pluginDir: string,
   approvals: ApprovalStore,
   hasAsrt: boolean,
+  auditHealth: AuditHealth | (() => AuditHealth) | undefined,
   gatewayOrigin = "http://127.0.0.1:18789",
-): void {
+): Server {
   activeCorsHeaders = {
     "Access-Control-Allow-Origin": gatewayOrigin,
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
   };
-  const dataDir = `${configDir}/data`;
-  const auditPath = `${dataDir}/audit.jsonl`;
-  const approvalsDir = `${configDir}/approvals`;
+  void approvals;
+  void dataDir;
+  const auditPath = getAuditLogPath();
+  const approvalsDir = getApprovalsDir();
 
   const server = createServer((req: IncomingMessage, res: ServerResponse) => {
     // CORS preflight
@@ -46,75 +126,16 @@ export function startDashboardApi(
       return;
     }
 
-    const url = new URL(req.url ?? "/", `http://localhost:${port}`);
-    const path = url.pathname;
-
     try {
-      // --- GET /api/status ---
-      if (path === "/api/status" && req.method === "GET") {
-        const skills = listSkills(pluginDir, approvalsDir);
-        respond(res, 200, {
-          status: "running",
-          asrt: hasAsrt,
-          supervisorPid: process.pid,
-          skills: skills.length,
-          approvedSkills: skills.filter((s) => s.approved).length,
-          uptime: process.uptime(),
-        });
-        return;
-      }
-
-      // --- GET /api/skills ---
-      if (path === "/api/skills" && req.method === "GET") {
-        respond(res, 200, listSkills(pluginDir, approvalsDir));
-        return;
-      }
-
-      // --- GET /api/skills/:name ---
-      if (path.startsWith("/api/skills/") && req.method === "GET") {
-        const name = path.slice("/api/skills/".length);
-        if (!isValidName(name)) {
-          respond(res, 400, { error: "Invalid skill name" });
-          return;
-        }
-        const skill = getSkillDetail(name, pluginDir, approvalsDir);
-        if (!skill) {
-          respond(res, 404, { error: "Skill not found" });
-          return;
-        }
-        respond(res, 200, skill);
-        return;
-      }
-
-      // --- GET /api/audit ---
-      if (path === "/api/audit" && req.method === "GET") {
-        const tail = parseInt(url.searchParams.get("tail") ?? "100", 10);
-        const skill = url.searchParams.get("skill");
-        const blocked = url.searchParams.get("blocked") === "true";
-
-        const entries = getAuditEntries(auditPath, tail, skill, blocked);
-        respond(res, 200, entries);
-        return;
-      }
-
-      // --- GET /api/audit/stats ---
-      if (path === "/api/audit/stats" && req.method === "GET") {
-        const stats = getAuditStats(auditPath);
-        respond(res, 200, stats);
-        return;
-      }
-
-      // --- GET /api/config ---
-      if (path === "/api/config" && req.method === "GET") {
-        // Return only non-sensitive config summary — omit full sandbox/gateway JSON
-        // which can contain credentials and network topology.
-        respond(res, 200, {
-          configDir,
-        });
-        return;
-      }
-
-      respond(res, 404, { error: "Not found" });
+      const result = handleDashboardApiRequest(req.method ?? "GET", req.url ?? "/", {
+        configDir,
+        pluginDir,
+        approvalsDir,
+        auditPath,
+        hasAsrt,
+        auditHealth,
+      });
+      respond(res, result.status, result.body);
     } catch (err) {
       respond(res, 500, { error: err instanceof Error ? err.message : "Internal error" });
     }
@@ -127,6 +148,8 @@ export function startDashboardApi(
   server.listen(port, "127.0.0.1", () => {
     console.log(`dashboard API listening on http://127.0.0.1:${port}`);
   });
+
+  return server;
 }
 
 // --- Helpers ---
@@ -140,7 +163,7 @@ interface SkillInfo {
   approvedAt?: string;
 }
 
-function listSkills(pluginDir: string, approvalsDir: string): SkillInfo[] {
+export function listSkills(pluginDir: string, approvalsDir: string): SkillInfo[] {
   if (!existsSync(pluginDir)) return [];
 
   const skills: SkillInfo[] = [];
@@ -181,7 +204,7 @@ function listSkills(pluginDir: string, approvalsDir: string): SkillInfo[] {
   return skills;
 }
 
-function getSkillDetail(name: string, pluginDir: string, approvalsDir: string): Record<string, unknown> | null {
+export function getSkillDetail(name: string, pluginDir: string, approvalsDir: string): Record<string, unknown> | null {
   const skillDir = join(pluginDir, name);
   if (!existsSync(skillDir)) return null;
 
@@ -193,89 +216,6 @@ function getSkillDetail(name: string, pluginDir: string, approvalsDir: string): 
     manifest,
     approval,
   };
-}
-
-interface AuditEntry {
-  timestamp: string;
-  skill: string;
-  tool: string;
-  args: string;
-  result: string;
-  error: string | null;
-  durationMs: number;
-  blocked: boolean;
-  blockReason: string | null;
-}
-
-/** Strip sensitive fields from an audit entry before serving via API. */
-function sanitizeAuditEntry(entry: AuditEntry): Omit<AuditEntry, "args" | "result"> {
-  const { args: _args, result: _result, ...safe } = entry;
-  return safe;
-}
-
-function getAuditEntries(
-  auditPath: string,
-  tail: number,
-  skillFilter: string | null,
-  blockedOnly: boolean
-): Omit<AuditEntry, "args" | "result">[] {
-  if (!existsSync(auditPath)) return [];
-
-  try {
-    const stat = statSync(auditPath);
-    if (stat.size > 100 * 1024 * 1024) return [];
-  } catch { return []; }
-
-  const maxTail = Math.min(tail, 10000);
-
-  const raw = readFileSync(auditPath, "utf-8");
-  let entries: AuditEntry[] = [];
-
-  for (const line of raw.trim().split("\n")) {
-    if (!line) continue;
-    try { entries.push(JSON.parse(line)); } catch { /* skip */ }
-  }
-
-  if (skillFilter) entries = entries.filter((e) => e.skill === skillFilter);
-  if (blockedOnly) entries = entries.filter((e) => e.blocked);
-
-  return entries.slice(-maxTail).map(sanitizeAuditEntry);
-}
-
-function getAuditStats(auditPath: string): Record<string, unknown> {
-  if (!existsSync(auditPath)) return { total: 0, blocked: 0, errors: 0, bySkill: {} };
-
-  try {
-    const stat = statSync(auditPath);
-    if (stat.size > 100 * 1024 * 1024) {
-      return { total: 0, blocked: 0, errors: 0, bySkill: {}, error: "Audit log too large for stats" };
-    }
-  } catch {
-    return { total: 0, blocked: 0, errors: 0, bySkill: {} };
-  }
-
-  const raw = readFileSync(auditPath, "utf-8");
-  const lines = raw.trim().split("\n").filter(Boolean);
-
-  let total = 0;
-  let blocked = 0;
-  let errors = 0;
-  const bySkill: Record<string, { calls: number; blocked: number }> = {};
-
-  for (const line of lines) {
-    try {
-      const entry = JSON.parse(line) as AuditEntry;
-      total++;
-      if (entry.blocked) blocked++;
-      if (entry.error && !entry.blocked) errors++;
-
-      if (!bySkill[entry.skill]) bySkill[entry.skill] = { calls: 0, blocked: 0 };
-      bySkill[entry.skill].calls++;
-      if (entry.blocked) bySkill[entry.skill].blocked++;
-    } catch { /* skip */ }
-  }
-
-  return { total, blocked, errors, ok: total - blocked - errors, bySkill };
 }
 
 function safeReadJson(path: string): Record<string, unknown> | null {

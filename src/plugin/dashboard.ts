@@ -133,7 +133,9 @@ const[st,stats]=await Promise.all([api("/api/status"),api("/api/audit/stats")]);
 let h='<h1>Status</h1><div class="sub">System overview</div>';
 if(st._error){h+='<div class="eb">Not connected: '+esc(st._error)+'<br><span class="m">Start with: sharkcage start</span></div>';app.innerHTML=h;return}
 h+='<div class="G">'+card("Status",st.status,st.status==="running"?"ok":"er")+card("ASRT Sandbox",st.asrt?"Active":"Disabled",st.asrt?"ok":"w")+card("Skills",st.approvedSkills+"/"+st.skills+" approved")+card("Uptime",fmtUp(st.uptime))+'</div>';
-if(!stats._error){h+='<div class="G">'+card("Total Calls",stats.total)+card("OK",stats.ok,"ok")+card("Blocked",stats.blocked,stats.blocked>0?"er":"m")+card("Errors",stats.errors,stats.errors>0?"w":"m")+'</div>';
+if(!stats._error){h+='<div class="G">'+card("Total Calls",stats.total)+card("OK",stats.ok,"ok")+card("Blocked",stats.blocked,stats.blocked>0?"er":"m")+card("Errors",stats.errors,stats.errors>0?"w":"m")+card("Audit Health",st.audit&&st.audit.healthy?"Healthy":"Degraded",st.audit&&st.audit.healthy?"ok":"er")+card("Audit Chain",stats.integrity?(stats.integrity.checked-stats.integrity.broken)+"/"+stats.integrity.checked:"?","m")+'</div>';
+if(st.audit&&!st.audit.healthy&&st.audit.lastWriteError){h+='<div class="eb">Audit writes degraded: '+esc(st.audit.lastWriteError)+'</div>'}
+if(stats.integrity&&stats.integrity.broken>0){h+='<div class="eb">Audit chain integrity warning: '+stats.integrity.broken+' broken link(s) detected.</div>'}
 const sk=Object.entries(stats.bySkill||{});if(sk.length){h+='<div class="S"><h2>By Skill</h2><table><thead><tr><th>Skill</th><th class="r">Calls</th><th class="r">Blocked</th></tr></thead><tbody>';for(const[n,d]of sk)h+='<tr><td>'+esc(n)+'</td><td class="r">'+d.calls+'</td><td class="r '+(d.blocked>0?"er":"m")+'">'+d.blocked+'</td></tr>';h+='</tbody></table></div>'}}
 app.innerHTML=h},
 skills:async()=>{

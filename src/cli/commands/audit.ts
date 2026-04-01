@@ -6,10 +6,10 @@
  */
 
 import { readFileSync, existsSync } from "node:fs";
+import { getAuditLogPath } from "../lib/paths.ts";
+import { getAuditIntegritySummary } from "../../supervisor/audit-reader.ts";
 
-const home = process.env.HOME ?? ".";
-const configDir = process.env.SHARKCAGE_CONFIG_DIR ?? `${home}/.config/sharkcage`;
-const auditPath = `${configDir}/data/audit.jsonl`;
+const auditPath = getAuditLogPath();
 
 interface AuditEntry {
   timestamp: string;
@@ -63,7 +63,9 @@ Options:
   let entries: AuditEntry[] = [];
   for (const line of lines) {
     try {
-      entries.push(JSON.parse(line));
+      const parsed = JSON.parse(line) as AuditEntry | { payload?: AuditEntry };
+      if ("payload" in parsed && parsed.payload) entries.push(parsed.payload);
+      else entries.push(parsed as AuditEntry);
     } catch { /* skip malformed */ }
   }
 
@@ -113,5 +115,7 @@ Options:
   const blocked = entries.filter((e) => e.blocked).length;
   const errors = entries.filter((e) => e.error && !e.blocked).length;
   const ok = entries.length - blocked - errors;
+  const integrity = getAuditIntegritySummary(auditPath);
   console.log(`\n  Summary: ${ok} ok, ${errors} errors, ${blocked} blocked`);
+  console.log(`  Integrity: ${integrity.checked - integrity.broken}/${integrity.checked} linked, ${integrity.broken} broken`);
 }

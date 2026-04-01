@@ -56,6 +56,21 @@ systemctl stop sharkcage
 
 ## Implementation Plan
 
+### Immediate Priority: Test Harness + Trust Guarantees
+
+Before expanding features, the roadmap should harden the promises Sharkcage already makes around auditability, security, and usability. The first milestone is a real automated test harness with these priorities:
+
+1. Path consistency tests
+   Prove the plugin, supervisor, CLI, and dashboard all read and write the same approvals and audit locations.
+2. Approval flow tests
+   Prove an unapproved skill blocks, an approved skill runs, and runtime scope expansion updates the correct approval record.
+3. Audit behavior tests
+   Prove allowed, blocked, and error cases all produce consistent audit entries that operators can rely on.
+4. Sandbox availability tests
+   Prove startup fails closed, or enters an explicit insecure mode, when `srt` is unavailable.
+
+This test-first phase should land before broadening the roadmap further because it gives every later security or UX claim an executable safety net.
+
 ### Phase 1: Supervisor + Sandbox — DONE
 
 - [x] `sharkcage-sdk`: capability types, ASRT config mapper, scanning, testing
@@ -67,6 +82,11 @@ systemctl stop sharkcage
 
 ### Phase 2: End-to-End Integration
 
+- [ ] Add `npm test` and a first-party test runner for supervisor, plugin, CLI, and dashboard integration flows
+- [ ] Test priority 1: path consistency across approvals, deny lists, audit logs, and dashboard/API reads
+- [ ] Test priority 2: approval lifecycle from first block through approval update and re-execution
+- [ ] Test priority 3: audit lifecycle for allowed, blocked, and errored tool calls
+- [ ] Test priority 4: startup behavior when `srt` is missing or sandbox backend registration fails
 - [ ] `sc start` command: starts supervisor + OpenClaw gateway (unsandboxed) + sandbox backend
 - [ ] Install OpenClaw locally, register sharkcage plugin
 - [ ] Test: Signal message → OpenClaw → sharkcage interceptor → supervisor → sandboxed skill → result

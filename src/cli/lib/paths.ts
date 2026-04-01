@@ -8,6 +8,24 @@
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
+export {
+  getInstallDir,
+  getConfigDir,
+  getDataDir,
+  getSocketPath,
+  getPidFile,
+  getPluginDir,
+  getApprovalsDir,
+  getAuditLogPath,
+  getGatewayConfigPath,
+  getManifestPath,
+} from "../../shared/paths.js";
+import {
+  getInstallDir,
+  getConfigDir,
+  getDataDir,
+  getManifestPath,
+} from "../../shared/paths.js";
 
 export interface InstallManifest {
   installDir: string;
@@ -18,56 +36,6 @@ export interface InstallManifest {
   installedBy: string;
   version: string;
   installedAt: string;
-}
-
-/** Root install directory. Override with SHARKCAGE_DIR env var. */
-export function getInstallDir(): string {
-  return process.env.SHARKCAGE_DIR ?? "/opt/sharkcage";
-}
-
-/** Config directory: {installDir}/etc */
-export function getConfigDir(): string {
-  return resolve(getInstallDir(), "etc");
-}
-
-/** Runtime data directory: {installDir}/var */
-export function getDataDir(): string {
-  return resolve(getInstallDir(), "var");
-}
-
-/** Unix socket path */
-export function getSocketPath(): string {
-  return resolve(getDataDir(), "supervisor.sock");
-}
-
-/** PID file path */
-export function getPidFile(): string {
-  return resolve(getDataDir(), "sharkcage.pid");
-}
-
-/** Plugins directory */
-export function getPluginDir(): string {
-  return resolve(getDataDir(), "plugins");
-}
-
-/** Approvals directory */
-export function getApprovalsDir(): string {
-  return resolve(getDataDir(), "approvals");
-}
-
-/** Audit log path */
-export function getAuditLogPath(): string {
-  return resolve(getDataDir(), "audit.jsonl");
-}
-
-/** Gateway config path */
-export function getGatewayConfigPath(): string {
-  return resolve(getConfigDir(), "gateway.json");
-}
-
-/** Install manifest path */
-export function getManifestPath(): string {
-  return resolve(getConfigDir(), "install.json");
 }
 
 /** Load the install manifest. Returns null if not found or invalid. */

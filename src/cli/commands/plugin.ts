@@ -12,11 +12,10 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, rmSync } from "node:fs";
 import { join, basename } from "node:path";
 import { createInterface } from "node:readline";
+import { getApprovalsDir, getDataDir, getPluginDir, getSocketPath } from "../lib/paths.ts";
 
-const home = process.env.HOME ?? ".";
-const configDir = process.env.SHARKCAGE_CONFIG_DIR ?? `${home}/.config/sharkcage`;
-const pluginDir = `${configDir}/plugins`;
-const dataDir = process.env.SHARKCAGE_DATA_DIR ?? `${configDir}/data`;
+const pluginDir = getPluginDir();
+const dataDir = getDataDir();
 
 export default async function plugin() {
   const sub = process.argv[3];
@@ -146,7 +145,7 @@ async function pluginAdd(): Promise<void> {
   try {
     const verify = await import("./verify.js");
     const origArgs = process.argv;
-    process.argv = ["", "", skillDir];
+    process.argv = ["", "", "", skillDir];
     await verify.default();
     process.argv = origArgs;
   } catch {
@@ -155,7 +154,7 @@ async function pluginAdd(): Promise<void> {
 
   // --- Approval ---
   console.log("");
-  const supervisorSock = `${dataDir}/supervisor.sock`;
+  const supervisorSock = getSocketPath();
   if (existsSync(supervisorSock)) {
     // Supervisor is running — capabilities will be approved at first tool-call time
     // via the channel breakout flow. Still offer interactive approval if possible.
@@ -283,7 +282,7 @@ function pluginList(): void {
     }
 
     // Check approval status
-    const approvalPath = `${configDir}/approvals/${name}.json`;
+    const approvalPath = join(getApprovalsDir(), `${name}.json`);
     const approved = existsSync(approvalPath);
 
     const status = approved ? "[approved]" : "[pending]";
@@ -316,7 +315,7 @@ async function pluginRemove(): Promise<void> {
   rmSync(skillDir, { recursive: true, force: true });
   console.log(`  Removed: ${skillDir}`);
 
-  const approvalPath = `${configDir}/approvals/${name}.json`;
+  const approvalPath = join(getApprovalsDir(), `${name}.json`);
   if (existsSync(approvalPath)) {
     rmSync(approvalPath);
     console.log(`  Removed approval: ${approvalPath}`);

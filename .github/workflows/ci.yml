@@ -19,22 +19,19 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: npm
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Type check
-        run: npx tsc --noEmit
+        run: npm run check
+
+      - name: Run test suite
+        run: npm test
 
       - name: Build plugin
-        run: |
-          npx tsc -p tsconfig.plugin.json --outDir dist/sharkcage-build
-          mkdir -p dist/sharkcage dist/supervisor
-          cp dist/sharkcage-build/plugin/* dist/sharkcage/
-          cp dist/sharkcage-build/supervisor/types.js dist/supervisor/ 2>/dev/null || true
-          cp dist/sharkcage-build/supervisor/types.d.ts dist/supervisor/ 2>/dev/null || true
-          cp src/plugin/openclaw.plugin.json dist/sharkcage/
-          cp src/plugin/security-patterns.json dist/sharkcage/
+        run: npm run build
 
       - name: Validate security patterns
         run: node -e "const p = require('./src/plugin/security-patterns.json'); console.log('Patterns OK:', Object.keys(p.secrets).length, 'secrets,', p.dangerous_commands.length, 'commands,', p.sensitive_files.length, 'files')"
@@ -50,9 +47,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: npm
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Trivy vulnerability scan
         uses: aquasecurity/trivy-action@master
