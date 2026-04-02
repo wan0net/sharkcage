@@ -51,8 +51,10 @@ export default async function init(options: InitOptions = {}) {
 
   if (needsOnboard) {
     await runOpenClawOnboard(manifest, options);
+    ensureLoopbackControlUiAuth(manifest, ocConfigPath);
   } else {
     p.log.success("OpenClaw already configured.");
+    ensureLoopbackControlUiAuth(manifest, ocConfigPath);
   }
 
   logConfiguredModel(manifest, ocConfigPath);
@@ -285,6 +287,48 @@ function writeGatewayConfigForUser(
   }
 
   execFileSync("sudo", ["-u", runAsUser, "tee", gatewayPath], {
+    input: content,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+}
+
+function ensureLoopbackControlUiAuth(manifest: InstallManifest, ocConfigPath: string): void {
+  let ocConfig: any;
+  try {
+    ocConfig = JSON.parse(readOpenClawConfig(manifest, ocConfigPath));
+  } catch {
+    return;
+  }
+
+  if (ocConfig?.gateway?.bind !== "loopback") return;
+  if (ocConfig?.gateway?.controlUi?.allowInsecureAuth === true) return;
+
+  const updated = {
+    ...ocConfig,
+    gateway: {
+      ...ocConfig.gateway,
+      controlUi: {
+        ...ocConfig.gateway?.controlUi,
+        allowInsecureAuth: true,
+      },
+    },
+  };
+  writeOpenClawConfigForUser(manifest, ocConfigPath, updated);
+}
+
+function writeOpenClawConfigForUser(
+  manifest: InstallManifest,
+  ocConfigPath: string,
+  config: unknown,
+): void {
+  const content = JSON.stringify(config, null, 2) + "\n";
+  const serviceUser = manifest.serviceUser;
+  if (!serviceUser || process.platform !== "linux" || process.env.USER === serviceUser) {
+    writeFileSync(ocConfigPath, content);
+    return;
+  }
+
+  execFileSync("sudo", ["-u", serviceUser, "tee", ocConfigPath], {
     input: content,
     stdio: ["pipe", "pipe", "pipe"],
   });
