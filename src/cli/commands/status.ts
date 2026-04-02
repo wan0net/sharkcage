@@ -13,6 +13,14 @@ interface PidData {
   startedAt: string;
 }
 
+interface OpenClawGatewayConfig {
+  port?: number;
+  auth?: {
+    mode?: string;
+    token?: string;
+  };
+}
+
 function isProcessRunning(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -39,6 +47,7 @@ export default async function status() {
   const socketPath = getSocketPath();
   const gatewayConfigPath = getGatewayConfigPath();
   const auditLogPath = getAuditLogPath();
+  const installDir = getInstallDir();
 
   try {
     const gwConfig = JSON.parse(readFileSync(gatewayConfigPath, "utf-8")) as { runAsUser?: string };
@@ -46,8 +55,7 @@ export default async function status() {
     if (serviceUser && process.env.USER !== serviceUser) {
       const manifest = loadManifest();
       const scBin = manifest?.scBin ?? `${process.env.SHARKCAGE_DIR ?? "/opt/sharkcage"}/bin/sc`;
-      const installDir = manifest?.installDir ?? getInstallDir();
-      const result = spawn("sudo", ["-u", serviceUser, "env", `HOME=${process.env.SHARKCAGE_DIR ?? "/opt/sharkcage"}`, scBin, "status"], {
+      const result = spawn("sudo", ["-u", serviceUser, "env", `HOME=${installDir}`, scBin, "status"], {
         stdio: "inherit",
         cwd: installDir,
         env: {
@@ -106,13 +114,37 @@ export default async function status() {
     console.log(`Config:      ${gatewayConfigPath}`);
     console.log(`Socket:      ${socketPath}`);
     console.log(`Audit log:   ${auditLogPath}`);
-    console.log(`Dashboard:   http://127.0.0.1:18790/sharkcage/\n`);
+    const urls = getUiUrls(installDir);
+    console.log(`Web UI:      ${urls.webUi}`);
+    console.log(`Dashboard:   ${urls.dashboard}`);
+    console.log(`API:         http://127.0.0.1:18790/api/status\n`);
   } catch (err) {
     console.error(
       "Error reading PID file:",
       err instanceof Error ? err.message : err
     );
     console.log("sharkcage may not be running.\n");
+  }
+}
+
+function getUiUrls(installDir: string): { webUi: string; dashboard: string } {
+  const fallback = {
+    webUi: "http://127.0.0.1:18789/",
+    dashboard: "http://127.0.0.1:18789/sharkcage/",
+  };
+
+  try {
+    const raw = readFileSync(`${installDir}/.openclaw/openclaw.json`, "utf-8");
+    const config = JSON.parse(raw) as { gateway?: OpenClawGatewayConfig };
+    const port = config.gateway?.port ?? 18789;
+    const token = config.gateway?.auth?.mode === "token" ? config.gateway.auth.token : undefined;
+    const suffix = token ? `?token=${token}` : "";
+    return {
+      webUi: `http://127.0.0.1:${port}/${token ? `#token=${token}` : ""}`,
+      dashboard: `http://127.0.0.1:${port}/sharkcage/${suffix}`,
+    };
+  } catch {
+    return fallback;
   }
 }
 

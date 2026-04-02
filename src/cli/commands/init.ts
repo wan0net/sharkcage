@@ -47,7 +47,7 @@ export default async function init(options: InitOptions = {}) {
   p.log.info(`Install directory: ${manifest.installDir}`);
 
   const ocConfigPath = `${manifest.installDir}/.openclaw/openclaw.json`;
-  const needsOnboard = openClawNeedsOnboard(ocConfigPath);
+  const needsOnboard = openClawNeedsOnboard(manifest, ocConfigPath);
 
   if (needsOnboard) {
     await runOpenClawOnboard(manifest, options);
@@ -55,7 +55,7 @@ export default async function init(options: InitOptions = {}) {
     p.log.success("OpenClaw already configured.");
   }
 
-  logConfiguredModel(ocConfigPath);
+  logConfiguredModel(manifest, ocConfigPath);
 
   const gatewayPath = getGatewayConfigPath();
   const existingConfig = loadGatewayConfig(gatewayPath);
@@ -67,10 +67,10 @@ export default async function init(options: InitOptions = {}) {
     serviceStarted,
   } = await configureSystemdService(manifest, runAsUser, options);
 
-  ensureDataDirs();
+  ensureDataDirsForUser(manifest, runAsUser);
   mkdirSync(dirname(gatewayPath), { recursive: true });
   const config: GatewayConfig = { mode, ...(runAsUser && { runAsUser }) };
-  writeFileSync(gatewayPath, JSON.stringify(config, null, 2) + "\n");
+  writeGatewayConfigForUser(gatewayPath, config, runAsUser);
   p.log.success(`Config written to ${gatewayPath}`);
 
   if (runAsUser) {
@@ -119,10 +119,10 @@ export default async function init(options: InitOptions = {}) {
   p.outro("Done.");
 }
 
-function openClawNeedsOnboard(ocConfigPath: string): boolean {
-  if (!existsSync(ocConfigPath)) return true;
+function openClawNeedsOnboard(manifest: InstallManifest, ocConfigPath: string): boolean {
+  if (!canAccessOpenClawConfig(manifest, ocConfigPath)) return true;
   try {
-    const ocConfig = JSON.parse(readFileSync(ocConfigPath, "utf-8"));
+    const ocConfig = JSON.parse(readOpenClawConfig(manifest, ocConfigPath));
     return !ocConfig.gateway?.mode;
   } catch {
     return true;
@@ -141,36 +141,29 @@ async function runOpenClawOnboard(manifest: InstallManifest, options: InitOption
 
     p.log.info("OpenClaw config missing — running non-interactive OpenClaw onboard.");
     const token = crypto.randomBytes(24).toString("hex");
-    const result = spawnSync(
-      manifest.openclawBin,
-      [
-        "onboard",
-        "--non-interactive",
-        "--accept-risk",
-        "--auth-choice",
-        "openrouter-api-key",
-        "--openrouter-api-key",
-        openRouterApiKey,
-        "--gateway-bind",
-        "loopback",
-        "--gateway-auth",
-        "token",
-        "--gateway-token",
-        token,
-        "--flow",
-        "quickstart",
-        "--skip-channels",
-        "--skip-search",
-        "--skip-ui",
-        "--skip-health",
-        "--no-install-daemon",
-        "--skip-skills",
-      ],
-      {
-        stdio: "inherit",
-        env: { ...process.env, HOME: manifest.installDir },
-      },
-    );
+    const result = runOpenClawCommand(manifest, [
+      "onboard",
+      "--non-interactive",
+      "--accept-risk",
+      "--auth-choice",
+      "openrouter-api-key",
+      "--openrouter-api-key",
+      openRouterApiKey,
+      "--gateway-bind",
+      "loopback",
+      "--gateway-auth",
+      "token",
+      "--gateway-token",
+      token,
+      "--flow",
+      "quickstart",
+      "--skip-channels",
+      "--skip-search",
+      "--skip-ui",
+      "--skip-health",
+      "--no-install-daemon",
+      "--skip-skills",
+    ]);
 
     if (result.status !== 0) {
       p.log.error("OpenClaw setup failed. Fix the issue and re-run 'sc init'.");
@@ -202,11 +195,7 @@ async function runOpenClawOnboard(manifest: InstallManifest, options: InitOption
   console.log("└──────────────────────────────────────────────┘");
   console.log("");
 
-  const result = spawnSync(
-    manifest.openclawBin,
-    ["onboard", "--no-install-daemon", "--skip-skills"],
-    { stdio: "inherit", env: { ...process.env, HOME: manifest.installDir } },
-  );
+  const result = runOpenClawCommand(manifest, ["onboard", "--no-install-daemon", "--skip-skills"]);
 
   if (result.status !== 0) {
     p.log.error("OpenClaw setup failed. Fix the issue and re-run 'sc init'.");
@@ -220,15 +209,85 @@ async function runOpenClawOnboard(manifest: InstallManifest, options: InitOption
   console.log("");
 }
 
-function logConfiguredModel(ocConfigPath: string) {
+function logConfiguredModel(manifest: InstallManifest, ocConfigPath: string) {
   try {
-    const ocConfig = JSON.parse(readFileSync(ocConfigPath, "utf-8"));
+    const ocConfig = JSON.parse(readOpenClawConfig(manifest, ocConfigPath));
     const model = ocConfig.agents?.defaults?.model;
     const modelStr = typeof model === "string" ? model : (model?.primary ?? "unknown");
     p.log.info(`Model: ${modelStr}`);
   } catch {
     p.log.warning("Could not read OpenClaw config to verify model.");
   }
+}
+
+function canAccessOpenClawConfig(manifest: InstallManifest, ocConfigPath: string): boolean {
+  if (existsSync(ocConfigPath)) return true;
+  const serviceUser = manifest.serviceUser;
+  if (!serviceUser || process.platform !== "linux") return false;
+  try {
+    execFileSync("sudo", ["-u", serviceUser, "test", "-f", ocConfigPath], { stdio: "pipe" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function readOpenClawConfig(manifest: InstallManifest, ocConfigPath: string): string {
+  try {
+    return readFileSync(ocConfigPath, "utf-8");
+  } catch {
+    const serviceUser = manifest.serviceUser;
+    if (!serviceUser || process.platform !== "linux") throw new Error("OpenClaw config unavailable");
+    return execFileSync("sudo", ["-u", serviceUser, "cat", ocConfigPath], {
+      encoding: "utf-8",
+      stdio: "pipe",
+    });
+  }
+}
+
+function runOpenClawCommand(manifest: InstallManifest, args: string[]) {
+  const serviceUser = manifest.serviceUser;
+  const needsSudo = !!serviceUser && process.platform === "linux" && process.env.USER !== serviceUser;
+  const command = needsSudo ? "sudo" : manifest.openclawBin;
+  const commandArgs = needsSudo
+    ? ["-u", serviceUser!, "env", `HOME=${manifest.installDir}`, manifest.openclawBin, ...args]
+    : args;
+
+  return spawnSync(command, commandArgs, {
+    stdio: "inherit",
+    env: { ...process.env, HOME: manifest.installDir },
+  });
+}
+
+function ensureDataDirsForUser(manifest: InstallManifest, runAsUser?: string): void {
+  if (!runAsUser || process.platform !== "linux" || process.env.USER === runAsUser) {
+    ensureDataDirs();
+    return;
+  }
+
+  const baseDir = `${manifest.installDir}/var`;
+  for (const sub of ["plugins", "approvals", "denied", "backups"]) {
+    execFileSync("sudo", ["-u", runAsUser, "mkdir", "-p", `${baseDir}/${sub}`], {
+      stdio: "pipe",
+    });
+  }
+}
+
+function writeGatewayConfigForUser(
+  gatewayPath: string,
+  config: GatewayConfig,
+  runAsUser?: string,
+): void {
+  const content = JSON.stringify(config, null, 2) + "\n";
+  if (!runAsUser || process.platform !== "linux" || process.env.USER === runAsUser) {
+    writeFileSync(gatewayPath, content);
+    return;
+  }
+
+  execFileSync("sudo", ["-u", runAsUser, "tee", gatewayPath], {
+    input: content,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
 }
 
 function loadGatewayConfig(gatewayPath: string): GatewayConfig | null {
@@ -337,6 +396,10 @@ function ensureServiceUser(
     p.log.success(`User "${username}" already exists.`);
   } catch {
     /* will create */
+  }
+
+  if (userExists && manifest.serviceUser === username) {
+    return username;
   }
 
   try {
