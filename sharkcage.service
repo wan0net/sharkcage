@@ -12,6 +12,8 @@ RestartSec=5
 User={{SERVICE_USER}}
 WorkingDirectory={{INSTALL_DIR}}
 Environment=SHARKCAGE_DIR={{INSTALL_DIR}}
+Environment=HOME={{INSTALL_DIR}}
+Environment=PATH={{INSTALL_DIR}}/bin:{{INSTALL_DIR}}/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 # Security hardening
 NoNewPrivileges=true

@@ -138,13 +138,13 @@ export default async function start(options: { foreground?: boolean } = {}) {
   log("sc", "OpenClaw ready");
 
   // --- 9. Write PID file ---
-  if (!options.foreground) {
-    writeFileSync(getPidFile(), JSON.stringify({
-      supervisor: supervisorProc.pid,
-      openclaw: openclawProc.pid,
-      startedAt: new Date().toISOString(),
-    }));
-  }
+  // Foreground/systemd runs still need the PID file so `sc status` and `sc stop`
+  // can observe the live runtime without guessing from systemd alone.
+  writeFileSync(getPidFile(), JSON.stringify({
+    supervisor: supervisorProc.pid,
+    openclaw: openclawProc.pid,
+    startedAt: new Date().toISOString(),
+  }));
 
   // --- 10. Running ---
   log("sc", "━━━ sharkcage running ━━━");
