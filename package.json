@@ -26,6 +26,7 @@
   "files": [
     "dist/sharkcage/",
     "dist/supervisor/",
+    "dist/shared/",
     "bin/",
     "scripts/",
     "src/",

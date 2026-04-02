@@ -10,5 +10,5 @@
     "skipLibCheck": true,
     "declaration": true
   },
-  "include": ["src/plugin/**/*.ts", "src/supervisor/types.ts"]
+  "include": ["src/plugin/**/*.ts", "src/supervisor/types.ts", "src/shared/**/*.ts"]
 }

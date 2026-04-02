@@ -98,10 +98,11 @@ echo ""
 # --- Build plugin for OpenClaw ---
 echo "Building plugin..."
 npx tsc -p tsconfig.plugin.json --outDir dist/sharkcage-build 2>/dev/null
-mkdir -p dist/sharkcage dist/supervisor
+mkdir -p dist/sharkcage dist/supervisor dist/shared
 cp dist/sharkcage-build/plugin/* dist/sharkcage/ 2>/dev/null || true
 cp dist/sharkcage-build/supervisor/types.js dist/supervisor/ 2>/dev/null || true
 cp dist/sharkcage-build/supervisor/types.d.ts dist/supervisor/ 2>/dev/null || true
+cp dist/sharkcage-build/shared/* dist/shared/ 2>/dev/null || true
 cp src/plugin/openclaw.plugin.json dist/sharkcage/
 cp src/plugin/security-patterns.json dist/sharkcage/
 echo "  [ok] Plugin built to dist/sharkcage/"
