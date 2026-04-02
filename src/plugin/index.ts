@@ -26,6 +26,7 @@ import { registerAsrtBackend } from "./asrt-backend.js";
 import { scanSecrets, scanPII, scanCommand, isSensitiveFile, redact } from "./security-scanner.js";
 import { getPluginDir, getSocketPath } from "../shared/paths.js";
 import { createApprovalGateHandler, type BeforeToolCallEvent, type HookContext, type RequireApprovalResult } from "./approval-gate.js";
+import { recordDirectToolAudit } from "./direct-audit.js";
 
 // --- File location (used to resolve repo root regardless of cwd) ---
 const __pluginDir = dirname(fileURLToPath(import.meta.url));
@@ -146,12 +147,32 @@ export function register(api: OpenClawPluginApi): void {
         const danger = scanCommand(cmd);
         if (danger) {
           console.log(`[sharkcage-security] blocked dangerous command: ${cmd.slice(0, 100)}`);
+          if (!skillMap.getSkill(toolName)) {
+            void recordDirectToolAudit(supervisor, {
+              toolName,
+              params,
+              error: `Blocked: dangerous command pattern detected (${danger.name})`,
+              durationMs: 0,
+              blocked: true,
+              blockReason: `security:${danger.name}`,
+            }).catch((err) => console.error("[sharkcage-audit] failed to record blocked tool:", err));
+          }
           return { block: true, blockReason: `Blocked: dangerous command pattern detected (${danger.name})` };
         }
         // Check for secrets in command args
         const secrets = scanSecrets(cmd);
         if (secrets.length > 0) {
           console.log(`[sharkcage-security] blocked secret in command: ${secrets.map(s => s.name).join(", ")}`);
+          if (!skillMap.getSkill(toolName)) {
+            void recordDirectToolAudit(supervisor, {
+              toolName,
+              params,
+              error: `Blocked: command contains embedded secret (${secrets[0].name})`,
+              durationMs: 0,
+              blocked: true,
+              blockReason: `security:secret:${secrets[0].name}`,
+            }).catch((err) => console.error("[sharkcage-audit] failed to record blocked tool:", err));
+          }
           return { block: true, blockReason: `Blocked: command contains embedded secret (${secrets[0].name})` };
         }
       }
@@ -163,6 +184,16 @@ export function register(api: OpenClawPluginApi): void {
       const path = String(params.path ?? params.file_path ?? "");
       if (path && isSensitiveFile(path)) {
         console.log(`[sharkcage-security] blocked sensitive file access: ${path}`);
+        if (!skillMap.getSkill(toolName)) {
+          void recordDirectToolAudit(supervisor, {
+            toolName,
+            params,
+            error: `Blocked: access to sensitive file (${path})`,
+            durationMs: 0,
+            blocked: true,
+            blockReason: `security:sensitive-file:${path}`,
+          }).catch((err) => console.error("[sharkcage-audit] failed to record blocked tool:", err));
+        }
         return { block: true, blockReason: `Blocked: access to sensitive file (${path})` };
       }
     }
@@ -178,6 +209,11 @@ export function register(api: OpenClawPluginApi): void {
     if (skill) return;
 
     console.log(`[sharkcage-audit] tool: ${event.toolName}, duration: ${event.durationMs}ms`);
+    try {
+      await recordDirectToolAudit(supervisor, event);
+    } catch (err) {
+      console.error("[sharkcage-audit] failed to record tool call:", err);
+    }
   }, { priority: 50 });
 
   // --- Hook 4: inbound_claim (priority 200) — handle sc commands from chat ---

@@ -1,6 +1,6 @@
 import type { ApprovalStore } from "./approvals.js";
 import type { AuditLog } from "./audit.js";
-import type { ToolCallRequest, ToolCallResponse } from "./types.js";
+import type { AuditEntry, ToolCallRequest, ToolCallResponse } from "./types.js";
 import type { TokenRegistry } from "./proxy.js";
 
 export interface ToolExecutor {
@@ -20,6 +20,13 @@ export interface SupervisorCoreDeps {
   pluginDir: string;
   getSkillEnv: () => Record<string, string>;
   tokenRegistry?: TokenRegistry;
+}
+
+export async function recordAuditEntry(audit: AuditLog, entry: AuditEntry): Promise<void> {
+  await audit.log({
+    ...entry,
+    result: entry.result.slice(0, 2000),
+  });
 }
 
 export async function handleToolCall(
@@ -47,7 +54,7 @@ export async function handleToolCall(
       durationMs: 0,
     };
 
-    await deps.audit.log({
+    await recordAuditEntry(deps.audit, {
       timestamp,
       skill: request.skill,
       tool: request.tool,
@@ -57,6 +64,7 @@ export async function handleToolCall(
       durationMs: 0,
       blocked: true,
       blockReason: "not approved",
+      source: "supervised",
     });
 
     return response;
@@ -66,7 +74,7 @@ export async function handleToolCall(
   const env = deps.getSkillEnv();
   const response = await deps.execute(request, approval, skillPath, env, deps.tokenRegistry);
 
-  await deps.audit.log({
+  await recordAuditEntry(deps.audit, {
     timestamp,
     skill: request.skill,
     tool: request.tool,
@@ -76,6 +84,7 @@ export async function handleToolCall(
     durationMs: response.durationMs,
     blocked: Boolean(response.violation),
     blockReason: response.violation ? `${response.violation.type}:${response.violation.target}` : null,
+    source: "supervised",
   });
 
   return response;

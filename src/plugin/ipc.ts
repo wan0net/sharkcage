@@ -4,6 +4,7 @@
  */
 
 import { connect, Socket } from "node:net";
+import type { AuditEntry, AuditRecordRequest, AuditRecordResponse } from "../supervisor/types.js";
 
 interface ToolCallRequest {
   id: string;
@@ -26,12 +27,14 @@ interface ToolCallResponse {
   violation?: SandboxViolation;
 }
 
+type SupervisorResponse = ToolCallResponse | AuditRecordResponse;
+
 export class SupervisorClient {
   private socketPath: string;
   private conn: Socket | null = null;
   private buffer = "";
   private pending = new Map<string, {
-    resolve: (r: ToolCallResponse) => void;
+    resolve: (r: SupervisorResponse) => void;
     reject: (e: Error) => void;
     timer: ReturnType<typeof setTimeout>;
   }>();
@@ -67,7 +70,7 @@ export class SupervisorClient {
         this.buffer = this.buffer.slice(idx + 1);
         if (!line.trim()) continue;
         try {
-          const response = JSON.parse(line) as ToolCallResponse;
+          const response = JSON.parse(line) as SupervisorResponse;
           const p = this.pending.get(response.id);
           if (p) {
             clearTimeout(p.timer);
@@ -103,7 +106,11 @@ export class SupervisorClient {
         }
       }, 300_000);
 
-      this.pending.set(id, { resolve, reject, timer });
+      this.pending.set(id, {
+        resolve: (response) => resolve(response as ToolCallResponse),
+        reject,
+        timer,
+      });
 
       const line = JSON.stringify(request) + "\n";
       this.conn!.write(line, (err) => {
@@ -111,6 +118,36 @@ export class SupervisorClient {
           const entry = this.pending.get(id);
           if (entry) {
             clearTimeout(entry.timer);
+            this.pending.delete(id);
+          }
+          reject(err);
+        }
+      });
+    });
+  }
+
+  async recordAudit(entry: AuditEntry): Promise<void> {
+    if (!this.conn) throw new Error("Not connected to supervisor");
+
+    const id = `audit_${++this.nextId}_${Date.now()}`;
+    const request: AuditRecordRequest = { id, type: "audit_record", entry };
+
+    await new Promise<SupervisorResponse>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        if (this.pending.has(id)) {
+          this.pending.delete(id);
+          reject(new Error(`Audit record timed out: ${entry.tool}`));
+        }
+      }, 30_000);
+
+      this.pending.set(id, { resolve, reject, timer });
+
+      const line = JSON.stringify(request) + "\n";
+      this.conn!.write(line, (err) => {
+        if (err) {
+          const pending = this.pending.get(id);
+          if (pending) {
+            clearTimeout(pending.timer);
             this.pending.delete(id);
           }
           reject(err);

@@ -41,6 +41,12 @@ export interface ToolCallRequest {
   args: Record<string, unknown>;
 }
 
+export interface AuditRecordRequest {
+  id: string;
+  type: "audit_record";
+  entry: AuditEntry;
+}
+
 /** A sandbox policy violation detected from subprocess stderr */
 export interface SandboxViolation {
   type: "network" | "filesystem" | "exec";
@@ -111,4 +117,10 @@ export interface AuditEntry {
   durationMs: number;
   blocked: boolean;
   blockReason: string | null;
+  source?: "supervised" | "openclaw-direct";
+}
+
+export interface AuditRecordResponse {
+  id: string;
+  ok: true;
 }

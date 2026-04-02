@@ -11,7 +11,7 @@
 import { createServer, type Socket } from "node:net";
 import { chmodSync, mkdirSync, unlinkSync } from "node:fs";
 import { dirname } from "node:path";
-import type { ToolCallRequest, ToolCallResponse } from "./types.js";
+import type { AuditRecordRequest, AuditRecordResponse, ToolCallRequest, ToolCallResponse } from "./types.js";
 import { ApprovalStore } from "./approvals.js";
 import { AuditLog } from "./audit.js";
 import { executeInSandbox, checkAsrtHealth } from "./worker.js";
@@ -19,7 +19,7 @@ import { startDashboardApi } from "./api.js";
 import { TokenRegistry, startLocalhostProxy } from "./proxy.js";
 import { resolveSandboxStartupDecision } from "./startup.js";
 import { getApprovalsDir, getAuditLogPath, getConfigDir, getDataDir, getPluginDir, getSocketPath, getDeniedDir } from "../shared/paths.js";
-import { handleToolCall } from "./core.js";
+import { handleToolCall, recordAuditEntry } from "./core.js";
 
 // --- Config ---
 const configDir = getConfigDir();
@@ -55,6 +55,16 @@ async function handleRequest(request: ToolCallRequest): Promise<ToolCallResponse
     getSkillEnv,
     tokenRegistry,
   });
+}
+
+function isAuditRecordRequest(value: unknown): value is AuditRecordRequest {
+  return Boolean(
+    value &&
+    typeof value === "object" &&
+    (value as { type?: unknown }).type === "audit_record" &&
+    typeof (value as { id?: unknown }).id === "string" &&
+    typeof (value as { entry?: unknown }).entry === "object"
+  );
 }
 
 // --- Unix socket server ---
@@ -114,10 +124,17 @@ async function handleConnection(conn: Socket): Promise<void> {
         if (!line.trim()) continue;
 
         try {
-          const request = JSON.parse(line) as ToolCallRequest;
-          handleRequest(request).then((response) => {
-            conn.write(JSON.stringify(response) + "\n");
-          }).catch((err) => console.error("request error:", err));
+          const request = JSON.parse(line) as ToolCallRequest | AuditRecordRequest;
+          if (isAuditRecordRequest(request)) {
+            recordAuditEntry(audit, request.entry).then(() => {
+              const response: AuditRecordResponse = { id: request.id, ok: true };
+              conn.write(JSON.stringify(response) + "\n");
+            }).catch((err) => console.error("audit request error:", err));
+          } else {
+            handleRequest(request).then((response) => {
+              conn.write(JSON.stringify(response) + "\n");
+            }).catch((err) => console.error("request error:", err));
+          }
         } catch (err) {
           conn.write(JSON.stringify({
             id: "unknown",
