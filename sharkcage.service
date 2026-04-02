@@ -18,7 +18,7 @@ Environment=PATH={{INSTALL_DIR}}/bin:{{INSTALL_DIR}}/node_modules/.bin:/usr/loca
 # Security hardening
 NoNewPrivileges=true
 ProtectSystem=strict
-ReadWritePaths={{INSTALL_DIR}}/var {{INSTALL_DIR}}/etc
+ReadWritePaths={{INSTALL_DIR}}/var {{INSTALL_DIR}}/etc {{INSTALL_DIR}}/.openclaw
 ProtectHome=true
 PrivateTmp=true
 

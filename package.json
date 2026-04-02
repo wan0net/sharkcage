@@ -27,6 +27,7 @@
     "dist/sharkcage/",
     "dist/supervisor/",
     "bin/",
+    "scripts/",
     "src/",
     "bootstrap.sh",
     "install.sh",
@@ -36,6 +37,7 @@
     "INSTALL.md"
   ],
   "scripts": {
+    "postinstall": "node scripts/patch-openclaw-control-ui-csp.mjs",
     "dev": "npx tsx src/cli/main.ts",
     "build": "bash bootstrap.sh",
     "check": "tsc --noEmit",

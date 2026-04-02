@@ -26,45 +26,53 @@ export function registerDashboardRoutes(api: {
     match?: "exact" | "prefix";
   }): void;
 }): void {
-  api.registerHttpRoute({
-    path: "/sharkcage",
-    auth: "plugin",
-    handler: async (_req, res) => {
-      const html = await buildPage("status");
-      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-      res.end(html);
-    },
-  });
-  api.registerHttpRoute({
-    path: "/sharkcage/skills",
-    auth: "plugin",
-    handler: async (_req, res) => {
-      const html = await buildPage("skills");
-      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-      res.end(html);
-    },
-  });
-  api.registerHttpRoute({
-    path: "/sharkcage/audit",
-    auth: "plugin",
-    handler: async (_req, res) => {
-      const html = await buildPage("audit");
-      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-      res.end(html);
-    },
-  });
-  api.registerHttpRoute({
-    path: "/sharkcage/config",
-    auth: "plugin",
-    handler: async (_req, res) => {
-      const html = await buildPage("config");
-      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-      res.end(html);
-    },
-  });
+  for (const path of ["/sharkcage", "/sharkcage/"]) {
+    api.registerHttpRoute({
+      path,
+      auth: "plugin",
+      handler: async (_req, res) => {
+        const html = await buildPage("status", "/sharkcage");
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+        res.end(html);
+      },
+    });
+  }
+  for (const path of ["/sharkcage/skills", "/sharkcage/skills/"]) {
+    api.registerHttpRoute({
+      path,
+      auth: "plugin",
+      handler: async (_req, res) => {
+        const html = await buildPage("skills", "/sharkcage");
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+        res.end(html);
+      },
+    });
+  }
+  for (const path of ["/sharkcage/audit", "/sharkcage/audit/"]) {
+    api.registerHttpRoute({
+      path,
+      auth: "plugin",
+      handler: async (_req, res) => {
+        const html = await buildPage("audit", "/sharkcage");
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+        res.end(html);
+      },
+    });
+  }
+  for (const path of ["/sharkcage/config", "/sharkcage/config/"]) {
+    api.registerHttpRoute({
+      path,
+      auth: "plugin",
+      handler: async (_req, res) => {
+        const html = await buildPage("config", "/sharkcage");
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+        res.end(html);
+      },
+    });
+  }
 }
 
-async function buildPage(view: string): Promise<string> {
+async function buildPage(view: string, basePath: string): Promise<string> {
   const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -111,10 +119,10 @@ h2{font-size:18px;font-weight:600;margin-bottom:12px}
 <nav>
 <div class="logo">sharkcage</div>
 <div class="tag">OpenClaw, but you trust it.</div>
-<a href="/sharkcage">Status</a>
-<a href="/sharkcage/skills">Skills</a>
-<a href="/sharkcage/audit">Audit Log</a>
-<a href="/sharkcage/config">Config</a>
+<a href="${basePath}">Status</a>
+<a href="${basePath}/skills">Skills</a>
+<a href="${basePath}/audit">Audit Log</a>
+<a href="${basePath}/config">Config</a>
 </nav>
 <main id="app">Loading...</main>
 </div>
@@ -170,4 +178,8 @@ views[V]();
 </html>`;
 
   return html;
+}
+
+export async function buildDashboardPage(view: "status" | "skills" | "audit" | "config", basePath = "/dashboard"): Promise<string> {
+  return buildPage(view, basePath);
 }

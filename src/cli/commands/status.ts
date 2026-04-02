@@ -15,6 +15,7 @@ interface PidData {
 
 interface OpenClawGatewayConfig {
   port?: number;
+  bind?: string;
   auth?: {
     mode?: string;
     token?: string;
@@ -118,6 +119,16 @@ export default async function status() {
     console.log(`Web UI:      ${urls.webUi}`);
     console.log(`Dashboard:   ${urls.dashboard}`);
     console.log(`API:         http://127.0.0.1:18790/api/status\n`);
+    if (urls.gatewayWsUrl || urls.token) {
+      console.log("Manual connect:");
+      if (urls.gatewayWsUrl) {
+        console.log(`  Gateway WS: ${urls.gatewayWsUrl}`);
+      }
+      if (urls.token) {
+        console.log(`  Token:      ${urls.token}`);
+      }
+      console.log("");
+    }
   } catch (err) {
     console.error(
       "Error reading PID file:",
@@ -127,21 +138,28 @@ export default async function status() {
   }
 }
 
-function getUiUrls(installDir: string): { webUi: string; dashboard: string } {
+function getUiUrls(installDir: string): { webUi: string; dashboard: string; gatewayWsUrl?: string; token?: string } {
   const fallback = {
     webUi: "http://127.0.0.1:18789/",
-    dashboard: "http://127.0.0.1:18789/sharkcage/",
+      dashboard: "http://127.0.0.1:18790/dashboard",
+    gatewayWsUrl: "ws://127.0.0.1:18789",
+    token: undefined,
   };
 
   try {
     const raw = readFileSync(`${installDir}/.openclaw/openclaw.json`, "utf-8");
     const config = JSON.parse(raw) as { gateway?: OpenClawGatewayConfig };
     const port = config.gateway?.port ?? 18789;
+    const bind = config.gateway?.bind ?? "loopback";
     const token = config.gateway?.auth?.mode === "token" ? config.gateway.auth.token : undefined;
     const suffix = token ? `?token=${token}` : "";
+    const gatewayHost = bind === "loopback" ? "127.0.0.1" : bind;
+    const gatewayWsUrl = `ws://${gatewayHost}:${port}`;
     return {
       webUi: `http://127.0.0.1:${port}/${token ? `#token=${token}` : ""}`,
-      dashboard: `http://127.0.0.1:${port}/sharkcage/${suffix}`,
+      dashboard: `http://127.0.0.1:18790/dashboard${suffix}`,
+      gatewayWsUrl,
+      token,
     };
   } catch {
     return fallback;

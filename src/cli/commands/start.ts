@@ -149,7 +149,7 @@ export default async function start(options: { foreground?: boolean } = {}) {
   // --- 10. Running ---
   log("sc", "━━━ sharkcage running ━━━");
   log("sc", `Web UI:    http://${gatewayHost}:18789/#token=${gatewayToken}`);
-  log("sc", `Dashboard: http://${gatewayHost}:18789/sharkcage/?token=${gatewayToken}`);
+  log("sc", `Dashboard: http://${gatewayHost}:18790/dashboard?token=${gatewayToken}`);
   log("sc", `API:       http://${gatewayHost}:18790/api/status`);
   log("sc", "Press Ctrl+C to stop");
 

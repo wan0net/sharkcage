@@ -12,6 +12,7 @@ import type { ApprovalStore } from "./approvals.js";
 import { getAuditEntries, getAuditStats } from "./audit-reader.js";
 import { getApprovalsDir, getAuditLogPath } from "../shared/paths.js";
 import type { AuditHealth } from "./audit.js";
+import { buildDashboardPage } from "../plugin/dashboard.js";
 
 /** Only allow simple alphanumeric skill/approval names — no path components. */
 function isValidName(name: string): boolean {
@@ -127,6 +128,17 @@ export function startDashboardApi(
     }
 
     try {
+      const path = new URL(req.url ?? "/", "http://localhost").pathname;
+      const dashboardView = getSupervisorDashboardView(path);
+      if (req.method === "GET" && dashboardView) {
+        void buildDashboardPage(dashboardView).then((html) => {
+          res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+          res.end(html);
+        }).catch((err) => {
+          respond(res, 500, { error: err instanceof Error ? err.message : "Internal error" });
+        });
+        return;
+      }
       const result = handleDashboardApiRequest(req.method ?? "GET", req.url ?? "/", {
         configDir,
         pluginDir,
@@ -229,4 +241,12 @@ function safeReadJson(path: string): Record<string, unknown> | null {
 function respond(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { "Content-Type": "application/json", ...activeCorsHeaders });
   res.end(JSON.stringify(body));
+}
+
+function getSupervisorDashboardView(path: string): "status" | "skills" | "audit" | "config" | null {
+  if (path === "/" || path === "/dashboard") return "status";
+  if (path === "/dashboard/skills") return "skills";
+  if (path === "/dashboard/audit") return "audit";
+  if (path === "/dashboard/config") return "config";
+  return null;
 }
