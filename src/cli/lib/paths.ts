@@ -29,6 +29,7 @@ import {
 
 export interface InstallManifest {
   installDir: string;
+  nodeBin?: string;
   openclawBin: string;
   srtBin: string;
   scBin: string;

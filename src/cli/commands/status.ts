@@ -3,8 +3,9 @@
  */
 
 import { readFileSync, existsSync } from "node:fs";
-import { execFileSync } from "node:child_process";
-import { getPidFile, getSocketPath, getDataDir, getConfigDir, getAuditLogPath, getGatewayConfigPath } from "../lib/paths.ts";
+import { execFileSync, spawn } from "node:child_process";
+import { getPidFile, getSocketPath, getDataDir, getConfigDir, getAuditLogPath, getGatewayConfigPath, getInstallDir } from "../lib/paths.ts";
+import { loadManifest } from "../lib/paths.ts";
 
 interface PidData {
   supervisor: number;
@@ -34,12 +35,35 @@ function formatUptime(startedAt: string): string {
 }
 
 export default async function status() {
-  console.log("\nsharkcage status\n");
-
   const pidFile = getPidFile();
   const socketPath = getSocketPath();
   const gatewayConfigPath = getGatewayConfigPath();
   const auditLogPath = getAuditLogPath();
+
+  try {
+    const gwConfig = JSON.parse(readFileSync(gatewayConfigPath, "utf-8")) as { runAsUser?: string };
+    const serviceUser = gwConfig.runAsUser;
+    if (serviceUser && process.env.USER !== serviceUser) {
+      const manifest = loadManifest();
+      const scBin = manifest?.scBin ?? `${process.env.SHARKCAGE_DIR ?? "/opt/sharkcage"}/bin/sc`;
+      const installDir = manifest?.installDir ?? getInstallDir();
+      const result = spawn("sudo", ["-u", serviceUser, "env", `HOME=${process.env.SHARKCAGE_DIR ?? "/opt/sharkcage"}`, scBin, "status"], {
+        stdio: "inherit",
+        cwd: installDir,
+        env: {
+          ...process.env,
+          HOME: installDir,
+          PATH: buildRuntimePath(manifest),
+        },
+      });
+      result.on("exit", (code) => process.exit(code ?? 1));
+      return;
+    }
+  } catch {
+    /* no config yet */
+  }
+
+  console.log("\nsharkcage status\n");
 
   // Check systemd service status (Linux)
   if (process.platform === "linux") {
@@ -90,4 +114,15 @@ export default async function status() {
     );
     console.log("sharkcage may not be running.\n");
   }
+}
+
+function buildRuntimePath(manifest: ReturnType<typeof loadManifest>): string {
+  const installDir = manifest?.installDir ?? getInstallDir();
+  const currentPath = process.env.PATH ?? "";
+  const segments = [
+    manifest?.nodeBin ? manifest.nodeBin.replace(/\/node$/, "") : `${installDir}/bin`,
+    `${installDir}/node_modules/.bin`,
+    currentPath,
+  ].filter(Boolean);
+  return Array.from(new Set(segments)).join(":");
 }

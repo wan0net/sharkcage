@@ -14,7 +14,7 @@ import { dirname } from "node:path";
 import type { ToolCallRequest, ToolCallResponse } from "./types.js";
 import { ApprovalStore } from "./approvals.js";
 import { AuditLog } from "./audit.js";
-import { executeInSandbox, checkAsrtAvailable } from "./worker.js";
+import { executeInSandbox, checkAsrtHealth } from "./worker.js";
 import { startDashboardApi } from "./api.js";
 import { TokenRegistry, startLocalhostProxy } from "./proxy.js";
 import { resolveSandboxStartupDecision } from "./startup.js";
@@ -148,8 +148,8 @@ async function main(): Promise<void> {
   console.log(`socket: ${socketPath}`);
 
   // Check ASRT
-  const hasAsrt = await checkAsrtAvailable();
-  const sandboxDecision = resolveSandboxStartupDecision(hasAsrt);
+  const asrtHealth = await checkAsrtHealth();
+  const sandboxDecision = resolveSandboxStartupDecision(asrtHealth.available, asrtHealth.reason);
   if (!sandboxDecision.allowed) {
     console.error(sandboxDecision.message);
     process.exit(1);

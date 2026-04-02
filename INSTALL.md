@@ -15,11 +15,21 @@ enforcement is at the individual tool call level. No permission prompts at runti
 
 > OpenClaw and srt are installed automatically by the install script. You do not need to install them separately.
 
+> Ubuntu 24.04+ note: Sharkcage's secure Linux runtime may also require `kernel.apparmor_restrict_unprivileged_userns=0`. The installer now checks this and warns with the exact fix if AppArmor blocks bubblewrap's unprivileged user namespace path.
+
 ## Quick Start
 
 ```bash
 # 1. Install to /opt/sharkcage
 curl -fsSL https://raw.githubusercontent.com/wan0net/sharkcage/main/install.sh | bash
+
+# Or be explicit about the git ref
+curl -fsSL https://raw.githubusercontent.com/wan0net/sharkcage/main/install.sh | bash -s -- --ref main
+
+# Or install + configure non-interactively for a server
+OPENROUTER_API_KEY=your-key-here \
+  curl -fsSL https://raw.githubusercontent.com/wan0net/sharkcage/main/install.sh | \
+  bash -s -- --configure --mode full --service-user openclaw
 
 # 2. Set your API key
 export OPENROUTER_API_KEY=your-key-here
@@ -31,8 +41,50 @@ sc init
 sc start
 ```
 
-The install script handles everything: cloning, dependency installation (including OpenClaw and srt),
-creating a dedicated system user, setting up directory layout, and adding `sc` to your PATH.
+The install script handles everything: cloning the requested git ref, deterministic dependency installation (including OpenClaw and srt),
+copying a local runtime `node` binary into `bin/`, creating a dedicated system user when configured, setting up directory layout, and adding `sc` to your PATH.
+
+By default, `install.sh` installs `main`. To install the newest tagged release instead, pass `--ref latest-tag`.
+
+For automation/server installs, `install.sh --configure` calls `sc init --non-interactive` for you. If OpenClaw is not configured yet, set `OPENROUTER_API_KEY` in the environment first.
+
+## Ubuntu 24.04+ AppArmor note
+
+On Ubuntu 24.04+, `bubblewrap` can be installed and `kernel.unprivileged_userns_clone` can be enabled, but AppArmor may still block the unprivileged namespace path Sharkcage uses for secure mode.
+
+If startup fails with errors like:
+
+```text
+bwrap: setting up uid map: Permission denied
+```
+
+or:
+
+```text
+bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted
+```
+
+check:
+
+```bash
+cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns
+```
+
+If it prints `1`, the temporary fix is:
+
+```bash
+sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+```
+
+To persist it across reboot:
+
+```bash
+printf 'kernel.apparmor_restrict_unprivileged_userns=0\n' | \
+  sudo tee /etc/sysctl.d/99-sharkcage-userns.conf
+sudo sysctl --system
+```
+
+This is not changed automatically by the installer because it is a host security policy decision.
 
 ## Directory Layout
 
@@ -89,12 +141,13 @@ If accessing via HTTPS (recommended), configure your reverse proxy (Traefik, Cad
 ## What `sc start` does
 
 1. Checks dependencies — installs OpenClaw and srt if missing
-2. Runs the setup wizard if no config exists
+2. Runs setup if no config exists
 3. Configures per-tool ASRT sandboxing for all AI-directed commands
 4. Registers the sharkcage plugin with OpenClaw
 5. Starts the supervisor (IPC, audit log, skill sandbox spawning)
 6. Starts OpenClaw with the sharkcage sandbox backend active
-7. Monitors both processes
+7. Runs a real sandbox smoke test and fails closed if the host cannot actually launch sandboxed workers
+8. Monitors both processes
 
 ## Installing skills
 
@@ -199,9 +252,14 @@ sc stop
 
 ```bash
 cd /opt/sharkcage
-sudo git fetch --tags
-sudo git checkout v1.1.0        # or the version you want
-sudo bash bootstrap.sh          # reinstall dependencies
+sudo bash install.sh --dir /opt/sharkcage --ref main
+
+# Or pin a specific release
+sudo bash install.sh --dir /opt/sharkcage --ref v1.2.0
+
+# Or follow the newest tagged release
+sudo bash install.sh --dir /opt/sharkcage --ref latest-tag
+
 sc stop && sc start             # restart with the new version
 ```
 

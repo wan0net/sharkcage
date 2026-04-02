@@ -35,7 +35,16 @@ export default async function start(options: { foreground?: boolean } = {}) {
       log("sc", `Re-executing as ${serviceUser}...`);
       const manifest = loadManifest();
       const scBin = manifest?.scBin ?? `${getInstallDir()}/bin/sc`;
-      const args = ["sudo", "-u", serviceUser, scBin, "start"];
+      const args = [
+        "sudo",
+        "-u",
+        serviceUser,
+        "env",
+        `HOME=${getInstallDir()}`,
+        `PATH=${buildRuntimePath(manifest)}`,
+        scBin,
+        "start",
+      ];
       if (options.foreground) args.push("--foreground");
       const result = spawn(args[0], args.slice(1), {
         stdio: "inherit",
@@ -259,7 +268,7 @@ function startSupervisor(options: { foreground?: boolean } = {}): ChildProcess {
   }
 
   const tsxBin = manifest ? resolve(manifest.installDir, "node_modules/.bin/tsx") : "tsx";
-  const proc = spawn(tsxBin, [supervisorPath], {
+  const proc = spawn(resolveNodeBin(manifest), [tsxBin, supervisorPath], {
     stdio: ["pipe", "pipe", "pipe"],
     env: passEnvVars(),
     ...(options.foreground ? {} : { detached: true }),
@@ -292,6 +301,7 @@ function startOpenClaw(runAsUser?: string, options: { foreground?: boolean } = {
 
   // Resolve openclaw binary — prefer manifest, then PATH lookup
   const manifest = loadManifest();
+  const nodeBin = resolveNodeBin(manifest);
   let openclawBin = manifest?.openclawBin ?? "openclaw";
   if (!existsSync(openclawBin)) {
     try {
@@ -301,11 +311,13 @@ function startOpenClaw(runAsUser?: string, options: { foreground?: boolean } = {
 
   // Smart sudo: only use sudo if current user differs from runAsUser
   const needsSudo = runAsUser && process.env.USER !== runAsUser;
-  const cmd = needsSudo ? "sudo" : openclawBin;
-  const cmdArgs = needsSudo ? ["-u", runAsUser, openclawBin, ...args] : args;
+  const cmd = needsSudo ? "sudo" : nodeBin;
+  const cmdArgs = needsSudo
+    ? ["-u", runAsUser, "env", `HOME=${getInstallDir()}`, `PATH=${buildRuntimePath(manifest)}`, nodeBin, openclawBin, ...args]
+    : [openclawBin, ...args];
   const proc = spawn(cmd, cmdArgs, {
     stdio: ["pipe", "pipe", "pipe"],
-    env: { ...process.env, HOME: getInstallDir() },
+    env: { ...process.env, HOME: getInstallDir(), PATH: buildRuntimePath(manifest) },
     ...(options.foreground ? {} : { detached: true }),
   });
   prefixOutput(proc, "openclaw");
@@ -394,6 +406,22 @@ function findPath(candidates: (string | undefined)[]): string | null {
   return null;
 }
 
+function resolveNodeBin(manifest: ReturnType<typeof loadManifest>): string {
+  if (manifest?.nodeBin && existsSync(manifest.nodeBin)) return manifest.nodeBin;
+  if (process.execPath) return process.execPath;
+  try {
+    return execFileSync("which", ["node"], { encoding: "utf-8" }).trim();
+  } catch {
+    return "node";
+  }
+}
+
+function buildRuntimePath(manifest: ReturnType<typeof loadManifest>): string {
+  const nodeBinDir = dirname(resolveNodeBin(manifest));
+  const pathParts = [nodeBinDir, process.env.PATH ?? ""].filter(Boolean);
+  return pathParts.join(":");
+}
+
 function passEnvVars(): Record<string, string> {
   const keys = [
     "HOME", "PATH", "NODE_PATH",
@@ -448,8 +476,8 @@ async function waitForHttp(url: string, timeoutMs: number): Promise<void> {
   const t0 = Date.now();
   while (Date.now() - t0 < timeoutMs) {
     try {
-      const res = await fetch(url);
-      if (res.ok) return;
+      await fetch(url, { redirect: "manual" });
+      return;
     } catch { /* not ready */ }
     await new Promise((r) => setTimeout(r, 500));
   }

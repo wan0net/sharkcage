@@ -35,9 +35,23 @@ program
 program
   .command("init")
   .description("Setup wizard")
-  .action(async () => {
+  .option("--non-interactive", "Fail instead of prompting; use defaults/flags where possible")
+  .option("--mode <mode>", "Sandbox mode: full | skills-only")
+  .option("--service-user <user>", "Create/use a dedicated runtime user")
+  .option("--no-service-user", "Do not configure a dedicated runtime user")
+  .option("--install-service", "Install a systemd service")
+  .option("--enable-service", "Enable the systemd service")
+  .option("--start-service", "Start the systemd service")
+  .action(async (opts: {
+    nonInteractive?: boolean;
+    mode?: string;
+    serviceUser?: string | boolean;
+    installService?: boolean;
+    enableService?: boolean;
+    startService?: boolean;
+  }) => {
     const m = await import("./commands/init.ts");
-    await m.default();
+    await m.default(opts);
   });
 
 program

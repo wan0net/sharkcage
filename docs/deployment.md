@@ -15,13 +15,28 @@ sc init
 sc start
 ```
 
+### Server Quick Start
+```bash
+OPENROUTER_API_KEY=your-key-here \
+  curl -fsSL https://raw.githubusercontent.com/wan0net/sharkcage/main/install.sh | \
+  bash -s -- --configure --mode full --service-user openclaw
+```
+
 ### What install.sh does
 1. Checks prerequisites (Node.js 22+, npm, git)
-2. Clones the latest tagged release to `/opt/sharkcage`
-3. Installs OpenClaw and srt locally via npm
-4. Builds the plugin
-5. Generates the `bin/sc` CLI wrapper
-6. Writes the install manifest to `etc/install.json`
+2. Clones the requested git ref to `/opt/sharkcage` (`main` by default, `latest-tag` optionally)
+3. Installs locked dependencies from `package-lock.json`
+4. Copies a local runtime `node` binary into `/opt/sharkcage/bin/node`
+5. Builds the plugin
+6. Generates the `bin/sc` CLI wrapper
+7. Writes the install manifest to `etc/install.json`
+8. Optionally runs `sc init --non-interactive` when `--configure` is passed
+
+To pin a specific ref during install:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/wan0net/sharkcage/main/install.sh | bash -s -- --ref v1.2.0
+```
 
 ### Directory Layout
 ```
@@ -44,6 +59,31 @@ sc start
 
 ### Dedicated User (Linux servers)
 `sc init` offers to create a dedicated `openclaw` system user whose home is `/opt/sharkcage`. The entire install directory is owned by this user. `sc start` re-executes as the dedicated user via sudo.
+
+### Host Compatibility
+`sc start` now runs a real sandbox smoke test before startup completes. If the host can resolve `srt` but cannot actually launch sandboxed workers, Sharkcage fails closed with the underlying host error instead of waiting for the first skill invocation to explode.
+
+On Ubuntu 24.04+, a common blocker is:
+
+```bash
+cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns
+```
+
+If that returns `1`, AppArmor is still restricting the unprivileged namespace path `bubblewrap` needs. The installer now warns about this explicitly, but it does not change the sysctl automatically because that is a host policy decision.
+
+Temporary fix:
+
+```bash
+sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+```
+
+Persistent fix:
+
+```bash
+printf 'kernel.apparmor_restrict_unprivileged_userns=0\n' | \
+  sudo tee /etc/sysctl.d/99-sharkcage-userns.conf
+sudo sysctl --system
+```
 
 ### Systemd Service
 `sc init` can install a systemd service that runs sharkcage on boot:

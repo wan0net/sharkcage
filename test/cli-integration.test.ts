@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
-import { getApprovalsDir, getAuditLogPath, getPluginDir } from "../src/shared/paths.ts";
+import { getApprovalsDir, getAuditLogPath, getGatewayConfigPath, getPluginDir } from "../src/shared/paths.ts";
 import { createTestEnv } from "./helpers/tmp-env.ts";
 
 async function runCli(args: string[], input = ""): Promise<{ code: number | null; stdout: string; stderr: string }> {
@@ -145,6 +145,44 @@ test("CLI status reports not running when no pid file is present", async () => {
     assert.equal(result.code, 0);
     assert.match(result.stdout, /sharkcage status/);
     assert.match(result.stdout, /sharkcage is not running/);
+  } finally {
+    env.restore();
+  }
+});
+
+test("CLI init supports non-interactive setup when OpenClaw is already configured", async () => {
+  const env = createTestEnv();
+  try {
+    const installDir = process.env.SHARKCAGE_DIR!;
+    mkdirSync(join(installDir, ".openclaw"), { recursive: true });
+
+    writeFileSync(join(installDir, "etc", "install.json"), JSON.stringify({
+      installDir,
+      openclawBin: join(installDir, "node_modules/.bin/openclaw"),
+      srtBin: join(installDir, "node_modules/.bin/srt"),
+      scBin: join(installDir, "bin/sc"),
+      installedBy: "tester",
+      version: "1.2.0",
+      installedAt: "2026-04-01T00:00:00.000Z",
+    }) + "\n");
+
+    writeFileSync(join(installDir, ".openclaw", "openclaw.json"), JSON.stringify({
+      gateway: { mode: "local" },
+      agents: { defaults: { model: "openrouter/auto" } },
+    }) + "\n");
+
+    const result = await runCli(["init", "--non-interactive", "--mode", "full", "--no-service-user"]);
+    assert.equal(result.code, 0);
+    assert.match(result.stdout, /OpenClaw already configured\./);
+    assert.match(result.stdout, /Config written to/);
+    assert.match(result.stdout, /Setup complete/);
+
+    const gatewayConfig = JSON.parse(readFileSync(getGatewayConfigPath(), "utf-8")) as {
+      mode: string;
+      runAsUser?: string;
+    };
+    assert.equal(gatewayConfig.mode, "full");
+    assert.equal(gatewayConfig.runAsUser, undefined);
   } finally {
     env.restore();
   }

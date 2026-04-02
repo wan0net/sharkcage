@@ -253,15 +253,39 @@ export async function executeInSandbox(
  * Check if srt (ASRT) is available on the system.
  */
 export async function checkAsrtAvailable(): Promise<boolean> {
+  const result = await checkAsrtHealth();
+  return result.available;
+}
+
+export interface AsrtHealthCheckResult {
+  available: boolean;
+  reason?: string;
+}
+
+export async function checkAsrtHealth(): Promise<AsrtHealthCheckResult> {
+  const srtPath = `${process.env.SHARKCAGE_DIR ?? "/opt/sharkcage"}/node_modules/.bin/srt`;
+  const configPath = writeAsrtConfig("startup-check", buildAsrtConfig([]));
   try {
-    const srtPath = `${process.env.SHARKCAGE_DIR ?? "/opt/sharkcage"}/node_modules/.bin/srt`;
-    const child = spawn(srtPath, ["--version"], { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(srtPath, ["--settings", configPath, "/bin/sh", "-lc", "true"], {
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    let stderr = "";
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+
     const exitCode = await new Promise<number>((resolve) => {
       child.on("close", (code) => resolve(code ?? 1));
       child.on("error", () => resolve(1));
     });
-    return exitCode === 0;
+
+    if (exitCode === 0) return { available: true };
+
+    const reason = stderr.trim().split("\n")[0] || "sandbox smoke test failed";
+    return { available: false, reason };
   } catch {
-    return false;
+    return { available: false, reason: "failed to launch srt smoke test" };
+  } finally {
+    try { unlinkSync(configPath); } catch { /* ok */ }
   }
 }

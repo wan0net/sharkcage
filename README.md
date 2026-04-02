@@ -4,9 +4,15 @@ OpenClaw, but you trust it.
 
 Sharkcage registers as OpenClaw's **sandbox backend**, wrapping every AI-directed tool call with `srt` (Anthropic Sandbox Runtime). Every bash command, file read/write, and skill execution is sandboxed using built-in OS kernel primitives. Capabilities approved once at install become the baseline policy, and later scope expansion is explicit and audited.
 
+> **Development status:** Sharkcage is still under active development. The core security model, test coverage, and install path are in much better shape now, but releases can still change quickly and operational edges are still being tightened. Treat it as a serious early-stage project, not a fully settled platform.
+>
+> If you deploy it, prefer a disposable VM, low-privilege accounts, revocable tokens, and a setup you can rebuild quickly.
+>
 > **No new sandboxing tech.** Sharkcage uses the same battle-tested OS primitives that Flatpak, Snap, and Chrome have relied on for years: [bubblewrap](https://github.com/containers/bubblewrap) + seccomp on Linux, Seatbelt (sandbox-exec) on macOS. Wrapped by Anthropic's [srt](https://github.com/anthropic-experimental/sandbox-runtime). These are proven, kernel-enforced boundaries — not a custom sandbox or a JS shim.
 >
 > Built by an unprofessional security engineer who got tired of `--dangerously-skip-permissions`. Vibe coded with AI, hardened by a human who kept asking "but what if..." until the sandbox actually held up. Three automated security review passes, Trivy and Semgrep on every build, every finding discussed before fixing. The security model wasn't designed top-down — it was discovered bottom-up by trying things, watching them break, and deciding what actually matters.
+>
+> Ubuntu 24.04+ note: if AppArmor is still restricting unprivileged user namespaces, secure startup will fail closed even when `bubblewrap` and `srt` are installed. The installer checks for this and points to the exact sysctl fix in [INSTALL.md](INSTALL.md).
 
 ## Security Model
 
@@ -39,12 +45,18 @@ OpenClaw + sharkcage plugin
 - **Approval flow** — uses OpenClaw's native `requireApproval` so the human sees approval prompts in their chat channel but the AI never does.
 - **Approve once, enforce always** — install-time approvals become the baseline policy, and later scope expansion is explicit, persisted, and audited. No per-action runtime nagging.
 - **Tamper-evident local audit trail** — tool and proxy events are written to a hash-chained local log with rotation and integrity checks.
+- **Fail closed on unsupported hosts** — startup runs a real sandbox smoke test, not just `srt --version`, and refuses to enter secure mode when the host cannot actually launch sandboxed workers.
 
 ## Quick Start
 
 ```bash
 # One-line install
 curl -fsSL https://raw.githubusercontent.com/wan0net/sharkcage/main/install.sh | bash
+
+# Or install + configure a server setup non-interactively
+OPENROUTER_API_KEY=your-key-here \
+  curl -fsSL https://raw.githubusercontent.com/wan0net/sharkcage/main/install.sh | \
+  bash -s -- --configure --mode full --service-user openclaw
 
 # Then
 sc init       # setup wizard (configures OpenClaw + sandbox mode)
@@ -59,6 +71,7 @@ See [INSTALL.md](INSTALL.md) for full installation instructions.
 sc start                            Start supervisor + OpenClaw
 sc stop                             Stop everything
 sc init                             First-time setup wizard
+sc init --non-interactive ...       Server/automation-friendly setup path
 sc status                           Show sandbox state, uptime, skill stats
 
 sc skill add <url|path>             Install a skill
