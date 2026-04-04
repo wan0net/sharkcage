@@ -119,6 +119,14 @@ program
   });
 
 program
+  .command("selfupdate")
+  .description("Update sharkcage to the latest release")
+  .action(async () => {
+    const m = await import("./commands/selfupdate.ts");
+    await m.default();
+  });
+
+program
   .command("user")
   .description("Manage dedicated OpenClaw user (copy-in | shell | home | info)")
   .argument("<action>", "copy-in | shell | home | info")

@@ -37,6 +37,8 @@ export interface InstallManifest {
   installedBy: string;
   version: string;
   installedAt: string;
+  gitRef?: string;
+  gitCommit?: string;
 }
 
 /** Load the install manifest. Returns null if not found or invalid. */
