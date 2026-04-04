@@ -151,7 +151,8 @@ function getUiUrls(installDir: string): { webUi: string; dashboard: string; gate
     const config = JSON.parse(raw) as { gateway?: OpenClawGatewayConfig };
     const port = config.gateway?.port ?? 18789;
     const bind = config.gateway?.bind ?? "loopback";
-    const token = config.gateway?.auth?.mode === "token" ? config.gateway.auth.token : undefined;
+    const rawToken = config.gateway?.auth?.mode === "token" ? config.gateway.auth.token : undefined;
+    const token = typeof rawToken === "string" ? rawToken : (process.env.OPENCLAW_GATEWAY_TOKEN || undefined);
     const suffix = token ? `?token=${token}` : "";
     const gatewayHost = bind === "loopback" ? "127.0.0.1" : bind;
     const gatewayWsUrl = `ws://${gatewayHost}:${port}`;

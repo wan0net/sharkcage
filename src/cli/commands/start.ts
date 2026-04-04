@@ -286,7 +286,8 @@ function startOpenClaw(runAsUser?: string, options: { foreground?: boolean } = {
   if (!gatewayToken) {
     try {
       const ocConfig = JSON.parse(readFileSync(`${getInstallDir()}/.openclaw/openclaw.json`, "utf-8"));
-      gatewayToken = ocConfig.gateway?.auth?.token ?? "";
+      const raw = ocConfig.gateway?.auth?.token;
+      gatewayToken = typeof raw === "string" ? raw : "";
     } catch { /* no config */ }
   }
   if (!gatewayToken) {
