@@ -212,10 +212,9 @@ if [ -d "$INSTALL_DIR/.git" ]; then
   cd "$INSTALL_DIR"
   git fetch --quiet --tags origin
 
-  if ! git diff --quiet || ! git diff --cached --quiet || [ -n "$(git ls-files --others --exclude-standard)" ]; then
-    echo "  Resetting local changes in $INSTALL_DIR..."
+  if ! git diff --quiet || ! git diff --cached --quiet; then
+    echo "  Resetting tracked file changes in $INSTALL_DIR..."
     git reset --hard --quiet
-    git clean -fd --quiet
   fi
 else
   echo "  Installing to $INSTALL_DIR..."

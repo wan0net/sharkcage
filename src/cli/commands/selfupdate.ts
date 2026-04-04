@@ -109,27 +109,28 @@ export default async function selfupdate() {
   }
   p.log.success(`Backed up to ${backupPath}`);
 
-  // --- 7. Checkout ---
+  // --- 7. Checkout (force — safe because runtime state is gitignored) ---
   p.log.info(`Checking out ${latestTag}...`);
   try {
-    execFileSync("git", ["checkout", "--quiet", latestTag], execOpts);
+    execFileSync("git", ["checkout", "--force", "--quiet", latestTag], execOpts);
   } catch {
     p.log.error(`git checkout ${latestTag} failed.`);
     process.exit(1);
   }
 
   // --- 8. Install deps ---
+  // Resolve npm via the same node that's running us, or from PATH
+  const npmBin = resolveNpmBin(installDir);
   p.log.info("Installing dependencies...");
-  const npmResult = spawnSync("npm", ["ci", "--silent"], {
+  const npmResult = spawnSync(npmBin, ["ci", "--silent"], {
     stdio: "inherit",
     cwd: installDir,
     timeout: 180_000,
   });
 
   if (npmResult.status !== 0) {
-    // Retry without --silent for better error output
     p.log.warning("Retrying npm ci without --silent...");
-    const retry = spawnSync("npm", ["ci"], {
+    const retry = spawnSync(npmBin, ["ci"], {
       stdio: "inherit",
       cwd: installDir,
       timeout: 180_000,
@@ -142,7 +143,8 @@ export default async function selfupdate() {
 
   // --- 9. Rebuild plugin ---
   p.log.info("Building plugin...");
-  const tscResult = spawnSync("npx", ["tsc", "-p", "tsconfig.plugin.json", "--outDir", "dist/sharkcage-build"], {
+  const npxBin = join(installDir, "node_modules/.bin/npx");
+  const tscResult = spawnSync(existsSync(npxBin) ? npxBin : "npx", ["tsc", "-p", "tsconfig.plugin.json", "--outDir", "dist/sharkcage-build"], {
     stdio: "inherit",
     cwd: installDir,
     timeout: 60_000,
@@ -223,4 +225,17 @@ export default async function selfupdate() {
     "Next steps"
   );
   p.outro("Self-update complete.");
+}
+
+/** Resolve npm binary — prefer local node_modules, then nvm, then PATH. */
+function resolveNpmBin(installDir: string): string {
+  const localNpm = join(installDir, "node_modules/.bin/npm");
+  if (existsSync(localNpm)) return localNpm;
+
+  // If we're running under nvm, npm is next to node
+  const nodeBin = process.execPath;
+  const siblingNpm = join(nodeBin, "..", "npm");
+  if (existsSync(siblingNpm)) return siblingNpm;
+
+  return "npm";
 }

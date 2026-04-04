@@ -6,6 +6,15 @@ dist/
 .env
 .playwright-mcp/
 bin/sc
+bin/node
 etc/
 var/
+
+# Runtime state (install dir doubles as service user HOME)
+.openclaw/
+.nvm/
+.gitconfig
+.npm/
+.config/
+
 !test/fixtures/**/*.js
